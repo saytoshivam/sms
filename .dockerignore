@@ -1,0 +1,28 @@
+# Ignore Gradle build directory
+/build
+.gradle
+
+# Ignore IDE project files
+/.idea
+/*.iml
+/.vscode
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore logs
+*.log
+/logs
+
+# Ignore target directory for Maven-based projects (if applicable)
+/target
+
+# Ignore other temporary files
+*.tmp
+*.swp
+*.bak
+
+# Ignore Dockerfile and Docker-related files
+Dockerfile
+docker-compose.yml

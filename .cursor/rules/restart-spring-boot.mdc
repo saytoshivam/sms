@@ -1,0 +1,27 @@
+---
+description: After backend or config changes, always restart affected dev servers yourself (never only tell the user)
+alwaysApply: true
+---
+
+# Always restart when changes require it
+
+If your edits require a process restart to take effect, **you must run the restart yourself** in the terminal. Do **not** end the turn with only instructions like “restart the server” unless a restart is impossible in this environment (then say why).
+
+## Spring Boot API (port 8080)
+
+Whenever you change anything that affects the running API, restart it:
+
+1. **Stop** whatever is listening on **port 8080** (usually Gradle `bootRun`), e.g. `lsof -nP -iTCP:8080 -sTCP:LISTEN -t` then `kill -9 <pid>` on macOS/Linux.
+2. **Start** from the repo root: `./gradlew bootRun` in the **background** so the session can continue. If startup fails with “port already in use”, kill listeners on 8080 again and retry.
+
+Apply after edits under `src/main/java/`, `src/main/resources/` (including `application.properties` and Flyway SQL), or `build.gradle`.
+
+**Note:** `spring-boot-devtools` may pick up some changes after `./gradlew compileJava`, but **after config, security, or CORS changes, do a full port-8080 restart** so behavior is guaranteed.
+
+## Frontend dev server (port 5173) — when needed
+
+If `vite.config.*`, env files used by Vite, or anything that only applies on `npm run dev` startup changes, restart Vite: stop port **5173** the same way, then `cd frontend && npm run dev` in the background.
+
+## Verification
+
+After restarting the API, briefly confirm the listener is up (e.g. log line “Tomcat started on port 8080” or successful `lsof` on 8080). If restart fails, fix (kill stale PID, free port) and retry—do not leave the task without a running server when the user expects one.

@@ -1,0 +1,17 @@
+admissionNo,firstName,lastName,classGroupCode,guardianName,guardianRelation,guardianPhone,guardianEmail
+ADM001,Aarav,Sharma,6-EMERALD,Rajesh Sharma,Father,9876543210,rajesh.sharma@gmail.com
+ADM002,Diya,Verma,6-EMERALD,Ankit Verma,Father,9876543211,ankit.verma@gmail.com
+ADM003,Rohan,Gupta,6-RUBY,Suresh Gupta,Father,9876543212,suresh.gupta@gmail.com
+ADM004,Ananya,Singh,6-RUBY,Manoj Singh,Father,9876543213,manoj.singh@gmail.com
+
+ADM005,Aditya,Patel,7-EMERALD,Rakesh Patel,Father,9876543214,rakesh.patel@gmail.com
+ADM006,Meera,Iyer,7-EMERALD,Sridhar Iyer,Father,9876543215,sridhar.iyer@gmail.com
+ADM007,Kabir,Khan,7-RUBY,Imran Khan,Father,9876543216,imran.khan@gmail.com
+ADM008,Simran,Kaur,7-RUBY,Gurpreet Kaur,Mother,9876543217,gurpreet.kaur@gmail.com
+
+ADM009,Arjun,Reddy,8-EMERALD,Srinivas Reddy,Father,9876543218,srinivas.reddy@gmail.com
+ADM010,Pooja,Nair,8-EMERALD,Rajeev Nair,Father,9876543219,rajeev.nair@gmail.com
+ADM011,Dev,Mehta,8-RUBY,Sanjay Mehta,Father,9876543220,sanjay.mehta@gmail.com
+ADM012,Kriti,Joshi,8-RUBY,Amit Joshi,Father,9876543221,amit.joshi@gmail.com
+ADM013,Yash,Malhotra,8-DIAMOND,Rohit Malhotra,Father,9876543222,rohit.malhotra@gmail.com
+ADM014,Riya,Kapoor,8-DIAMOND,Anil Kapoor,Father,9876543223,anil.kapoor@gmail.com

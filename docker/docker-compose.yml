@@ -1,0 +1,36 @@
+services:
+  mysqldb:
+    image: 'mysql:latest'
+    ports:
+      - "3307:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=newdb
+      - MYSQL_WAIT_TIMEOUT=28800
+      - MYSQL_INTERACTIVE_TIMEOUT=28800
+      - MYSQL_MAX_CONNECTIONS=200
+    container_name: "mysqldb"
+    networks:
+      - my-network
+    healthcheck:
+      test: [ 'CMD','mysqladmin','ping','-h','localhost' ]
+      timeout: 20s
+      retries: 10
+
+  sms:
+    build: ../
+    ports:
+      - "8080:8080"
+    container_name: sms
+    networks:
+      - my-network
+    depends_on:
+      mysqldb:
+        condition: service_healthy
+    restart: always
+    environment:
+      - SPRING_APPLICATION_JSON={"spring.datasource.url":"jdbc:mysql://mysqldb:3306/newdb","sms.cors.allowed-origins":"http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"}
+
+networks:
+  my-network:
+
