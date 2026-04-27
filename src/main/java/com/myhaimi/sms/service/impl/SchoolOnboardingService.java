@@ -243,7 +243,23 @@ public class SchoolOnboardingService {
             if (secs == null || secs.isEmpty()) continue; // allow "skip" grades in per-grade mode
             for (String sec : secs) {
                 String code = g + "-" + sec;
-                if (classGroupRepo.findByCodeAndSchool_Id(code, schoolId).isPresent()) {
+                java.util.Optional<ClassGroup> existingOpt = classGroupRepo.findByCodeAndSchool_Id(code, schoolId);
+                if (existingOpt.isPresent()) {
+                    ClassGroup existing = existingOpt.get();
+                    // If class was soft-deleted earlier (e.g. via "Delete all classes"), revive it so onboarding can re-generate safely.
+                    if (existing.isDeleted()) {
+                        existing.setDeleted(false);
+                        existing.setGradeLevel(g);
+                        existing.setSection(sec);
+                        existing.setDisplayName("Grade " + g + " — Section " + sec);
+                        if (dto.defaultCapacity() != null && dto.defaultCapacity() > 0) {
+                            existing.setCapacity(dto.defaultCapacity());
+                        }
+                        existing.setUpdatedBy(actor);
+                        classGroupRepo.save(existing);
+                        createdCodes.add(code);
+                        continue;
+                    }
                     skipped += 1;
                     continue;
                 }
@@ -298,8 +314,32 @@ public class SchoolOnboardingService {
                 throw new IllegalArgumentException("Duplicate subject code in request: " + code);
             }
             seenCodes.add(code);
-            if (subjectRepo.findBySchool_IdAndCode(schoolId, code).isPresent()) {
-                skipped += 1;
+            var existingOpt = subjectRepo.findBySchool_IdAndCode(schoolId, code);
+            if (existingOpt.isPresent()) {
+                Subject existing = existingOpt.get();
+                if (!existing.isDeleted()) {
+                    skipped += 1;
+                    continue;
+                }
+                // Revive soft-deleted subject (idempotent onboarding re-run).
+                Integer weekly = dto.weeklyFrequency();
+                if (weekly == null || weekly <= 0) {
+                    throw new IllegalArgumentException("weeklyFrequency is required and must be positive for subject " + code);
+                }
+                SubjectType type;
+                try {
+                    type = SubjectType.valueOf((dto.type() == null ? "CORE" : dto.type().trim().toUpperCase()));
+                } catch (Exception e) {
+                    type = SubjectType.CORE;
+                }
+                existing.setDeleted(false);
+                existing.setName(name);
+                existing.setType(type);
+                existing.setWeeklyFrequency(weekly);
+                existing.setUpdatedBy(actor);
+                subjectRepo.save(existing);
+                created += 1;
+                createdCodes.add(code);
                 continue;
             }
             Subject s = new Subject();
@@ -313,9 +353,11 @@ public class SchoolOnboardingService {
                 type = SubjectType.CORE;
             }
             s.setType(type);
-            // Keep as a hint only; Academic Structure defines per-class weeklyFrequency.
-            Integer hint = dto.weeklyFrequency();
-            s.setWeeklyFrequency(hint != null && hint > 0 ? hint : null);
+            Integer weekly = dto.weeklyFrequency();
+            if (weekly == null || weekly <= 0) {
+                throw new IllegalArgumentException("weeklyFrequency is required and must be positive for subject " + code);
+            }
+            s.setWeeklyFrequency(weekly);
             s.setCreatedBy(actor);
             s.setUpdatedBy(actor);
             subjectRepo.save(s);
@@ -713,15 +755,85 @@ public class SchoolOnboardingService {
             String designation = dto.designation() == null ? "" : dto.designation().trim();
             if (designation.isBlank()) throw new IllegalArgumentException("Designation is required for " + email + ".");
 
-            // If user already exists in this tenant, skip (idempotent).
+            // If user already exists, treat onboarding as an update for this tenant
+            // (CSV re-upload should be able to update teachable subjects / roles).
             User existingUser = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
             if (existingUser != null) {
+                Integer existingSchoolId = existingUser.getSchool() == null ? null : existingUser.getSchool().getId();
+                Staff linked = existingUser.getLinkedStaff();
+                if (existingSchoolId != null && existingSchoolId.equals(schoolId) && linked != null && !linked.isDeleted()) {
+                    // Update staff profile fields (best-effort) + teachables + roles.
+                    linked.setFullName(dto.fullName() == null ? linked.getFullName() : dto.fullName().trim());
+                    linked.setEmail(email);
+                    linked.setPhone(phone);
+                    linked.setDesignation(designation);
+                    if (dto.employeeNo() != null && !dto.employeeNo().trim().isBlank()) {
+                        linked.setEmployeeNo(dto.employeeNo().trim());
+                    }
+                    applyStaffLoadAndPrefs(linked, dto.maxWeeklyLectureLoad(), dto.preferredClassGroupIds());
+                    linked.setUpdatedBy(actorEmailOrSystem());
+                    staffRepo.save(linked);
+
+                    Set<Role> roles = new HashSet<>();
+                    List<String> requested = dto.roles() == null ? List.of(RoleNames.TEACHER) : dto.roles();
+                    boolean isTeacher = requested.stream().anyMatch(r -> r != null && r.trim().equalsIgnoreCase(RoleNames.TEACHER));
+                    if (isTeacher && (dto.teachableSubjectIds() == null || dto.teachableSubjectIds().isEmpty())) {
+                        throw new IllegalArgumentException("Teachers must have at least one teachable subject: " + email);
+                    }
+                    // Constraint: only TEACHER role can have teachable subjects.
+                    if (isTeacher) {
+                        replaceTeachableForStaff(linked, dto.teachableSubjectIds(), schoolId);
+                    } else {
+                        replaceTeachableForStaff(linked, List.of(), schoolId);
+                    }
+
+                    for (String r : requested) {
+                        if (r == null) continue;
+                        String name = r.trim().toUpperCase(Locale.ROOT);
+                        if (name.isBlank()) continue;
+                        if (RoleNames.SUPER_ADMIN.equals(name) || RoleNames.STUDENT.equals(name) || RoleNames.PARENT.equals(name)) {
+                            throw new IllegalArgumentException("Invalid role for staff onboarding: " + name);
+                        }
+                        Role role = roleRepo.findByName(name).stream().findFirst()
+                                .orElseThrow(() -> new IllegalArgumentException("Unknown role: " + name));
+                        roles.add(role);
+                    }
+                    if (roles.isEmpty()) {
+                        Role role = roleRepo.findByName(RoleNames.TEACHER).stream().findFirst().orElseThrow();
+                        roles.add(role);
+                    }
+                    existingUser.setRoles(roles);
+                    userRepo.save(existingUser);
+
+                    skipped += 1;
+                    continue;
+                }
                 skipped += 1;
                 continue;
             }
 
-            // Staff profile (idempotent-ish by email)
+            // Staff profile (idempotent-ish by email / employeeNo). Revive soft-deleted row if needed
+            // because (school_id, employee_no) is unique even for deleted staff.
             Staff staff = staffRepo.findFirstBySchool_IdAndEmailIgnoreCaseAndIsDeletedFalse(schoolId, email).orElse(null);
+            if (staff == null) {
+                // Try revive by email (may exist but deleted)
+                Staff byEmailAny = staffRepo.findFirstBySchool_IdAndEmailIgnoreCase(schoolId, email).orElse(null);
+                if (byEmailAny != null && byEmailAny.isDeleted()) {
+                    staff = byEmailAny;
+                    staff.setDeleted(false);
+                }
+            }
+            if (staff == null) {
+                String emp = dto.employeeNo() == null ? "" : dto.employeeNo().trim();
+                if (!emp.isBlank()) {
+                    Staff byEmpAny = staffRepo.findFirstBySchool_IdAndEmployeeNoIgnoreCase(schoolId, emp).orElse(null);
+                    if (byEmpAny != null && byEmpAny.isDeleted()) {
+                        // Revive by employee no (common re-upload case).
+                        staff = byEmpAny;
+                        staff.setDeleted(false);
+                    }
+                }
+            }
             if (staff == null) {
                 staff = new Staff();
                 staff.setSchool(school);
@@ -747,6 +859,14 @@ public class SchoolOnboardingService {
                 staff = staffRepo.save(staff);
                 staffCreated += 1;
             } else {
+                // Revived or existing staff: ensure core fields are updated from CSV.
+                staff.setEmail(email);
+                staff.setFullName(dto.fullName() == null ? staff.getFullName() : dto.fullName().trim());
+                staff.setPhone(phone);
+                staff.setDesignation(designation);
+                if (dto.employeeNo() != null && !dto.employeeNo().trim().isBlank()) {
+                    staff.setEmployeeNo(dto.employeeNo().trim());
+                }
                 applyStaffLoadAndPrefs(staff, dto.maxWeeklyLectureLoad(), dto.preferredClassGroupIds());
                 staff.setUpdatedBy(actorEmailOrSystem());
                 staffRepo.save(staff);
@@ -760,7 +880,12 @@ public class SchoolOnboardingService {
                 throw new IllegalArgumentException("Teachers must have at least one teachable subject: " + email);
             }
 
-            replaceTeachableForStaff(staff, dto.teachableSubjectIds(), schoolId);
+            // Constraint: only TEACHER role can have teachable subjects.
+            if (isTeacher) {
+                replaceTeachableForStaff(staff, dto.teachableSubjectIds(), schoolId);
+            } else {
+                replaceTeachableForStaff(staff, List.of(), schoolId);
+            }
 
             for (String r : requested) {
                 if (r == null) continue;
@@ -856,12 +981,14 @@ public class SchoolOnboardingService {
         List<String> reasons = new ArrayList<>();
 
         long alloc = subjectAllocationRepo.countBySchool_IdAndStaff_Id(schoolId, st.getId());
-        if (alloc > 0) reasons.add("Assigned in academic structure (" + alloc + " allocation(s)).");
+        // Academic structure links are safe to clear automatically on delete.
+        if (alloc > 0) reasons.add("Assigned in academic structure (" + alloc + " allocation(s)) — will be cleared on delete.");
 
         long tt = timetableEntryRepo.countBySchool_IdAndStaff_Id(schoolId, st.getId());
         if (tt > 0) reasons.add("Used in timetable (" + tt + " entry/entries).");
 
-        boolean canDelete = reasons.isEmpty();
+        // Only block deletion when used in timetable entries.
+        boolean canDelete = tt == 0;
         return new StaffDeleteInfoDTO(canDelete, reasons);
     }
 
@@ -873,6 +1000,11 @@ public class SchoolOnboardingService {
         if (!info.canDelete()) {
             throw new IllegalStateException(String.join(" ", info.reasons()));
         }
+
+        // Clear onboarding academic-structure references (allocations/templates/overrides).
+        subjectAllocationRepo.clearStaffBySchool_IdAndStaff_Id(schoolId, st.getId());
+        classSubjectConfigRepo.clearStaffBySchool_IdAndStaff_Id(schoolId, st.getId());
+        subjectSectionOverrideRepo.clearStaffBySchool_IdAndStaff_Id(schoolId, st.getId());
 
         // If a login user exists, delete it (onboarding cleanup). This avoids orphaned accounts.
         userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, st.getId()).ifPresent(userRepo::delete);
@@ -922,7 +1054,12 @@ public class SchoolOnboardingService {
         if (isTeacher && (dto.teachableSubjectIds() == null || dto.teachableSubjectIds().isEmpty())) {
             throw new IllegalArgumentException("Teachers must have at least one teachable subject.");
         }
-        replaceTeachableForStaff(staff, dto.teachableSubjectIds(), schoolId);
+        // Constraint: only TEACHER role can have teachable subjects.
+        if (isTeacher) {
+            replaceTeachableForStaff(staff, dto.teachableSubjectIds(), schoolId);
+        } else {
+            replaceTeachableForStaff(staff, List.of(), schoolId);
+        }
 
         // If login exists, update roles. If requested and missing, create login.
         Set<Role> roles = new HashSet<>();

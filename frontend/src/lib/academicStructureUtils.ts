@@ -71,6 +71,19 @@ export function computeSectionHealth(
   staff: StaffTeachable[],
   slotsPerWeek: number | null,
 ): SectionHealth {
+  // If the subject catalog is empty (e.g. after bulk delete), treat every section as unconfigured.
+  // Any stale allocRows in local draft / server responses should not show up as "subjects on" or "issues".
+  if (!catalogSubjectCount || catalogSubjectCount <= 0) {
+    return {
+      subjectCount: 0,
+      totalPeriods: 0,
+      issueCount: 0,
+      hasHardIssue: false,
+      overCapacity: false,
+      hasTeacherLoadWarn: false,
+      completenessPct: 0,
+    };
+  }
   const rows = allocRows.filter((r) => Number(r.classGroupId) === Number(classGroupId));
   const subjectCount = rows.length;
   const totalPeriods = rows.reduce((a, r) => a + (r.weeklyFrequency > 0 ? r.weeklyFrequency : 0), 0);
@@ -170,18 +183,24 @@ export function buildEffectiveAllocRows(
     cfgByKey.set(`${g}:${s}`, c);
   }
   const ovByKey = new Map<string, SectionSubjectOverrideRow>();
+  const overrideByClassGroup = new Map<number, SectionSubjectOverrideRow[]>();
   for (const o of sectionSubjectOverrides ?? []) {
     if (!o) continue;
     const cg = Number(o.classGroupId);
     const s = Number(o.subjectId);
     if (!Number.isFinite(cg) || !Number.isFinite(s)) continue;
     ovByKey.set(`${cg}:${s}`, o);
+    const arr = overrideByClassGroup.get(cg) ?? [];
+    arr.push(o);
+    overrideByClassGroup.set(cg, arr);
   }
 
   const out: AcademicAllocRow[] = [];
   for (const cg of classGroups ?? []) {
     const grade = cg.gradeLevel == null ? null : Number(cg.gradeLevel);
     if (grade == null || !Number.isFinite(grade)) continue;
+
+    // Template-driven subjects (class defaults)
     for (const [key, cfg] of cfgByKey.entries()) {
       const [gStr, sStr] = key.split(':');
       const g = Number(gStr);
@@ -196,6 +215,24 @@ export function buildEffectiveAllocRows(
         weeklyFrequency,
         staffId: ov?.teacherId ?? cfg.defaultTeacherId ?? null,
         roomId: ov?.roomId ?? cfg.defaultRoomId ?? null,
+      });
+    }
+
+    // Section-only additions (subjects NOT in class defaults but explicitly enabled in this section)
+    const ovr = overrideByClassGroup.get(cg.classGroupId) ?? [];
+    for (const o of ovr) {
+      const subjectId = Number(o.subjectId);
+      if (!Number.isFinite(subjectId)) continue;
+      // If template has this subject, it was already handled above.
+      if (cfgByKey.has(`${grade}:${subjectId}`)) continue;
+      const weeklyFrequency = o.periodsPerWeek;
+      if (!weeklyFrequency || weeklyFrequency <= 0) continue;
+      out.push({
+        classGroupId: cg.classGroupId,
+        subjectId,
+        weeklyFrequency,
+        staffId: o.teacherId ?? null,
+        roomId: o.roomId ?? null,
       });
     }
   }

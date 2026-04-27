@@ -94,7 +94,14 @@ public class DataSeeder implements CommandLineRunner {
         user.getRoles().add(superAdminRole);
 
         userRepository.save(user);
-        System.out.println("Super admin ensured: " + superAdminEmail + " (" + superAdminUsername + ")");
+        try {
+            boolean ok = passwordEncoder.matches(superAdminPassword, user.getPassword());
+            System.out.println(
+                    "Super admin ensured: " + superAdminEmail + " (" + superAdminUsername + "), pwMatches=" + ok
+                            + ", pwLen=" + (user.getPassword() == null ? 0 : user.getPassword().length()));
+        } catch (Exception e) {
+            System.out.println("Super admin ensured: " + superAdminEmail + " (" + superAdminUsername + "), pwCheckError=" + e);
+        }
     }
 }
 

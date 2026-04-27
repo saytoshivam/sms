@@ -7,9 +7,11 @@ import com.myhaimi.sms.DTO.RoomUpdateDTO;
 import com.myhaimi.sms.entity.LabType;
 import com.myhaimi.sms.entity.RoomType;
 import com.myhaimi.sms.repository.ClassGroupRepo;
+import com.myhaimi.sms.repository.ClassSubjectConfigRepo;
 import com.myhaimi.sms.repository.RoomRepo;
 import com.myhaimi.sms.repository.SchoolRepo;
 import com.myhaimi.sms.repository.TimetableEntryRepo;
+import com.myhaimi.sms.repository.SubjectSectionOverrideRepo;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -30,6 +32,8 @@ public class RoomService {
     private final SchoolRepo schoolRepo;
     private final ClassGroupRepo classGroupRepo;
     private final TimetableEntryRepo timetableEntryRepo;
+    private final ClassSubjectConfigRepo classSubjectConfigRepo;
+    private final SubjectSectionOverrideRepo subjectSectionOverrideRepo;
 
     private Integer requireSchoolId() {
         Integer id = TenantContext.getSchoolId();
@@ -69,12 +73,13 @@ public class RoomService {
 
         List<String> reasons = new ArrayList<>();
         long defaultUse = classGroupRepo.countBySchool_IdAndDefaultRoom_Id(schoolId, roomId);
-        if (defaultUse > 0) reasons.add("Assigned as default room for " + defaultUse + " class(es).");
+        if (defaultUse > 0) reasons.add("Assigned as default room for " + defaultUse + " class(es) (will be cleared).");
 
         long timetableUse = timetableEntryRepo.countBySchool_IdAndRoom_Id(schoolId, roomId);
-        if (timetableUse > 0) reasons.add("Used in timetable (" + timetableUse + " entry/entries).");
+        if (timetableUse > 0) reasons.add("Used in timetable (" + timetableUse + " entry/entries) (will be cleared).");
 
-        boolean canDelete = reasons.isEmpty();
+        // We can safely delete after clearing references (same behavior as delete-all).
+        boolean canDelete = true;
         return new RoomDeleteInfoDTO(canDelete, reasons);
     }
 
@@ -82,13 +87,35 @@ public class RoomService {
     public void delete(Integer roomId) {
         Integer schoolId = requireSchoolId();
         Room r = roomRepo.findByIdAndSchool_Id(roomId, schoolId).orElseThrow();
-        RoomDeleteInfoDTO info = deleteInfo(roomId);
-        if (!info.canDelete()) {
-            throw new IllegalStateException(String.join(" ", info.reasons()));
-        }
+
+        // Clear FK references first so room soft-delete never leaves stale mappings.
+        classGroupRepo.clearDefaultRoomBySchool_IdAndRoom_Id(schoolId, roomId);
+        classSubjectConfigRepo.clearRoomsBySchool_IdAndRoom_Id(schoolId, roomId);
+        subjectSectionOverrideRepo.clearRoomsBySchool_IdAndRoom_Id(schoolId, roomId);
+        timetableEntryRepo.clearRoomsBySchool_IdAndRoom_Id(schoolId, roomId);
+
         r.setDeleted(true);
         r.setUpdatedBy(actorEmailOrSystem());
         roomRepo.save(r);
+    }
+
+    @Transactional
+    public void deleteAllForSchool() {
+        Integer schoolId = requireSchoolId();
+        String actor = actorEmailOrSystem();
+
+        // Clear FK references first so room soft-delete never violates constraints.
+        classGroupRepo.clearDefaultRoomsBySchool_Id(schoolId);
+        classSubjectConfigRepo.clearRoomsBySchool_Id(schoolId);
+        subjectSectionOverrideRepo.clearRoomsBySchool_Id(schoolId);
+        timetableEntryRepo.clearRoomsBySchool_Id(schoolId);
+
+        List<Room> rooms = roomRepo.findBySchool_IdAndIsDeletedFalse(schoolId, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        for (Room r : rooms) {
+            r.setDeleted(true);
+            r.setUpdatedBy(actor);
+            roomRepo.save(r);
+        }
     }
 
     @Transactional

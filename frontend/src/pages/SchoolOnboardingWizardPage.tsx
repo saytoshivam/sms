@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -10,7 +10,6 @@ import { SelectKeeper } from '../components/SelectKeeper';
 import { DateKeeper } from '../components/DateKeeper';
 import { MultiSelectKeeper } from '../components/MultiSelectKeeper';
 import { ClassGroupSearchCombobox } from '../components/ClassGroupSearchCombobox';
-import { ClassesSectionsManager } from '../components/ClassesSectionsManager';
 import { RowActionsMenu } from '../components/RowActionsMenu';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AcademicStructureSetupStep } from '../components/AcademicStructureSetupStep';
@@ -40,6 +39,7 @@ type BasicInfo = {
 type SubjectDraft = {
   name: string;
   code: string;
+  weeklyFrequency: number;
 };
 
 type RoomDraft = {
@@ -91,7 +91,7 @@ type FeesSetup = {
 
 type SpringPage<T> = { content: T[] };
 type ClassGroupLite = { id: number; code?: string | null; gradeLevel?: number | null; section?: string | null; name?: string | null };
-type SubjectCatalogRow = { id: number; code: string; name: string };
+type SubjectCatalogRow = { id: number; code: string; name: string; weeklyFrequency?: number | null };
 type ClassDefaultRoomRow = {
   classGroupId: number;
   code: string;
@@ -116,11 +116,53 @@ type RoomOption = {
 
 type DeleteInfo = { canDelete: boolean; reasons: string[] };
 type StaffDeleteInfo = { canDelete: boolean; reasons: string[] };
+type ClassGroupDeleteSummary = {
+  classGroupsDeleted: number;
+  studentsDeleted: number;
+  subjectAllocationsDeleted: number;
+  classSubjectConfigsDeleted: number;
+  subjectSectionOverridesDeleted: number;
+  subjectClassMappingsDeleted: number;
+  timetableEntriesDeleted: number;
+  attendanceSessionsDeleted: number;
+  lecturesDeleted: number;
+  announcementTargetsDeleted: number;
+};
 
 function pageContent<T>(data: SpringPage<T> | T[] | undefined | null): T[] {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   return Array.isArray(data.content) ? data.content : [];
+}
+
+function summarizeClassDelete(s: ClassGroupDeleteSummary) {
+  const parts: string[] = [];
+  if (s.classGroupsDeleted) parts.push(`${s.classGroupsDeleted} section(s)`);
+  if (s.studentsDeleted) parts.push(`${s.studentsDeleted} student(s)`);
+  if (s.subjectAllocationsDeleted) parts.push(`${s.subjectAllocationsDeleted} allocation row(s)`);
+  if (s.subjectSectionOverridesDeleted) parts.push(`${s.subjectSectionOverridesDeleted} override row(s)`);
+  if (s.subjectClassMappingsDeleted) parts.push(`${s.subjectClassMappingsDeleted} mapping row(s)`);
+  if (s.timetableEntriesDeleted) parts.push(`${s.timetableEntriesDeleted} timetable entry(s)`);
+  if (s.attendanceSessionsDeleted) parts.push(`${s.attendanceSessionsDeleted} attendance session(s)`);
+  if (s.lecturesDeleted) parts.push(`${s.lecturesDeleted} lecture(s)`);
+  if (s.announcementTargetsDeleted) parts.push(`${s.announcementTargetsDeleted} announcement target(s)`);
+  return parts.length ? parts.join(' · ') : 'No dependent rows found.';
+}
+
+function deriveGradeSection(g: ClassGroupLite): { grade: number | null; section: string | null } {
+  const gradeLevel = g.gradeLevel;
+  const section = g.section;
+  if (typeof gradeLevel === 'number' && Number.isFinite(gradeLevel)) {
+    return { grade: gradeLevel, section: section ? String(section) : null };
+  }
+  const code = String(g.code ?? '').trim();
+  // Common patterns: "10-A", "10_A", "10A" (fallback)
+  const m = code.match(/^(\d{1,2})\s*[-_ ]?\s*([A-Za-z0-9]{1,8})?$/);
+  if (!m) return { grade: null, section: section ? String(section) : null };
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return { grade: null, section: section ? String(section) : null };
+  const sec = m[2] ? String(m[2]).trim() : null;
+  return { grade: n, section: sec ?? (section ? String(section) : null) };
 }
 
 type GradeSectionsRow = { gradeLevel: number; sectionsText: string };
@@ -193,17 +235,23 @@ function parseSubjectsCsv(text: string): SubjectDraft[] {
     const cols = lines[i].split(',').map((c) => c.trim());
     let name: string;
     let code: string;
+    let weeklyFrequencyRaw: string;
     if (hasHeader) {
       const inName = colIndex(['name', 'subjectname', 'subject']);
       const inCode = colIndex(['code', 'subjectcode']);
+      const inWf = colIndex(['weeklyfrequency', 'weekly_frequency', 'frequency', 'freq', 'periodsperweek', 'periods_per_week']);
       name = (inName >= 0 ? cols[inName] : cols[0]) ?? '';
       code = (inCode >= 0 ? cols[inCode] : cols[1]) ?? '';
+      weeklyFrequencyRaw = (inWf >= 0 ? cols[inWf] : cols[2]) ?? '';
     } else {
       name = cols[0] ?? '';
       code = cols[1] ?? '';
+      weeklyFrequencyRaw = cols[2] ?? '';
     }
     if (!name || !code) continue;
-    out.push({ name, code: code.toUpperCase() });
+    const n = weeklyFrequencyRaw ? Number(String(weeklyFrequencyRaw).trim()) : NaN;
+    const weeklyFrequency = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 4;
+    out.push({ name, code: code.toUpperCase(), weeklyFrequency });
   }
   return out;
 }
@@ -371,11 +419,36 @@ export function SchoolOnboardingWizardPage() {
   const [classesResult, setClassesResult] = useState<{ createdCount: number; skippedExistingCount: number } | null>(
     null,
   );
+  const [classesSearch, setClassesSearch] = useState('');
+  const [classesGradeFilter, setClassesGradeFilter] = useState<string>(''); // '' = all
+  const [classesExpandedGrades, setClassesExpandedGrades] = useState<Record<number, boolean>>({});
+  const [classesDeleteAllOpen, setClassesDeleteAllOpen] = useState(false);
+  const [classesDeleteGradeModal, setClassesDeleteGradeModal] = useState<{
+    open: boolean;
+    grade: number | null;
+    ids: number[];
+  }>({ open: false, grade: null, ids: [] });
+  const [classDeleteModal, setClassDeleteModal] = useState<{ open: boolean; id: number | null; code: string }>({
+    open: false,
+    id: null,
+    code: '',
+  });
+  const [classEditModal, setClassEditModal] = useState<{
+    open: boolean;
+    id: number | null;
+    code: string;
+    displayName: string;
+    gradeLevel: number | '';
+    section: string;
+    capacity: number | '';
+  }>({ open: false, id: null, code: '', displayName: '', gradeLevel: '', section: '', capacity: '' });
   const [subjectName, setSubjectName] = useState('');
   const [subjectCode, setSubjectCode] = useState('');
+  const [subjectWeeklyFrequency, setSubjectWeeklyFrequency] = useState<number | ''>(4);
   const [subjectSearch, setSubjectSearch] = useState('');
   const [subjectsCsvName, setSubjectsCsvName] = useState<string | null>(null);
   const [subjects, setSubjects] = useState<SubjectDraft[]>([]);
+  const subjectsCsvInputRef = useRef<HTMLInputElement | null>(null);
   const [academicAllocRows, setAcademicAllocRows] = useState<
     { classGroupId: number; subjectId: number; staffId: number | null; weeklyFrequency: number; roomId: number | null }[]
   >([]);
@@ -418,6 +491,7 @@ export function SchoolOnboardingWizardPage() {
     busy: boolean;
   }>({ roomId: null, type: 'CLASSROOM', labType: 'PHYSICS', capacity: '', isSchedulable: true, busy: false });
   const [roomsCsvName, setRoomsCsvName] = useState<string | null>(null);
+  const roomsCsvInputRef = useRef<HTMLInputElement | null>(null);
   const [roomsSelectedKeys, setRoomsSelectedKeys] = useState<Record<string, boolean>>({});
   const [bulkStart, setBulkStart] = useState<number | ''>(101);
   const [bulkEnd, setBulkEnd] = useState<number | ''>(110);
@@ -450,6 +524,7 @@ export function SchoolOnboardingWizardPage() {
   });
   const staffEmployeeNoTrim = staffEmployeeNo.trim();
   const [staffCsvName, setStaffCsvName] = useState<string | null>(null);
+  const staffCsvInputRef = useRef<HTMLInputElement | null>(null);
   const [staffRows, setStaffRows] = useState<StaffDraft[]>([]);
   const [staffResult, setStaffResult] = useState<{
     staffCreated: number;
@@ -459,6 +534,7 @@ export function SchoolOnboardingWizardPage() {
   } | null>(null);
   const [feesRows, setFeesRows] = useState<FeeClassRow[]>([]);
   const [feesCsvName, setFeesCsvName] = useState<string | null>(null);
+  const feesCsvInputRef = useRef<HTMLInputElement | null>(null);
   const [feesCopyFromGrade, setFeesCopyFromGrade] = useState<string>('');
   const [feesExpandedGrades, setFeesExpandedGrades] = useState<Record<string, boolean>>({});
   const [feePreviewGrade, setFeePreviewGrade] = useState<string>('');
@@ -469,6 +545,9 @@ export function SchoolOnboardingWizardPage() {
   const [graceDays, setGraceDays] = useState<number | ''>(7);
   const [lateFeePerDay, setLateFeePerDay] = useState<number | ''>(0);
   const [feesSaved, setFeesSaved] = useState(false);
+  const [basicSaveSuccess, setBasicSaveSuccess] = useState(false);
+  const [academicSaveSuccess, setAcademicSaveSuccess] = useState(false);
+  const [timetableAutoGenInfo, setTimetableAutoGenInfo] = useState<{ n: number } | null>(null);
   const [studentAdmissionNo, setStudentAdmissionNo] = useState('');
   const [studentFirstName, setStudentFirstName] = useState('');
   const [studentLastName, setStudentLastName] = useState('');
@@ -478,6 +557,7 @@ export function SchoolOnboardingWizardPage() {
   const [guardianPhone, setGuardianPhone] = useState('');
   const [guardianEmail, setGuardianEmail] = useState('');
   const [studentsCsvName, setStudentsCsvName] = useState<string | null>(null);
+  const studentsCsvInputRef = useRef<HTMLInputElement | null>(null);
   const [studentRows, setStudentRows] = useState<StudentDraft[]>([]);
   const [studentsResult, setStudentsResult] = useState<{
     studentsCreated: number;
@@ -488,6 +568,11 @@ export function SchoolOnboardingWizardPage() {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const wizardStepInitedRef = useRef(false);
   const [searchParams] = useSearchParams();
+  const idxOf = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (let i = 0; i < WIZARD_STEPS.length; i++) m[WIZARD_STEPS[i]!.id] = i;
+    return m;
+  }, []);
 
   const progress = useQuery({
     queryKey: ['onboarding-progress'],
@@ -498,7 +583,8 @@ export function SchoolOnboardingWizardPage() {
   useEffect(() => {
     const raw = searchParams.get('step');
     if (!raw) return;
-    const stepId = raw.toUpperCase();
+    const stepIdRaw = raw.toUpperCase();
+    const stepId = stepIdRaw === 'SUBJECT_CLASS_MAPPING' ? 'ACADEMIC_STRUCTURE' : stepIdRaw;
     const idx = WIZARD_STEPS.findIndex((s) => s.id === stepId);
     if (idx < 0) return;
     setActiveStepIndex(idx);
@@ -514,6 +600,46 @@ export function SchoolOnboardingWizardPage() {
   const classGroups = useQuery({
     queryKey: ['class-groups'],
     queryFn: async () => (await api.get<SpringPage<ClassGroupLite> | ClassGroupLite[]>('/api/class-groups?size=500')).data,
+  });
+
+  const deleteAllClasses = useMutation({
+    mutationFn: async () => api.delete('/api/class-groups/delete-all'),
+    onSuccess: async () => {
+      setClassesDeleteAllOpen(false);
+      setClassesResult(null);
+      await qc.invalidateQueries({ queryKey: ['class-groups'] });
+      toast.success('Deleted', 'All classes and sections were deleted.');
+    },
+    onError: (e) => toast.error('Delete failed', formatApiError(e)),
+  });
+
+  const deleteOneClass = useMutation({
+    mutationFn: async (id: number) => (await api.delete<ClassGroupDeleteSummary>(`/api/class-groups/${id}`)).data,
+    onError: (e) => toast.error('Delete failed', formatApiError(e)),
+  });
+
+  const updateOneClass = useMutation({
+    mutationFn: async (body: {
+      id: number;
+      code: string;
+      displayName: string;
+      gradeLevel: number | null;
+      section: string | null;
+      capacity: number | null;
+    }) =>
+      api.put(`/api/class-groups/${body.id}`, {
+        code: body.code,
+        displayName: body.displayName,
+        gradeLevel: body.gradeLevel,
+        section: body.section,
+        capacity: body.capacity,
+      }),
+    onSuccess: async () => {
+      setClassEditModal({ open: false, id: null, code: '', displayName: '', gradeLevel: '', section: '', capacity: '' });
+      await qc.invalidateQueries({ queryKey: ['class-groups'] });
+      toast.success('Saved', 'Class updated.');
+    },
+    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   const feesSetup = useQuery({
@@ -543,7 +669,7 @@ export function SchoolOnboardingWizardPage() {
   const subjectsCatalog = useQuery({
     queryKey: ['subjects-catalog'],
     queryFn: async () => (await api.get<SpringPage<SubjectCatalogRow> | SubjectCatalogRow[]>('/api/subjects?size=500')).data,
-    enabled: [2, 4, 5].includes(activeStepIndex),
+    enabled: [idxOf.SUBJECTS, idxOf.STAFF, idxOf.ACADEMIC_STRUCTURE].includes(activeStepIndex),
   });
 
   const [subjectDeleteInfoCache, setSubjectDeleteInfoCache] = useState<Record<number, { canDelete: boolean; reasons: string[] }>>({});
@@ -561,8 +687,9 @@ export function SchoolOnboardingWizardPage() {
     subjectId: number | null;
     name: string;
     code: string;
+    weeklyFrequency: number | null;
     busy: boolean;
-  }>({ open: false, subjectId: null, name: '', code: '', busy: false });
+  }>({ open: false, subjectId: null, name: '', code: '', weeklyFrequency: null, busy: false });
 
   async function ensureSubjectDeleteInfo(subjectId: number) {
     if (subjectDeleteInfoCache[subjectId]) return subjectDeleteInfoCache[subjectId];
@@ -601,13 +728,14 @@ export function SchoolOnboardingWizardPage() {
   const staffCatalog = useQuery({
     queryKey: ['onboarding-staff-view'],
     queryFn: async () => (await api.get<OnboardedStaffRow[]>('/api/v1/onboarding/staff')).data,
-    enabled: activeStepIndex === 4,
+    enabled: activeStepIndex === idxOf.STAFF,
   });
 
   const [staffTableSearch, setStaffTableSearch] = useState('');
   /** OR filter: staff must have at least one of these roles when non-empty */
   const [staffTableRoles, setStaffTableRoles] = useState<string[]>([]);
   const [staffTableLogin, setStaffTableLogin] = useState<'ALL' | 'HAS' | 'NONE'>('ALL');
+  const [staffExpandedId, setStaffExpandedId] = useState<number | null>(null);
 
   const [staffDeleteInfoCache, setStaffDeleteInfoCache] = useState<Record<number, StaffDeleteInfo | undefined>>({});
   const [staffDeleteModal, setStaffDeleteModal] = useState<{
@@ -616,6 +744,7 @@ export function SchoolOnboardingWizardPage() {
     fullName?: string;
     email?: string;
   }>({ open: false });
+  const [staffDeleteAllModal, setStaffDeleteAllModal] = useState<{ open: boolean; busy: boolean }>({ open: false, busy: false });
 
   const ensureStaffDeleteInfo = async (staffId: number) => {
     if (staffDeleteInfoCache[staffId]) return;
@@ -635,6 +764,40 @@ export function SchoolOnboardingWizardPage() {
     },
   });
 
+  const deleteAllStaff = useMutation({
+    mutationFn: async (rows: OnboardedStaffRow[]) => {
+      const sorted = rows.slice().sort((a, b) => Number(a.staffId) - Number(b.staffId));
+      let deleted = 0;
+      let skipped = 0;
+      const skippedNames: string[] = [];
+      for (const r of sorted) {
+        const id = Number(r.staffId);
+        if (!Number.isFinite(id)) continue;
+        try {
+          const info = (await api.get<StaffDeleteInfo>(`/api/v1/onboarding/staff/${id}/delete-info`)).data;
+          if (info?.canDelete === false) {
+            skipped += 1;
+            skippedNames.push(r.fullName || r.email || String(id));
+            continue;
+          }
+          await api.delete(`/api/v1/onboarding/staff/${id}`);
+          deleted += 1;
+        } catch {
+          skipped += 1;
+          skippedNames.push(r.fullName || r.email || String(id));
+        }
+      }
+      return { deleted, skipped, skippedNames: skippedNames.slice(0, 8) };
+    },
+    onMutate: () => setStaffDeleteAllModal((p) => ({ ...p, busy: true })),
+    onSuccess: async () => {
+      setStaffDeleteAllModal({ open: false, busy: false });
+      setStaffDeleteInfoCache({});
+      await qc.invalidateQueries({ queryKey: ['onboarding-staff-view'] });
+    },
+    onError: () => setStaffDeleteAllModal((p) => ({ ...p, busy: false })),
+  });
+
   const [staffEdit, setStaffEdit] = useState<{
     open: boolean;
     staffId?: number;
@@ -643,17 +806,19 @@ export function SchoolOnboardingWizardPage() {
 
   const updateStaff = useMutation({
     mutationFn: async ({ staffId, body }: { staffId: number; body: StaffDraft }) => {
+      const roles = (body.roles ?? []).map((r) => String(r).trim().toUpperCase()).filter(Boolean);
+      const isTeacher = roles.includes('TEACHER');
       const r = await api.put(`/api/v1/onboarding/staff/${staffId}`, {
         fullName: body.fullName,
         email: body.email,
         phone: body.phone ?? '',
         employeeNo: body.employeeNo ?? '',
         designation: body.designation ?? '',
-        roles: body.roles ?? [],
-        teachableSubjectIds: body.teachableSubjectIds ?? [],
+        roles,
+        teachableSubjectIds: isTeacher ? body.teachableSubjectIds ?? [] : [],
         createLoginAccount: body.createLoginAccount ?? true,
-        maxWeeklyLectureLoad: body.maxWeeklyLectureLoad ?? null,
-        preferredClassGroupIds: body.preferredClassGroupIds ?? [],
+        maxWeeklyLectureLoad: isTeacher ? body.maxWeeklyLectureLoad ?? null : null,
+        preferredClassGroupIds: isTeacher ? body.preferredClassGroupIds ?? [] : [],
       });
       return r.data as { email: string; username: string; temporaryPassword: string; roles: string[] } | null;
     },
@@ -711,13 +876,13 @@ export function SchoolOnboardingWizardPage() {
       });
       return { ...data, classGroups };
     },
-    enabled: activeStepIndex === 5,
+    enabled: activeStepIndex === idxOf.ACADEMIC_STRUCTURE,
   });
 
   const roomsForClassDefaults = useQuery({
     queryKey: ['rooms'],
     queryFn: async () => (await api.get<SpringPage<RoomOption> | RoomOption[]>('/api/rooms?size=500')).data,
-    enabled: activeStepIndex === 5,
+    enabled: activeStepIndex === idxOf.ACADEMIC_STRUCTURE,
   });
 
   const roomsSaved = useQuery({
@@ -912,12 +1077,17 @@ export function SchoolOnboardingWizardPage() {
         schoolEndTime,
         lectureDurationMinutes: lectureDurationMinutes === '' ? null : Number(lectureDurationMinutes),
       }),
+    onMutate: () => {
+      setBasicSaveSuccess(false);
+    },
     onSuccess: async () => {
+      setBasicSaveSuccess(true);
       await qc.invalidateQueries({ queryKey: ['onboarding-progress'] });
       await qc.invalidateQueries({ queryKey: ['onboarding-basic-info'] });
-      toast.success('Saved', 'Basic setup saved.');
     },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
+    onError: () => {
+      setBasicSaveSuccess(false);
+    },
   });
 
   const generateClasses = useMutation({
@@ -955,9 +1125,7 @@ export function SchoolOnboardingWizardPage() {
       await qc.invalidateQueries({ queryKey: ['onboarding-progress'] });
       await qc.invalidateQueries({ queryKey: ['class-groups-catalog'] });
       await qc.invalidateQueries({ queryKey: ['class-groups'] });
-      toast.success('Classes generated', `Created ${data.createdCount} · Skipped ${data.skippedExistingCount}`);
     },
-    onError: (e) => toast.error('Generate failed', formatApiError(e)),
   });
 
   const saveSubjects = useMutation({
@@ -972,6 +1140,9 @@ export function SchoolOnboardingWizardPage() {
         if (!isValidSubjectCode(code)) {
           throw new Error('Subject code must be uppercase A–Z/0–9 only (no spaces), 3–32 chars.');
         }
+        if (!Number.isFinite(s.weeklyFrequency) || s.weeklyFrequency <= 0) {
+          throw new Error(`weeklyFrequency must be positive for subject ${code}`);
+        }
         if (seen.has(code)) throw new Error(`Duplicate subject code in queue: ${code}`);
         seen.add(code);
       }
@@ -981,17 +1152,27 @@ export function SchoolOnboardingWizardPage() {
           skippedExistingCount: number;
           mappingsCreated: number;
           createdSubjectCodes: string[];
-        }>('/api/v1/onboarding/subjects', subjects.map((s) => ({ name: s.name, code: normalizeSubjectCode(s.code) })))
+        }>(
+          '/api/v1/onboarding/subjects',
+          subjects.map((s) => ({
+            name: s.name,
+            code: normalizeSubjectCode(s.code),
+            weeklyFrequency: Math.trunc(Number(s.weeklyFrequency)),
+          })),
+        )
       ).data;
+    },
+    onMutate: () => {
+      setSubjectsResult(null);
     },
     onSuccess: async (data) => {
       setSubjectsResult({ createdCount: data.createdCount, skippedExistingCount: data.skippedExistingCount });
       setSubjects([]);
       await qc.invalidateQueries({ queryKey: ['onboarding-progress'] });
       await qc.invalidateQueries({ queryKey: ['subjects-catalog'] });
-      toast.success('Subjects saved', `Created ${data.createdCount} · Skipped ${data.skippedExistingCount}`);
+      // Ensure the saved list refreshes immediately even if it was previously disabled.
+      await qc.refetchQueries({ queryKey: ['subjects-catalog'] });
     },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   const saveRooms = useMutation({
@@ -1019,6 +1200,9 @@ export function SchoolOnboardingWizardPage() {
         )
       ).data;
     },
+    onMutate: () => {
+      setRoomsResult(null);
+    },
     onSuccess: async (data) => {
       setRoomsResult({ createdCount: data.createdCount, skippedExistingCount: data.skippedExistingCount });
       setRooms([]);
@@ -1026,9 +1210,7 @@ export function SchoolOnboardingWizardPage() {
       await qc.invalidateQueries({ queryKey: ['rooms-saved-onboarding'] });
       await qc.invalidateQueries({ queryKey: ['onboarding-class-default-rooms'] });
       await qc.invalidateQueries({ queryKey: ['rooms'] });
-      toast.success('Rooms saved', `Created ${data.createdCount} · Skipped ${data.skippedExistingCount}`);
     },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   const skipRoomsOnboarding = useMutation({
@@ -1065,7 +1247,11 @@ export function SchoolOnboardingWizardPage() {
         assignmentSlotMeta: assignmentSlotMetaList,
       });
     },
+    onMutate: () => {
+      setAcademicSaveSuccess(false);
+    },
     onSuccess: async () => {
+      setAcademicSaveSuccess(true);
       try {
         localStorage.removeItem(ACADEMIC_LOCAL_DRAFT_KEY);
       } catch {
@@ -1075,29 +1261,30 @@ export function SchoolOnboardingWizardPage() {
       await qc.invalidateQueries({ queryKey: ['onboarding-academic-structure'] });
       await qc.invalidateQueries({ queryKey: ['class-groups'] });
       await qc.invalidateQueries({ queryKey: ['subjects-catalog'] });
-      toast.success('Saved', 'Academic structure updated.');
     },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
+    onError: () => {
+      setAcademicSaveSuccess(false);
+    },
   });
 
   const autoGenTimetable = useMutation({
     mutationFn: async () => (await api.post('/api/v1/onboarding/timetable/auto-generate')).data,
+    onMutate: () => {
+      setTimetableAutoGenInfo(null);
+    },
     onSuccess: async (data) => {
       const n = (data as { perClass?: { classCode: string; result: { warnings: string[] } }[] }).perClass?.length ?? 0;
-      toast.success('Timetable', `Auto-filled ${n} class(es). Open the grid to review.`);
+      setTimetableAutoGenInfo({ n });
       await qc.invalidateQueries({ queryKey: ['timetable-v2'] });
     },
-    onError: (e) => toast.error('Auto-generate failed', formatApiError(e)),
   });
 
   const completeTimetableStep = useMutation({
     mutationFn: async () => api.post('/api/v1/onboarding/timetable/complete', {}),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['onboarding-progress'] });
-      toast.success('Timetable', 'Marked complete.');
       setActiveStepIndex((i) => Math.min(i + 1, WIZARD_STEPS.length - 1));
     },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   useEffect(() => {
@@ -1391,15 +1578,16 @@ export function SchoolOnboardingWizardPage() {
         }>('/api/v1/onboarding/staff', body)
       ).data;
     },
+    onMutate: () => {
+      setStaffResult(null);
+    },
     onSuccess: async (data) => {
       setStaffResult(data);
       setStaffRows([]);
       await qc.invalidateQueries({ queryKey: ['onboarding-progress'] });
       await qc.invalidateQueries({ queryKey: ['onboarding-staff-view'] });
       await qc.invalidateQueries({ queryKey: ['me'] });
-      toast.success('Staff saved', `Created ${data.usersCreated} login(s) · Skipped ${data.skippedExistingCount}`);
     },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   const saveFees = useMutation({
@@ -1425,13 +1613,14 @@ export function SchoolOnboardingWizardPage() {
         },
       });
     },
+    onMutate: () => {
+      setFeesSaved(false);
+    },
     onSuccess: async () => {
       setFeesSaved(true);
       await qc.invalidateQueries({ queryKey: ['onboarding-progress'] });
       await qc.invalidateQueries({ queryKey: ['onboarding-fees'] });
-      toast.success('Fees saved', 'Fee structure updated.');
     },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   const saveStudents = useMutation({
@@ -1445,14 +1634,15 @@ export function SchoolOnboardingWizardPage() {
         }>('/api/v1/onboarding/students', studentRows)
       ).data;
     },
+    onMutate: () => {
+      setStudentsResult(null);
+    },
     onSuccess: async (data) => {
       setStudentsResult(data);
       setStudentRows([]);
       await qc.invalidateQueries({ queryKey: ['onboarding-progress'] });
       await qc.invalidateQueries({ queryKey: ['students'] });
-      toast.success('Students saved', `Created ${data.studentsCreated} · Skipped ${data.skippedExistingCount}`);
     },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   const pct = percentCompleted(progress.data?.completedSteps ?? []);
@@ -1748,13 +1938,20 @@ export function SchoolOnboardingWizardPage() {
           ) : null}
         </div>
 
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <button type="button" className="btn" disabled={!canSave} onClick={() => saveBasic.mutate()}>
             {saveBasic.isPending ? 'Saving…' : 'Save'}
           </button>
-          {/* Success toast shown globally */}
+          {basicSaveSuccess && !saveBasic.isError ? (
+            <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Saved</div>
+                <div className="sms-alert__msg">Basic school setup is updated.</div>
+              </div>
+            </div>
+          ) : null}
           {saveBasic.isError ? (
-            <div className="sms-alert sms-alert--error">
+            <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
               <div>
                 <div className="sms-alert__title">Save failed</div>
                 <div className="sms-alert__msg">{formatApiError(saveBasic.error)}</div>
@@ -1769,8 +1966,12 @@ export function SchoolOnboardingWizardPage() {
       {activeStepIndex === 1 ? (
       <div className="card stack" style={{ gap: 14 }}>
         <div className="workspace-panel__head">
-          <h2 className="workspace-panel__title">Step 2 — Classes & sections</h2>
-          <span className="workspace-hero__tag">Required</span>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 12, width: '100%' }}>
+            <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+              <h2 className="workspace-panel__title">Step 2 — Classes & sections</h2>
+              <span className="workspace-hero__tag">Required</span>
+            </div>
+          </div>
         </div>
 
         <p className="muted" style={{ margin: 0, fontSize: 14, lineHeight: 1.55 }}>
@@ -1899,7 +2100,7 @@ export function SchoolOnboardingWizardPage() {
           </div>
         )}
 
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <button
             type="button"
             className="btn"
@@ -1908,13 +2109,18 @@ export function SchoolOnboardingWizardPage() {
           >
             {generateClasses.isPending ? 'Generating…' : 'Generate classes'}
           </button>
-          {classesResult ? (
-            <span className="muted" style={{ fontSize: 13 }}>
-              Created {classesResult.createdCount} · Skipped {classesResult.skippedExistingCount} existing
-            </span>
+          {classesResult && !generateClasses.isError ? (
+            <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Classes generated</div>
+                <div className="sms-alert__msg">
+                  Created {classesResult.createdCount} · Skipped {classesResult.skippedExistingCount} existing
+                </div>
+              </div>
+            </div>
           ) : null}
           {generateClasses.isError ? (
-            <div className="sms-alert sms-alert--error">
+            <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
               <div>
                 <div className="sms-alert__title">Generate failed</div>
                 <div className="sms-alert__msg">{formatApiError(generateClasses.error)}</div>
@@ -1923,7 +2129,452 @@ export function SchoolOnboardingWizardPage() {
           ) : null}
         </div>
 
-        <ClassesSectionsManager />
+        <div className="stack" style={{ gap: 10, marginTop: 6 }}>
+          <div className="row" style={{ justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+              <div style={{ fontWeight: 900 }}>Generated classes &amp; sections</div>
+              <div className="muted" style={{ fontSize: 12 }}>Shows what exists after generation</div>
+            </div>
+            <RowActionsMenu
+              ariaLabel="Generated classes actions"
+              actions={[
+                {
+                  id: 'delete-all-classes',
+                  label: 'Delete all classes',
+                  danger: true,
+                  onSelect: () => setClassesDeleteAllOpen(true),
+                },
+              ]}
+            />
+          </div>
+          {classGroups.isLoading ? (
+            <div className="muted">Loading classes…</div>
+          ) : classGroups.isError ? (
+            <div style={{ color: '#b91c1c' }}>{formatApiError(classGroups.error)}</div>
+          ) : (() => {
+              const q = classesSearch.trim().toLowerCase();
+              const gradePick = classesGradeFilter ? Number(classesGradeFilter) : null;
+              const allRows = pageContent(classGroups.data)
+                .slice()
+                .sort((a, b) => {
+                  const aa = deriveGradeSection(a);
+                  const bb = deriveGradeSection(b);
+                  const ga = aa.grade ?? 999;
+                  const gb = bb.grade ?? 999;
+                  if (ga !== gb) return ga - gb;
+                  return String(aa.section ?? '').localeCompare(String(bb.section ?? ''));
+                });
+
+              if (!allRows.length) {
+                return (
+                  <div className="muted">
+                    No classes yet. Click <strong>Generate classes</strong> above.
+                  </div>
+                );
+              }
+
+              const gradeOptions = Array.from(
+                new Set(
+                  allRows
+                    .map((r) => deriveGradeSection(r).grade)
+                    .filter((n): n is number => typeof n === 'number' && Number.isFinite(n)),
+                ),
+              )
+                .sort((a, b) => a - b)
+                .map((g) => ({ value: String(g), label: `Grade ${g}` }));
+
+              const byGrade = new Map<number, ClassGroupLite[]>();
+              const other: ClassGroupLite[] = [];
+              for (const r of allRows) {
+                const d = deriveGradeSection(r);
+                const g = d.grade;
+                if (gradePick != null && g !== gradePick) continue;
+                const hay = `${g ?? ''} ${d.section ?? ''} ${r.code ?? ''} ${r.name ?? ''}`.toLowerCase();
+                if (q && !hay.includes(q)) continue;
+                if (typeof g === 'number' && Number.isFinite(g)) {
+                  byGrade.set(g, [...(byGrade.get(g) ?? []), r]);
+                } else {
+                  other.push(r);
+                }
+              }
+
+              const autoExpand = Boolean(q) || gradePick != null;
+
+              return (
+                <div className="stack" style={{ gap: 12 }}>
+                  <div className="card row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      value={classesSearch}
+                      onChange={(e) => setClassesSearch(e.target.value)}
+                      placeholder="Search grade / section / code…"
+                      style={{ flex: '1 1 260px' }}
+                    />
+                    <div style={{ minWidth: 220 }} className="stack">
+                      <SelectKeeper
+                        value={classesGradeFilter}
+                        onChange={(v) => setClassesGradeFilter(v || '')}
+                        options={gradeOptions}
+                        emptyValueLabel="All grades"
+                      />
+                    </div>
+                    {(classesSearch.trim() || classesGradeFilter) ? (
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() => {
+                          setClassesSearch('');
+                          setClassesGradeFilter('');
+                        }}
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {allRows.length} section(s)
+                    </div>
+                  </div>
+
+                  {byGrade.size === 0 && other.length === 0 ? (
+                    <div className="muted">No matches.</div>
+                  ) : (
+                    <div className="stack" style={{ gap: 10 }}>
+                      {Array.from(byGrade.entries())
+                        .sort((a, b) => a[0] - b[0])
+                        .map(([grade, rows]) => {
+                          const isOpen = classesExpandedGrades[grade] ?? false;
+                          const openNow = autoExpand ? true : isOpen;
+                          const toggleGrade = () => {
+                            if (autoExpand) return;
+                            setClassesExpandedGrades((p) => ({ ...p, [grade]: !(p[grade] ?? false) }));
+                          };
+                          return (
+                            <div key={grade} className="card stack" style={{ gap: 10, padding: 12 }}>
+                              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={toggleGrade}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      toggleGrade();
+                                    }
+                                  }}
+                                  title={autoExpand ? 'Clear filters/search to collapse' : undefined}
+                                  className="row"
+                                  style={{
+                                    gap: 10,
+                                    alignItems: 'center',
+                                    cursor: autoExpand ? 'default' : 'pointer',
+                                    userSelect: 'none',
+                                  }}
+                                >
+                                  <span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>
+                                    {openNow ? '▾' : '▸'}
+                                  </span>
+                                  <div>
+                                    <div style={{ fontWeight: 950 }}>Grade {grade}</div>
+                                    <div className="muted" style={{ fontSize: 12 }}>
+                                      Sections: <strong>{rows.length}</strong>
+                                    </div>
+                                  </div>
+                                </div>
+                                <RowActionsMenu
+                                  ariaLabel={`Grade ${grade} actions`}
+                                  actions={[
+                                    {
+                                      id: 'delete-grade',
+                                      label: `Delete Grade ${grade}`,
+                                      danger: true,
+                                      onSelect: () => {
+                                        // Delete the entire class (grade), even if the UI is filtered/searching.
+                                        const ids = allRows
+                                          .filter((r) => deriveGradeSection(r).grade === grade)
+                                          .map((r) => r.id);
+                                        setClassesDeleteGradeModal({
+                                          open: true,
+                                          grade,
+                                          ids,
+                                        });
+                                      },
+                                    },
+                                  ]}
+                                />
+                              </div>
+
+                              {openNow ? (
+                                <div className="stack" style={{ gap: 8 }}>
+                                  {rows.map((r) => {
+                                    const code = r.code ?? r.name ?? `#${r.id}`;
+                                    const displayName = r.name ?? r.code ?? code;
+                                    return (
+                                      <div
+                                        key={r.id}
+                                        className="row"
+                                        style={{
+                                          justifyContent: 'space-between',
+                                          gap: 10,
+                                          padding: '10px 12px',
+                                          borderRadius: 12,
+                                          border: '1px solid rgba(15,23,42,0.10)',
+                                          background: 'rgba(255,255,255,0.9)',
+                                          flexWrap: 'wrap',
+                                          alignItems: 'center',
+                                        }}
+                                      >
+                                        <div style={{ minWidth: 0 }}>
+                                          <div style={{ fontWeight: 900 }}>{displayName}</div>
+                                          <div className="muted" style={{ fontSize: 12 }}>
+                                            <code>{code}</code>
+                                            {deriveGradeSection(r).section ? ` · Section ${deriveGradeSection(r).section}` : ''}
+                                          </div>
+                                        </div>
+                                        <RowActionsMenu
+                                          ariaLabel="Class actions"
+                                          actions={[
+                                            {
+                                              id: 'edit',
+                                              label: 'Edit',
+                                              onSelect: () =>
+                                                setClassEditModal({
+                                                  open: true,
+                                                  id: r.id,
+                                                  code: String(r.code ?? ''),
+                                                  displayName: String(r.name ?? r.code ?? ''),
+                                                  gradeLevel: Number.isFinite(Number(r.gradeLevel)) ? Number(r.gradeLevel) : '',
+                                                  section: String(r.section ?? ''),
+                                                  capacity: '',
+                                                }),
+                                            },
+                                            {
+                                              id: 'delete',
+                                              label: 'Delete',
+                                              danger: true,
+                                              onSelect: () => setClassDeleteModal({ open: true, id: r.id, code }),
+                                            },
+                                          ]}
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="muted" style={{ fontSize: 12 }}>
+                                  Closed · Click the card to view sections
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                      {other.length ? (
+                        <div className="card stack" style={{ gap: 10, padding: 12 }}>
+                          <div style={{ fontWeight: 950 }}>Other</div>
+                          <div className="muted" style={{ fontSize: 12 }}>Classes without a grade/section (still usable elsewhere).</div>
+                          <div className="stack" style={{ gap: 8 }}>
+                            {other.map((r) => {
+                              const code = r.code ?? r.name ?? `#${r.id}`;
+                              const displayName = r.name ?? r.code ?? code;
+                              return (
+                                <div
+                                  key={r.id}
+                                  className="row"
+                                  style={{
+                                    justifyContent: 'space-between',
+                                    gap: 10,
+                                    padding: '10px 12px',
+                                    borderRadius: 12,
+                                    border: '1px solid rgba(15,23,42,0.10)',
+                                    background: 'rgba(255,255,255,0.9)',
+                                    flexWrap: 'wrap',
+                                    alignItems: 'center',
+                                  }}
+                                >
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 900 }}>{displayName}</div>
+                                    <div className="muted" style={{ fontSize: 12 }}>
+                                      <code>{code}</code>
+                                    </div>
+                                  </div>
+                                  <RowActionsMenu
+                                    ariaLabel="Class actions"
+                                    actions={[
+                                      {
+                                        id: 'edit',
+                                        label: 'Edit',
+                                        onSelect: () =>
+                                          setClassEditModal({
+                                            open: true,
+                                            id: r.id,
+                                            code: String(r.code ?? ''),
+                                            displayName: String(r.name ?? r.code ?? ''),
+                                            gradeLevel: '',
+                                            section: String(r.section ?? ''),
+                                            capacity: '',
+                                          }),
+                                      },
+                                      {
+                                        id: 'delete',
+                                        label: 'Delete',
+                                        danger: true,
+                                        onSelect: () => setClassDeleteModal({ open: true, id: r.id, code }),
+                                      },
+                                    ]}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+        </div>
+
+        <ConfirmDialog
+          open={classesDeleteAllOpen}
+          title="Delete all classes?"
+          description="This removes all class groups/sections and dependent data (students, attendance, lectures, timetable entries, academic-structure mappings)."
+          danger
+          confirmLabel={deleteAllClasses.isPending ? 'Deleting…' : 'Delete all'}
+          confirmDisabled={deleteAllClasses.isPending}
+          onConfirm={async () => {
+            await deleteAllClasses.mutateAsync();
+          }}
+          onClose={() => (deleteAllClasses.isPending ? null : setClassesDeleteAllOpen(false))}
+        />
+
+        <ConfirmDialog
+          open={classDeleteModal.open}
+          title={`Delete ${classDeleteModal.code || 'class'}?`}
+          description="This will delete dependent data for this class/section (students, attendance, lectures, timetable entries, academic-structure mappings)."
+          danger
+          confirmLabel={deleteOneClass.isPending ? 'Deleting…' : 'Delete'}
+          confirmDisabled={deleteOneClass.isPending || !classDeleteModal.id}
+          onConfirm={async () => {
+            if (!classDeleteModal.id) return;
+            const s = await deleteOneClass.mutateAsync(classDeleteModal.id);
+            setClassDeleteModal({ open: false, id: null, code: '' });
+            await qc.invalidateQueries({ queryKey: ['class-groups'] });
+            toast.success('Deleted', summarizeClassDelete(s));
+          }}
+          onClose={() => (deleteOneClass.isPending ? null : setClassDeleteModal({ open: false, id: null, code: '' }))}
+        />
+
+        <ConfirmDialog
+          open={classesDeleteGradeModal.open}
+          title={classesDeleteGradeModal.grade != null ? `Delete Grade ${classesDeleteGradeModal.grade}?` : 'Delete grade?'}
+          description="This will delete all sections in this grade and dependent data (students, attendance, lectures, timetable entries, academic-structure mappings)."
+          danger
+          confirmLabel={deleteOneClass.isPending ? 'Deleting…' : 'Delete grade'}
+          confirmDisabled={deleteOneClass.isPending || !classesDeleteGradeModal.ids.length}
+          onConfirm={async () => {
+            const ids = classesDeleteGradeModal.ids.slice();
+            const agg: ClassGroupDeleteSummary = {
+              classGroupsDeleted: 0,
+              studentsDeleted: 0,
+              subjectAllocationsDeleted: 0,
+              classSubjectConfigsDeleted: 0,
+              subjectSectionOverridesDeleted: 0,
+              subjectClassMappingsDeleted: 0,
+              timetableEntriesDeleted: 0,
+              attendanceSessionsDeleted: 0,
+              lecturesDeleted: 0,
+              announcementTargetsDeleted: 0,
+            };
+            // sequential deletes to avoid request spikes + easier error handling
+            for (const id of ids) {
+              // eslint-disable-next-line no-await-in-loop
+              const s = await deleteOneClass.mutateAsync(id);
+              agg.classGroupsDeleted += s.classGroupsDeleted ?? 0;
+              agg.studentsDeleted += s.studentsDeleted ?? 0;
+              agg.subjectAllocationsDeleted += s.subjectAllocationsDeleted ?? 0;
+              agg.classSubjectConfigsDeleted += s.classSubjectConfigsDeleted ?? 0;
+              agg.subjectSectionOverridesDeleted += s.subjectSectionOverridesDeleted ?? 0;
+              agg.subjectClassMappingsDeleted += s.subjectClassMappingsDeleted ?? 0;
+              agg.timetableEntriesDeleted += s.timetableEntriesDeleted ?? 0;
+              agg.attendanceSessionsDeleted += s.attendanceSessionsDeleted ?? 0;
+              agg.lecturesDeleted += s.lecturesDeleted ?? 0;
+              agg.announcementTargetsDeleted += s.announcementTargetsDeleted ?? 0;
+            }
+            setClassesDeleteGradeModal({ open: false, grade: null, ids: [] });
+            await qc.invalidateQueries({ queryKey: ['class-groups'] });
+            toast.success('Deleted', summarizeClassDelete(agg));
+          }}
+          onClose={() => (deleteOneClass.isPending ? null : setClassesDeleteGradeModal({ open: false, grade: null, ids: [] }))}
+        />
+
+        <ConfirmDialog
+          open={classEditModal.open}
+          title="Edit class / section"
+          confirmLabel={updateOneClass.isPending ? 'Saving…' : 'Save'}
+          confirmDisabled={
+            updateOneClass.isPending ||
+            !classEditModal.id ||
+            !classEditModal.code.trim() ||
+            !classEditModal.displayName.trim() ||
+            classEditModal.gradeLevel === ''
+          }
+          onConfirm={async () => {
+            if (!classEditModal.id) return;
+            const gradeLevel = classEditModal.gradeLevel === '' ? null : Number(classEditModal.gradeLevel);
+            const capacity = classEditModal.capacity === '' ? null : Number(classEditModal.capacity);
+            await updateOneClass.mutateAsync({
+              id: classEditModal.id,
+              code: classEditModal.code.trim(),
+              displayName: classEditModal.displayName.trim(),
+              gradeLevel: Number.isFinite(Number(gradeLevel)) ? Number(gradeLevel) : null,
+              section: classEditModal.section.trim() ? classEditModal.section.trim() : null,
+              capacity: Number.isFinite(Number(capacity)) ? Number(capacity) : null,
+            });
+          }}
+          onClose={() =>
+            updateOneClass.isPending
+              ? null
+              : setClassEditModal({ open: false, id: null, code: '', displayName: '', gradeLevel: '', section: '', capacity: '' })
+          }
+        >
+          <div
+            style={{
+              display: 'grid',
+              gap: 12,
+              gridTemplateColumns: 'minmax(220px, 1.2fr) minmax(220px, 2fr)',
+            }}
+          >
+            <div className="stack" style={{ gap: 6 }}>
+              <label>Grade</label>
+              <input
+                type="number"
+                min={1}
+                max={12}
+                value={classEditModal.gradeLevel}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setClassEditModal((p) => ({ ...p, gradeLevel: v === '' ? '' : Number(v) }));
+                }}
+              />
+            </div>
+            <div className="stack" style={{ gap: 6 }}>
+              <label>Section (optional)</label>
+              <input value={classEditModal.section} onChange={(e) => setClassEditModal((p) => ({ ...p, section: e.target.value }))} placeholder="A" />
+            </div>
+            <div className="stack" style={{ gap: 6 }}>
+              <label>Code</label>
+              <input value={classEditModal.code} onChange={(e) => setClassEditModal((p) => ({ ...p, code: e.target.value }))} placeholder="10-A" />
+            </div>
+            <div className="stack" style={{ gap: 6 }}>
+              <label>Display name</label>
+              <input
+                value={classEditModal.displayName}
+                onChange={(e) => setClassEditModal((p) => ({ ...p, displayName: e.target.value }))}
+                placeholder="Class 10 · A"
+              />
+            </div>
+          </div>
+        </ConfirmDialog>
 
       </div>
       ) : null}
@@ -1943,7 +2594,7 @@ export function SchoolOnboardingWizardPage() {
         <div className="workspace-placeholder">
           <strong>Bulk upload (CSV)</strong>
           <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>
-            Header recommended. Columns: <code>name</code>, <code>code</code>. One subject per row.
+            Header recommended. Columns: <code>name</code>, <code>code</code>, <code>weeklyFrequency</code>. One subject per row.
           </p>
         </div>
 
@@ -1955,6 +2606,7 @@ export function SchoolOnboardingWizardPage() {
                 className="onboarding-file__input"
                 type="file"
                 accept=".csv,text/csv"
+                ref={subjectsCsvInputRef}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
@@ -1969,7 +2621,26 @@ export function SchoolOnboardingWizardPage() {
                 }}
               />
             </label>
-            <span className="onboarding-file__name">{subjectsCsvName ?? 'No file selected'}</span>
+            <span className="onboarding-file__name" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+              <span>{subjectsCsvName ?? 'No file selected'}</span>
+              {subjectsCsvName ? (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ padding: '4px 10px', fontSize: 12, lineHeight: 1 }}
+                  onClick={() => {
+                    setSubjectsCsvName(null);
+                    if (subjectsCsvInputRef.current) subjectsCsvInputRef.current.value = '';
+                    setSubjects([]);
+                    setSubjectsResult(null);
+                  }}
+                  aria-label="Clear selected CSV"
+                  title="Clear selected CSV"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </span>
           </div>
           <button
             type="button"
@@ -1977,7 +2648,7 @@ export function SchoolOnboardingWizardPage() {
             onClick={() =>
               downloadTemplate(
                 'subjects-template.csv',
-                ['name,code', 'Mathematics,MTH', 'English,ENG'].join('\n') + '\n',
+                ['name,code,weeklyFrequency', 'Mathematics,MTH,4', 'English,ENG,5'].join('\n') + '\n',
               )
             }
           >
@@ -1988,8 +2659,8 @@ export function SchoolOnboardingWizardPage() {
           </span>
         </div>
 
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div className="stack" style={{ flex: '2 1 240px' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div className="sms-form-field" style={{ flex: '2 1 240px' }}>
             <label>Subject name</label>
             <input
               value={subjectName}
@@ -2001,23 +2672,34 @@ export function SchoolOnboardingWizardPage() {
               }}
               placeholder="Mathematics"
             />
+            <div className="sms-form-field__messages" aria-hidden="true" />
           </div>
-          <div className="stack" style={{ flex: '1 1 180px' }}>
+          <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
             <label>Code</label>
             <input
               value={subjectCode}
               onChange={(e) => setSubjectCode(normalizeSubjectCode(e.target.value))}
               placeholder="MTH"
             />
-            {!subjectCode.trim() ? (
-              <div className="muted" style={{ fontSize: 12 }}>
-                Tip: code auto-suggests from the name (edit anytime).
-              </div>
-            ) : !isValidSubjectCode(normalizeSubjectCode(subjectCode)) ? (
-              <div style={{ fontSize: 12, fontWeight: 800, color: '#b91c1c' }}>
-                Code must be 3–32 chars, uppercase A–Z/0–9 only.
-              </div>
-            ) : null}
+            <div className="sms-form-field__messages" aria-live="polite">
+              {!subjectCode.trim() ? (
+                'Tip: code auto-suggests from the name (edit anytime).'
+              ) : !isValidSubjectCode(normalizeSubjectCode(subjectCode)) ? (
+                <span style={{ color: '#b91c1c' }}>Code must be 3–32 chars, uppercase A–Z/0–9 only.</span>
+              ) : null}
+            </div>
+          </div>
+          <div className="sms-form-field" style={{ flex: '0 0 170px' }}>
+            <label>Frequency (per week)</label>
+            <input
+              type="number"
+              min={1}
+              max={40}
+              value={subjectWeeklyFrequency}
+              onChange={(e) => setSubjectWeeklyFrequency(e.target.value === '' ? '' : Math.trunc(Number(e.target.value)))}
+              placeholder="4"
+            />
+            <div className="sms-form-field__messages">Used as a default hint for timetable.</div>
           </div>
         </div>
 
@@ -2025,15 +2707,23 @@ export function SchoolOnboardingWizardPage() {
           <button
             type="button"
             className="btn secondary"
-            disabled={!subjectName.trim() || !normalizeSubjectCode(subjectCode) || !isValidSubjectCode(normalizeSubjectCode(subjectCode))}
+            disabled={
+              !subjectName.trim() ||
+              !normalizeSubjectCode(subjectCode) ||
+              !isValidSubjectCode(normalizeSubjectCode(subjectCode)) ||
+              !(Number.isFinite(Number(subjectWeeklyFrequency)) && Number(subjectWeeklyFrequency) > 0)
+            }
             onClick={() => {
+              const wf = Math.trunc(Number(subjectWeeklyFrequency));
               const draft: SubjectDraft = {
                 name: subjectName.trim(),
                 code: normalizeSubjectCode(subjectCode),
+                weeklyFrequency: Number.isFinite(wf) && wf > 0 ? wf : 4,
               };
               setSubjects((prev) => [...prev, draft]);
               setSubjectName('');
               setSubjectCode('');
+              setSubjectWeeklyFrequency(4);
               setSubjectsResult(null);
             }}
           >
@@ -2084,8 +2774,25 @@ export function SchoolOnboardingWizardPage() {
                         setSubjects((p) => p.map((x, i) => (i === idx ? { ...x, code: v } : x)));
                       }}
                     />
+                    <input
+                      type="number"
+                      min={1}
+                      max={40}
+                      style={{ width: 160 }}
+                      value={s.weeklyFrequency ?? 4}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        const v = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 4;
+                        setSubjects((p) => p.map((x, i) => (i === idx ? { ...x, weeklyFrequency: v } : x)));
+                      }}
+                      placeholder="freq/wk"
+                      title="Default frequency hint (periods per week)"
+                    />
                     {!isValidSubjectCode(s.code) ? (
                       <span style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c' }}>Invalid code</span>
+                    ) : null}
+                    {(!Number.isFinite(s.weeklyFrequency) || s.weeklyFrequency <= 0) ? (
+                      <span style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c' }}>Invalid frequency</span>
                     ) : null}
                   </div>
                 </div>
@@ -2099,17 +2806,22 @@ export function SchoolOnboardingWizardPage() {
           <div className="muted">Add at least one subject (manually or via CSV) to continue.</div>
         )}
 
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <button type="button" className="btn" disabled={saveSubjects.isPending || subjects.length === 0} onClick={() => saveSubjects.mutate()}>
             {saveSubjects.isPending ? 'Saving…' : 'Save subjects'}
           </button>
-          {subjectsResult ? (
-            <span className="muted" style={{ fontSize: 13 }}>
-              Created {subjectsResult.createdCount} · Skipped {subjectsResult.skippedExistingCount} existing
-            </span>
+          {subjectsResult && !saveSubjects.isError ? (
+            <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Subjects saved</div>
+                <div className="sms-alert__msg">
+                  Created {subjectsResult.createdCount} · Skipped {subjectsResult.skippedExistingCount} existing
+                </div>
+              </div>
+            </div>
           ) : null}
           {saveSubjects.isError ? (
-            <div className="sms-alert sms-alert--error">
+            <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
               <div>
                 <div className="sms-alert__title">Save failed</div>
                 <div className="sms-alert__msg">{formatApiError(saveSubjects.error)}</div>
@@ -2156,6 +2868,7 @@ export function SchoolOnboardingWizardPage() {
                   <tr>
                     <th style={{ textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>Subject</th>
                     <th style={{ textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>Code</th>
+                    <th style={{ textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>Freq/wk</th>
                     <th style={{ textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>Actions</th>
                   </tr>
                 </thead>
@@ -2179,6 +2892,9 @@ export function SchoolOnboardingWizardPage() {
                           <span className="muted" style={{ fontWeight: 900 }}>{s.code}</span>
                         </td>
                         <td style={{ padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.06)', textAlign: 'right' }}>
+                          <span style={{ fontWeight: 900 }}>{s.weeklyFrequency ?? '—'}</span>
+                        </td>
+                        <td style={{ padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.06)', textAlign: 'right' }}>
                           <RowActionsMenu
                             ariaLabel={`Actions for ${s.name}`}
                             actions={[
@@ -2191,6 +2907,7 @@ export function SchoolOnboardingWizardPage() {
                                     subjectId: s.id,
                                     name: s.name,
                                     code: s.code,
+                                    weeklyFrequency: s.weeklyFrequency ?? null,
                                     busy: false,
                                   });
                                 },
@@ -2277,9 +2994,10 @@ export function SchoolOnboardingWizardPage() {
           confirmDisabled={
             subjectEditModal.busy ||
             !subjectEditModal.name.trim() ||
-            !isValidSubjectCode(normalizeSubjectCode(subjectEditModal.code))
+            !isValidSubjectCode(normalizeSubjectCode(subjectEditModal.code)) ||
+            !(subjectEditModal.weeklyFrequency == null || (Number.isFinite(subjectEditModal.weeklyFrequency) && subjectEditModal.weeklyFrequency > 0))
           }
-          onClose={() => setSubjectEditModal({ open: false, subjectId: null, name: '', code: '', busy: false })}
+          onClose={() => setSubjectEditModal({ open: false, subjectId: null, name: '', code: '', weeklyFrequency: null, busy: false })}
           onConfirm={async () => {
             if (!subjectEditModal.subjectId) return;
             const name = subjectEditModal.name.trim();
@@ -2287,11 +3005,11 @@ export function SchoolOnboardingWizardPage() {
             if (!name || !isValidSubjectCode(code)) return;
             setSubjectEditModal((p) => ({ ...p, busy: true }));
             try {
-              await api.put(`/api/subjects/${subjectEditModal.subjectId}`, { name, code });
+              await api.put(`/api/subjects/${subjectEditModal.subjectId}`, { name, code, weeklyFrequency: subjectEditModal.weeklyFrequency });
               await qc.invalidateQueries({ queryKey: ['subjects-catalog'] });
               await qc.invalidateQueries({ queryKey: ['onboarding-academic-structure'] });
               toast.success('Saved', `${code} updated.`);
-              setSubjectEditModal({ open: false, subjectId: null, name: '', code: '', busy: false });
+              setSubjectEditModal({ open: false, subjectId: null, name: '', code: '', weeklyFrequency: null, busy: false });
             } catch (e) {
               toast.error('Update failed', formatApiError(e));
               setSubjectEditModal((p) => ({ ...p, busy: false }));
@@ -2317,6 +3035,26 @@ export function SchoolOnboardingWizardPage() {
               {!isValidSubjectCode(normalizeSubjectCode(subjectEditModal.code)) ? (
                 <div style={{ fontSize: 12, fontWeight: 800, color: '#b91c1c' }}>3–32 chars, uppercase A–Z and 0–9 only.</div>
               ) : null}
+            </div>
+            <div className="stack" style={{ gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 800 }}>Frequency (per week)</label>
+              <input
+                type="number"
+                min={1}
+                max={40}
+                value={subjectEditModal.weeklyFrequency ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const n = v === '' ? null : Math.trunc(Number(v));
+                  setSubjectEditModal((p) => ({ ...p, weeklyFrequency: Number.isFinite(n as number) ? (n as number) : null }));
+                }}
+                placeholder="4"
+              />
+              {subjectEditModal.weeklyFrequency != null && subjectEditModal.weeklyFrequency <= 0 ? (
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#b91c1c' }}>Must be positive.</div>
+              ) : (
+                <div className="muted" style={{ fontSize: 12 }}>Default hint used in timetable auto-fill.</div>
+              )}
             </div>
           </div>
         </ConfirmDialog>
@@ -2352,6 +3090,7 @@ export function SchoolOnboardingWizardPage() {
                 className="onboarding-file__input"
                 type="file"
                 accept=".csv,text/csv"
+                ref={roomsCsvInputRef}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
@@ -2366,7 +3105,26 @@ export function SchoolOnboardingWizardPage() {
                 }}
               />
             </label>
-            <span className="onboarding-file__name">{roomsCsvName ?? 'No file selected'}</span>
+            <span className="onboarding-file__name" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+              <span>{roomsCsvName ?? 'No file selected'}</span>
+              {roomsCsvName ? (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ padding: '4px 10px', fontSize: 12, lineHeight: 1 }}
+                  onClick={() => {
+                    setRoomsCsvName(null);
+                    if (roomsCsvInputRef.current) roomsCsvInputRef.current.value = '';
+                    setRooms([]);
+                    setRoomsResult(null);
+                  }}
+                  aria-label="Clear selected CSV"
+                  title="Clear selected CSV"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </span>
           </div>
           <button
             type="button"
@@ -2766,7 +3524,7 @@ export function SchoolOnboardingWizardPage() {
           );
         })()}
 
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <button
             type="button"
             className="btn"
@@ -2775,13 +3533,18 @@ export function SchoolOnboardingWizardPage() {
           >
             {saveRooms.isPending ? 'Saving…' : 'Save rooms'}
           </button>
-          {roomsResult ? (
-            <span className="muted" style={{ fontSize: 13 }}>
-              Created {roomsResult.createdCount} · Skipped {roomsResult.skippedExistingCount} existing
-            </span>
+          {roomsResult && !saveRooms.isError ? (
+            <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Rooms saved</div>
+                <div className="sms-alert__msg">
+                  Created {roomsResult.createdCount} · Skipped {roomsResult.skippedExistingCount} existing
+                </div>
+              </div>
+            </div>
           ) : null}
           {saveRooms.isError ? (
-            <div className="sms-alert sms-alert--error">
+            <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
               <div>
                 <div className="sms-alert__title">Save failed</div>
                 <div className="sms-alert__msg">{formatApiError(saveRooms.error)}</div>
@@ -3191,7 +3954,7 @@ export function SchoolOnboardingWizardPage() {
       </div>
       ) : null}
 
-      {activeStepIndex === 5 ? (
+      {activeStepIndex === idxOf.ACADEMIC_STRUCTURE ? (
         <AcademicStructureSetupStep
           classGroups={academicStructureQuery.data?.classGroups ?? []}
           subjects={academicStructureQuery.data?.subjects ?? []}
@@ -3221,11 +3984,12 @@ export function SchoolOnboardingWizardPage() {
           formatError={formatApiError}
           assignmentMeta={assignmentSlotMeta}
           setAssignmentMeta={setAssignmentSlotMeta}
+          saveSuccess={academicSaveSuccess}
         />
       ) : null}
 
 
-      {activeStepIndex === 4 ? (
+      {activeStepIndex === idxOf.STAFF ? (
       <div className="card stack" style={{ gap: 14 }}>
         <div className="workspace-panel__head">
           <h2 className="workspace-panel__title">Step 5 — Staff onboarding</h2>
@@ -3398,6 +4162,7 @@ export function SchoolOnboardingWizardPage() {
             disabled={!staffManual.ready}
             onClick={() => {
               const roles = staffRoles.map((r) => r.trim().toUpperCase()).filter(Boolean);
+              const isTeacher = roles.includes('TEACHER');
               const teachableSubjectIds = staffTeachablePicks.map((x) => Number(x)).filter((n) => Number.isFinite(n));
               const ml = staffMaxWeeklyLoad.trim();
               const maxWeeklyLectureLoad =
@@ -3412,10 +4177,10 @@ export function SchoolOnboardingWizardPage() {
                 employeeNo: staffEmployeeNo.trim() || null,
                 designation: staffDesignation.trim() || null,
                 roles: roles.length ? roles : ['TEACHER'],
-                teachableSubjectIds: teachableSubjectIds.length ? teachableSubjectIds : undefined,
+                teachableSubjectIds: isTeacher && teachableSubjectIds.length ? teachableSubjectIds : undefined,
                 createLoginAccount: staffCreateLogin,
-                maxWeeklyLectureLoad: staffRoles.includes('TEACHER') ? maxWeeklyLectureLoad : null,
-                preferredClassGroupIds: staffRoles.includes('TEACHER') && preferredClassGroupIds.length ? preferredClassGroupIds : undefined,
+                maxWeeklyLectureLoad: isTeacher ? maxWeeklyLectureLoad : null,
+                preferredClassGroupIds: isTeacher && preferredClassGroupIds.length ? preferredClassGroupIds : undefined,
               };
               setStaffRows((p) => [...p, row]);
               setStaffFullName('');
@@ -3452,6 +4217,7 @@ export function SchoolOnboardingWizardPage() {
                 className="onboarding-file__input"
                 type="file"
                 accept=".csv,text/csv"
+                ref={staffCsvInputRef}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
@@ -3504,7 +4270,7 @@ export function SchoolOnboardingWizardPage() {
                       employeeNo: employeeNo || null,
                       designation: designation || null,
                       roles: roles.length ? roles : ['TEACHER'],
-                      teachableSubjectIds: teachableSubjectIds.length ? teachableSubjectIds : undefined,
+                      teachableSubjectIds: roles.includes('TEACHER') && teachableSubjectIds.length ? teachableSubjectIds : undefined,
                       createLoginAccount,
                     });
                   }
@@ -3516,7 +4282,26 @@ export function SchoolOnboardingWizardPage() {
                 }}
               />
             </label>
-            <span className="onboarding-file__name">{staffCsvName ?? 'No file selected'}</span>
+            <span className="onboarding-file__name" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+              <span>{staffCsvName ?? 'No file selected'}</span>
+              {staffCsvName ? (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ padding: '4px 10px', fontSize: 12, lineHeight: 1 }}
+                  onClick={() => {
+                    setStaffCsvName(null);
+                    if (staffCsvInputRef.current) staffCsvInputRef.current.value = '';
+                    setStaffRows([]);
+                    setStaffResult(null);
+                  }}
+                  aria-label="Clear selected CSV"
+                  title="Clear selected CSV"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </span>
           </div>
           <button
             type="button"
@@ -3565,12 +4350,22 @@ export function SchoolOnboardingWizardPage() {
           <div className="muted">Add or upload at least one staff row to continue.</div>
         )}
 
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <button type="button" className="btn" disabled={saveStaff.isPending || staffRows.length === 0} onClick={() => saveStaff.mutate()}>
             {saveStaff.isPending ? 'Creating accounts…' : 'Create staff accounts'}
           </button>
+          {staffResult && !saveStaff.isError ? (
+            <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Staff saved</div>
+                <div className="sms-alert__msg">
+                  Created {staffResult.usersCreated} login(s) · Skipped {staffResult.skippedExistingCount} existing
+                </div>
+              </div>
+            </div>
+          ) : null}
           {saveStaff.isError ? (
-            <div className="sms-alert sms-alert--error">
+            <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
               <div>
                 <div className="sms-alert__title">Save failed</div>
                 <div className="sms-alert__msg">{formatApiError(saveStaff.error)}</div>
@@ -3679,128 +4474,292 @@ export function SchoolOnboardingWizardPage() {
                 >
                   Reset
                 </button>
+
+                <RowActionsMenu
+                  actions={[
+                    {
+                      id: 'staff-delete-all',
+                      label: 'Delete all staff',
+                      danger: true,
+                      onSelect: () => setStaffDeleteAllModal({ open: true, busy: false }),
+                    },
+                  ]}
+                />
               </div>
 
-              <div style={{ overflowX: 'auto' }}>
-                <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>Employee #</th>
-                    <th>Designation</th>
-                    <th>Roles</th>
-                    <th>Subjects</th>
-                    <th>Login</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {(staffCatalog.data ?? [])
-                    .filter((s) => {
-                      const q = staffTableSearch.trim().toLowerCase();
-                      if (q) {
-                        const subjectBits = (s.subjectCodes ?? []).map((code) => {
-                          const k = String(code).trim().toLowerCase();
-                          return subjectSearchStringsByCode.get(k) ?? k;
-                        });
-                        const hay = [
-                          s.fullName,
-                          s.email,
-                          s.phone ?? '',
-                          s.employeeNo ?? '',
-                          s.designation ?? '',
-                          ...(s.roles ?? []),
-                          ...(s.subjectCodes ?? []),
-                          ...subjectBits,
-                        ]
-                          .join(' ')
-                          .toLowerCase();
-                        if (!hay.includes(q)) return false;
-                      }
-                      if (staffTableRoles.length) {
-                        const rs = s.roles ?? [];
-                        if (!staffTableRoles.some((role) => rs.includes(role))) return false;
-                      }
-                      if (staffTableLogin === 'HAS' && !s.hasLoginAccount) return false;
-                      if (staffTableLogin === 'NONE' && s.hasLoginAccount) return false;
-                      return true;
-                    })
-                    .slice()
-                    .sort((a, b) => String(a.fullName ?? '').localeCompare(String(b.fullName ?? '')))
-                    .map((s) => (
-                      <tr key={s.staffId}>
-                        <td style={{ fontWeight: 900 }}>
-                          {s.fullName}
-                        </td>
-                        <td>{s.email ?? '—'}</td>
-                        <td>{s.phone ?? '—'}</td>
-                        <td>{s.employeeNo ?? '—'}</td>
-                        <td>{s.designation ?? '—'}</td>
-                        <td>
-                          <div className="row" style={{ gap: 8 }}>
-                            {(s.roles ?? []).length ? (
-                              (s.roles ?? []).map((r) => (
-                                <span key={r} className="sms-badge" style={{ padding: '4px 9px' }}>
-                                  {r}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="muted">—</span>
-                            )}
+              {(() => {
+                const filtered = (staffCatalog.data ?? [])
+                  .filter((s) => {
+                    const q = staffTableSearch.trim().toLowerCase();
+                    if (q) {
+                      const subjectBits = (s.subjectCodes ?? []).map((code) => {
+                        const k = String(code).trim().toLowerCase();
+                        return subjectSearchStringsByCode.get(k) ?? k;
+                      });
+                      const hay = [
+                        s.fullName,
+                        s.email,
+                        s.phone ?? '',
+                        s.employeeNo ?? '',
+                        s.designation ?? '',
+                        ...(s.roles ?? []),
+                        ...(s.subjectCodes ?? []),
+                        ...subjectBits,
+                      ]
+                        .join(' ')
+                        .toLowerCase();
+                      if (!hay.includes(q)) return false;
+                    }
+                    if (staffTableRoles.length) {
+                      const rs = s.roles ?? [];
+                      if (!staffTableRoles.some((role) => rs.includes(role))) return false;
+                    }
+                    if (staffTableLogin === 'HAS' && !s.hasLoginAccount) return false;
+                    if (staffTableLogin === 'NONE' && s.hasLoginAccount) return false;
+                    return true;
+                  })
+                  .slice()
+                  .sort((a, b) => String(a.fullName ?? '').localeCompare(String(b.fullName ?? '')));
+
+                const openEdit = (s: OnboardedStaffRow) => {
+                  const subjectCatalog = pageContent(subjectsCatalog.data);
+                  setStaffEdit({
+                    open: true,
+                    staffId: s.staffId,
+                    draft: {
+                      fullName: s.fullName ?? '',
+                      email: s.email ?? '',
+                      phone: s.phone ?? '',
+                      employeeNo: s.employeeNo ?? '',
+                      designation: s.designation ?? '',
+                      roles: s.roles ?? [],
+                      teachableSubjectIds:
+                        (s.subjectCodes ?? []).length
+                          ? subjectCatalog.filter((sub) => (s.subjectCodes ?? []).includes(sub.code)).map((sub) => sub.id)
+                          : [],
+                      createLoginAccount: true,
+                      maxWeeklyLectureLoad: s.maxWeeklyLectureLoad ?? null,
+                      preferredClassGroupIds: s.preferredClassGroupIds ?? [],
+                    },
+                  });
+                };
+
+                const actionMenu = (s: OnboardedStaffRow) => (
+                  // Constraint: only TEACHER role can be assigned teachable subjects.
+                  <RowActionsMenu
+                    actions={[
+                      { id: `staff-${s.staffId}-edit`, label: 'Edit', onSelect: () => openEdit(s) },
+                      { id: `staff-${s.staffId}-reset-login`, label: 'Reset login', onSelect: () => toast.info('Login', 'Reset login is not supported yet.') },
+                      {
+                        id: `staff-${s.staffId}-assign`,
+                        label: 'Assign subjects',
+                        disabled: !(s.roles ?? []).includes('TEACHER'),
+                        disabledReason: 'Only staff with TEACHER role can be assigned subjects.',
+                        onSelect: () => openEdit(s),
+                      },
+                      {
+                        id: `staff-${s.staffId}-delete`,
+                        label: 'Delete',
+                        danger: true,
+                        onSelect: async () => {
+                          await ensureStaffDeleteInfo(s.staffId);
+                          setStaffDeleteModal({ open: true, staffId: s.staffId, fullName: s.fullName, email: s.email });
+                        },
+                      },
+                    ]}
+                  />
+                );
+
+                const roleChip = (r: string) => (
+                  <span key={r} className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-extrabold text-slate-800">
+                    {r}
+                  </span>
+                );
+
+                const statusBadge = (has: boolean) =>
+                  has ? (
+                    <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-extrabold text-orange-700">
+                      Created
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-extrabold text-slate-700">
+                      No login
+                    </span>
+                  );
+
+                return (
+                  <div className="w-full">
+                    {/* Mobile: cards */}
+                    <div className="grid grid-cols-1 gap-3 md:hidden">
+                      {filtered.map((s) => (
+                        <div key={s.staffId} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-base font-black text-slate-900">{s.fullName}</div>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-600">
+                                <span className="font-extrabold text-slate-700">{s.designation ?? '—'}</span>
+                                <span className="text-slate-300">•</span>
+                                <span className="font-extrabold text-slate-700">{s.employeeNo ?? '—'}</span>
+                              </div>
+                            </div>
+                            {actionMenu(s)}
                           </div>
-                        </td>
-                        <td>{(s.subjectCodes ?? []).length ? (s.subjectCodes ?? []).join(', ') : <span className="muted">—</span>}</td>
-                        <td>{s.hasLoginAccount ? <span className="sms-badge sms-badge--created">Created</span> : <span className="muted">No login</span>}</td>
-                        <td style={{ width: 44 }}>
-                          <RowActionsMenu
-                            actions={[
-                              {
-                                id: `staff-${s.staffId}-edit`,
-                                label: 'Edit',
-                                onSelect: () => {
-                                  const subjectCatalog = pageContent(subjectsCatalog.data);
-                                  setStaffEdit({
-                                    open: true,
-                                    staffId: s.staffId,
-                                    draft: {
-                                      fullName: s.fullName ?? '',
-                                      email: s.email ?? '',
-                                      phone: s.phone ?? '',
-                                      employeeNo: s.employeeNo ?? '',
-                                      designation: s.designation ?? '',
-                                      roles: s.roles ?? [],
-                                      teachableSubjectIds:
-                                        (s.subjectCodes ?? []).length
-                                          ? subjectCatalog
-                                              .filter((sub) => (s.subjectCodes ?? []).includes(sub.code))
-                                              .map((sub) => sub.id)
-                                          : [],
-                                      createLoginAccount: true,
-                                      maxWeeklyLectureLoad: s.maxWeeklyLectureLoad ?? null,
-                                      preferredClassGroupIds: s.preferredClassGroupIds ?? [],
-                                    },
-                                  });
-                                },
-                              },
-                              {
-                                id: `staff-${s.staffId}-delete`,
-                                label: 'Delete',
-                                danger: true,
-                                onSelect: async () => {
-                                  await ensureStaffDeleteInfo(s.staffId);
-                                  setStaffDeleteModal({ open: true, staffId: s.staffId, fullName: s.fullName, email: s.email });
-                                },
-                              },
-                            ]}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
+
+                          <div className="mt-3 space-y-2 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="text-slate-500">Email</div>
+                              <div className="min-w-0 text-right font-semibold text-slate-800 break-words">{s.email ?? '—'}</div>
+                            </div>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="text-slate-500">Phone</div>
+                              <div className="text-right font-semibold text-slate-800">{s.phone ?? '—'}</div>
+                            </div>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="text-slate-500">Role</div>
+                              <div className="text-right">{(s.roles ?? []).length ? roleChip((s.roles ?? [])[0]!) : <span className="text-slate-500">—</span>}</div>
+                            </div>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="text-slate-500">Subjects</div>
+                              <div className="text-right font-semibold text-slate-800 break-words">
+                                {(s.subjectCodes ?? []).length ? (s.subjectCodes ?? []).join(', ') : <span className="text-slate-500">—</span>}
+                              </div>
+                            </div>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="text-slate-500">Login</div>
+                              <div className="text-right">{statusBadge(!!s.hasLoginAccount)}</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Tablet: compact table + details */}
+                    <div className="hidden md:block lg:hidden">
+                      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <div className="max-h-[70vh] overflow-auto">
+                          <table className="min-w-full text-sm">
+                            <thead className="sticky top-0 z-10 bg-white">
+                              <tr className="border-b border-slate-200">
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Name</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Role</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Phone</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Status</th>
+                                <th className="w-12 px-3 py-3" />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filtered.map((s, idx) => {
+                                const open = staffExpandedId === s.staffId;
+                                return (
+                                  <Fragment key={s.staffId}>
+                                    <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} border-b border-slate-100 hover:bg-orange-50/30`}>
+                                      <td className="px-4 py-3">
+                                        <button
+                                          type="button"
+                                          className="w-full text-left"
+                                          onClick={() => setStaffExpandedId((p) => (p === s.staffId ? null : s.staffId))}
+                                        >
+                                          <div className="font-extrabold text-slate-900">{s.fullName}</div>
+                                          <div className="mt-0.5 text-xs font-semibold text-slate-500">
+                                            {s.employeeNo ?? '—'} • {s.designation ?? '—'}
+                                          </div>
+                                        </button>
+                                      </td>
+                                      <td className="px-4 py-3">{(s.roles ?? []).length ? roleChip((s.roles ?? [])[0]!) : <span className="text-slate-500">—</span>}</td>
+                                      <td className="px-4 py-3 font-semibold text-slate-800">{s.phone ?? '—'}</td>
+                                      <td className="px-4 py-3">{statusBadge(!!s.hasLoginAccount)}</td>
+                                      <td className="px-3 py-3 text-right">{actionMenu(s)}</td>
+                                    </tr>
+                                    {open ? (
+                                      <tr className="bg-white">
+                                        <td colSpan={5} className="px-4 pb-4">
+                                          <div className="rounded-xl border border-slate-200 bg-white p-4">
+                                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                              <div>
+                                                <div className="text-xs font-black tracking-wide text-slate-500">Email</div>
+                                                <div className="mt-1 break-words text-sm font-semibold text-slate-900">{s.email ?? '—'}</div>
+                                              </div>
+                                              <div>
+                                                <div className="text-xs font-black tracking-wide text-slate-500">Employee #</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-900">{s.employeeNo ?? '—'}</div>
+                                              </div>
+                                              <div>
+                                                <div className="text-xs font-black tracking-wide text-slate-500">Designation</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-900">{s.designation ?? '—'}</div>
+                                              </div>
+                                              <div>
+                                                <div className="text-xs font-black tracking-wide text-slate-500">Subjects</div>
+                                                <div className="mt-1 break-words text-sm font-semibold text-slate-900">
+                                                  {(s.subjectCodes ?? []).length ? (s.subjectCodes ?? []).join(', ') : '—'}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    ) : null}
+                                  </Fragment>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Desktop: full table */}
+                    <div className="hidden lg:block">
+                      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <div className="max-h-[72vh] overflow-auto">
+                          <table className="min-w-full text-sm">
+                            <thead className="sticky top-0 z-10 bg-white">
+                              <tr className="border-b border-slate-200">
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Name</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Email</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Phone</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Employee #</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Designation</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Roles</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Subjects</th>
+                                <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Login</th>
+                                <th className="w-12 px-3 py-3" />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filtered.map((s, idx) => (
+                                <tr key={s.staffId} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} border-b border-slate-100 hover:bg-orange-50/30`}>
+                                  <td className="px-4 py-3 font-extrabold text-slate-900">{s.fullName}</td>
+                                  <td className="px-4 py-3">
+                                    <div className="max-w-[340px] break-words font-semibold text-slate-800">{s.email ?? '—'}</div>
+                                  </td>
+                                  <td className="px-4 py-3 font-semibold text-slate-800">{s.phone ?? '—'}</td>
+                                  <td className="px-4 py-3 font-semibold text-slate-800">{s.employeeNo ?? '—'}</td>
+                                  <td className="px-4 py-3 font-semibold text-slate-800">{s.designation ?? '—'}</td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex flex-wrap gap-2">
+                                      {(s.roles ?? []).length ? (s.roles ?? []).map((r) => roleChip(r)) : <span className="text-slate-500">—</span>}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="max-w-[360px] break-words font-semibold text-slate-800">
+                                      {(s.subjectCodes ?? []).length ? (s.subjectCodes ?? []).join(', ') : <span className="text-slate-500">—</span>}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">{statusBadge(!!s.hasLoginAccount)}</td>
+                                  <td className="px-3 py-3 text-right">{actionMenu(s)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {filtered.length === 0 ? (
+                            <div className="p-8 text-center text-sm font-semibold text-slate-600">No staff match your filters.</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -3851,6 +4810,48 @@ export function SchoolOnboardingWizardPage() {
             </div>
           );
         })()}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={staffDeleteAllModal.open}
+        title="Delete all staff?"
+        description="This will delete all onboarded staff that are safe to delete. Staff linked to timetable/allocations may be skipped."
+        confirmLabel={staffDeleteAllModal.busy ? 'Deleting…' : 'Delete all'}
+        danger
+        onConfirm={async () => {
+          const rows = pageContent(staffCatalog.data);
+          deleteAllStaff.mutate(rows);
+        }}
+        onClose={() => {
+          if (staffDeleteAllModal.busy) return;
+          setStaffDeleteAllModal({ open: false, busy: false });
+        }}
+        confirmDisabled={staffDeleteAllModal.busy || staffCatalog.isLoading || pageContent(staffCatalog.data).length === 0}
+      >
+        {(() => {
+          if (staffDeleteAllModal.busy) return <div className="muted">Deleting…</div>;
+          const n = pageContent(staffCatalog.data).length;
+          return <div className="muted">About to process {n} staff record(s).</div>;
+        })()}
+        {deleteAllStaff.isSuccess ? (
+          <div className="sms-alert sms-alert--success" style={{ marginTop: 10 }}>
+            <div>
+              <div className="sms-alert__title">Done</div>
+              <div className="sms-alert__msg">
+                Deleted {deleteAllStaff.data.deleted} · Skipped {deleteAllStaff.data.skipped}
+                {deleteAllStaff.data.skippedNames.length ? ` (e.g. ${deleteAllStaff.data.skippedNames.join(', ')})` : ''}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {deleteAllStaff.isError ? (
+          <div className="sms-alert sms-alert--error" style={{ marginTop: 10 }}>
+            <div>
+              <div className="sms-alert__title">Delete all failed</div>
+              <div className="sms-alert__msg">Please try again.</div>
+            </div>
+          </div>
+        ) : null}
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -4109,6 +5110,7 @@ export function SchoolOnboardingWizardPage() {
                   className="onboarding-file__input"
                   type="file"
                   accept=".csv,text/csv"
+                  ref={feesCsvInputRef}
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
@@ -4134,7 +5136,27 @@ export function SchoolOnboardingWizardPage() {
                   }}
                 />
               </label>
-              <span className="onboarding-file__name">{feesCsvName ?? 'No file selected'}</span>
+              <span className="onboarding-file__name" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                <span>{feesCsvName ?? 'No file selected'}</span>
+                {feesCsvName ? (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    style={{ padding: '4px 10px', fontSize: 12, lineHeight: 1 }}
+                    onClick={() => {
+                      setFeesCsvName(null);
+                      if (feesCsvInputRef.current) feesCsvInputRef.current.value = '';
+                      setFeesRows((prev) => prev.map((x) => ({ ...x, totalAmount: '' })));
+                      setFeesSaved(false);
+                      setFeePreviewGrade('');
+                    }}
+                    aria-label="Clear selected CSV"
+                    title="Clear selected CSV"
+                  >
+                    ✕
+                  </button>
+                ) : null}
+              </span>
             </div>
             <button
               type="button"
@@ -4384,13 +5406,20 @@ export function SchoolOnboardingWizardPage() {
           </div>
         </div>
 
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <button type="button" className="btn" disabled={saveFees.isPending || feesRows.length === 0} onClick={() => saveFees.mutate()}>
             {saveFees.isPending ? 'Saving…' : 'Save fees'}
           </button>
-          {feesSaved ? <span className="sms-badge sms-badge--success">Saved</span> : null}
+          {feesSaved && !saveFees.isError ? (
+            <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Fees saved</div>
+                <div className="sms-alert__msg">Fee structure is updated for your classes.</div>
+              </div>
+            </div>
+          ) : null}
           {saveFees.isError ? (
-            <div className="sms-alert sms-alert--error">
+            <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
               <div>
                 <div className="sms-alert__title">Save failed</div>
                 <div className="sms-alert__msg">{formatApiError(saveFees.error)}</div>
@@ -4544,6 +5573,7 @@ export function SchoolOnboardingWizardPage() {
                 className="onboarding-file__input"
                 type="file"
                 accept=".csv,text/csv"
+                ref={studentsCsvInputRef}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
@@ -4593,7 +5623,26 @@ export function SchoolOnboardingWizardPage() {
                 }}
               />
             </label>
-            <span className="onboarding-file__name">{studentsCsvName ?? 'No file selected'}</span>
+            <span className="onboarding-file__name" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+              <span>{studentsCsvName ?? 'No file selected'}</span>
+              {studentsCsvName ? (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ padding: '4px 10px', fontSize: 12, lineHeight: 1 }}
+                  onClick={() => {
+                    setStudentsCsvName(null);
+                    if (studentsCsvInputRef.current) studentsCsvInputRef.current.value = '';
+                    setStudentRows([]);
+                    setStudentsResult(null);
+                  }}
+                  aria-label="Clear selected CSV"
+                  title="Clear selected CSV"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </span>
           </div>
           <button
             type="button"
@@ -4638,17 +5687,23 @@ export function SchoolOnboardingWizardPage() {
           <div className="muted">Add or upload at least one student row (optional).</div>
         )}
 
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <button type="button" className="btn" disabled={saveStudents.isPending || studentRows.length === 0} onClick={() => saveStudents.mutate()}>
             {saveStudents.isPending ? 'Saving…' : 'Save students'}
           </button>
-          {studentsResult ? (
-            <span className="muted" style={{ fontSize: 13 }}>
-              Created {studentsResult.studentsCreated} · Guardians {studentsResult.guardiansCreated} · Skipped {studentsResult.skippedExistingCount}
-            </span>
+          {studentsResult && !saveStudents.isError ? (
+            <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Students saved</div>
+                <div className="sms-alert__msg">
+                  Created {studentsResult.studentsCreated} · Guardians {studentsResult.guardiansCreated} · Skipped{' '}
+                  {studentsResult.skippedExistingCount}
+                </div>
+              </div>
+            </div>
           ) : null}
           {saveStudents.isError ? (
-            <div className="sms-alert sms-alert--error">
+            <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
               <div>
                 <div className="sms-alert__title">Save failed</div>
                 <div className="sms-alert__msg">{formatApiError(saveStudents.error)}</div>
@@ -4660,7 +5715,7 @@ export function SchoolOnboardingWizardPage() {
       </div>
       ) : null}
 
-      {activeStepIndex === 6 ? (
+      {activeStepIndex === idxOf.TIMETABLE ? (
       <div className="card stack" style={{ gap: 14 }}>
         <div className="workspace-panel__head">
           <h2 className="workspace-panel__title">Step 7 — Timetable</h2>
@@ -4670,7 +5725,7 @@ export function SchoolOnboardingWizardPage() {
           Auto-generate a first draft from your academic structure, then refine in the grid. Time slots should exist from
           basic setup; add more in the editor if needed.
         </p>
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <button
             type="button"
             className="btn"
@@ -4691,6 +5746,16 @@ export function SchoolOnboardingWizardPage() {
             {completeTimetableStep.isPending ? 'Saving…' : 'Mark timetable done & continue'}
           </button>
         </div>
+        {timetableAutoGenInfo && !autoGenTimetable.isError ? (
+          <div className="sms-alert sms-alert--success">
+            <div>
+              <div className="sms-alert__title">Timetable draft ready</div>
+              <div className="sms-alert__msg">
+                Auto-filled {timetableAutoGenInfo.n} class{timetableAutoGenInfo.n === 1 ? '' : 'es'}. Open the grid to review.
+              </div>
+            </div>
+          </div>
+        ) : null}
         {autoGenTimetable.isError ? (
           <div className="sms-alert sms-alert--error">
             <div>

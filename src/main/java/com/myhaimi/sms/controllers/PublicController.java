@@ -12,13 +12,14 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.authentication.DisabledException;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+import com.myhaimi.sms.entity.User;
+import com.myhaimi.sms.repository.UserRepo;
+import com.myhaimi.sms.security.RoleNames;
 
 @RestController
 @RequestMapping("/public")
@@ -26,10 +27,13 @@ import java.util.Map;
 public class PublicController {
 
     @Autowired
-    private AuthenticationManager authenticationManager;
+    private IUserService userService;
 
     @Autowired
-    private IUserService userService;
+    private UserRepo userRepo;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @Value("${spring.security.oauth2.client.registration.google.client-id:}")
     private String googleClientId;
@@ -69,17 +73,26 @@ public class PublicController {
         if (res.getStatusCode().is4xxClientError()) return res;
         String principal = user.getUsername() == null ? "" : user.getUsername().trim();
         try {
-            authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(principal, user.getPassword()));
+            User u = userRepo
+                    .findFirstWithSchoolByUsernameOrEmail(principal)
+                    .orElse(null);
+            boolean pwOk = u != null && u.getPassword() != null && passwordEncoder.matches(user.getPassword(), u.getPassword());
+            log.info("Public login attempt principal={}, userFound={}, pwOk={}", principal, u != null, pwOk);
+            if (!pwOk) {
+                return new ResponseEntity<>("Incorrect username or password", HttpStatus.BAD_REQUEST);
+            }
+
+            boolean isSuperAdmin = u.getRoles() != null && u.getRoles().stream().anyMatch(r -> RoleNames.SUPER_ADMIN.equals(r.getName()));
+            boolean tenantArchived = !isSuperAdmin && u.getSchool() != null && u.getSchool().isArchived();
+            if (tenantArchived) {
+                log.warn("Login disabled for principal={}", principal);
+                return new ResponseEntity<>("This account is disabled (e.g. archived school tenant).", HttpStatus.FORBIDDEN);
+            }
+
             LoginDTO forJwt = new LoginDTO();
             forJwt.setUsername(principal);
             forJwt.setPassword(user.getPassword());
             return userService.Login(forJwt);
-        } catch (DisabledException e) {
-            log.warn("Login disabled for principal={}", principal);
-            return new ResponseEntity<>("This account is disabled (e.g. archived school tenant).", HttpStatus.FORBIDDEN);
-        } catch (BadCredentialsException e) {
-            return new ResponseEntity<>("Incorrect username or password", HttpStatus.BAD_REQUEST);
         } catch (Exception e) {
             log.error("Exception occurred while createAuthenticationToken", e);
             return new ResponseEntity<>("Incorrect username or password", HttpStatus.BAD_REQUEST);

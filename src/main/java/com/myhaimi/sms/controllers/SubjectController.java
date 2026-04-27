@@ -51,6 +51,13 @@ public class SubjectController {
         return ResponseEntity.noContent().build();
     }
 
+    @DeleteMapping("/delete-all")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<?> deleteAll() {
+        subjectService.deleteAllForSchool();
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/{id}/delete-info")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public SubjectDeleteInfoDTO deleteInfo(@PathVariable Integer id) {

@@ -4,6 +4,8 @@ import com.myhaimi.sms.DTO.ClassGroupDTO;
 import com.myhaimi.sms.DTO.ClassGroupSectionSummaryDTO;
 import com.myhaimi.sms.DTO.ClassTeacherBatchAssignDTO;
 import com.myhaimi.sms.DTO.ClassTeacherAssignDTO;
+import com.myhaimi.sms.DTO.ClassGroupUpdateDTO;
+import com.myhaimi.sms.DTO.ClassGroupDeleteSummaryDTO;
 import com.myhaimi.sms.entity.ClassGroup;
 import com.myhaimi.sms.service.impl.ClassGroupService;
 import com.myhaimi.sms.utils.CommonUtil;
@@ -40,6 +42,28 @@ public class ClassGroupController {
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<?> update(
+            @PathVariable int id,
+            @Valid @RequestBody ClassGroupUpdateDTO body,
+            BindingResult result,
+            Authentication authentication) {
+        ResponseEntity<?> res = CommonUtil.dtoBindingResults(result);
+        if (res.getStatusCode().is4xxClientError()) return res;
+        String email = authentication != null ? authentication.getName() : "";
+        ClassGroup updated = classGroupService.update(id, body, email);
+        return ResponseEntity.ok(updated);
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<?> deleteOne(@PathVariable int id, Authentication authentication) {
+        String email = authentication != null ? authentication.getName() : "";
+        ClassGroupDeleteSummaryDTO summary = classGroupService.deleteOne(id, email);
+        return ResponseEntity.ok(summary);
+    }
+
     @PutMapping("/{id}/class-teacher")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public ResponseEntity<?> assignClassTeacher(
@@ -72,6 +96,14 @@ public class ClassGroupController {
         if (res.getStatusCode().is4xxClientError()) return res;
         String email = authentication != null ? authentication.getName() : "";
         classGroupService.assignClassTeachersBatch(body, email);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/delete-all")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<?> deleteAll(Authentication authentication) {
+        String email = authentication != null ? authentication.getName() : "";
+        classGroupService.deleteAllForSchool(email);
         return ResponseEntity.noContent().build();
     }
 }

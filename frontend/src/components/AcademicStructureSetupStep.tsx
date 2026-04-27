@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ClassGroupSearchCombobox } from './ClassGroupSearchCombobox';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { SelectKeeper } from './SelectKeeper';
-import { MultiSelectKeeper } from './MultiSelectKeeper';
 import { toast } from '../lib/toast';
 import {
   buildEffectiveAllocRows,
@@ -57,12 +55,6 @@ type BasicInfo = {
 
 const TEACHER = 'TEACHER';
 
-type BulkAction =
-  | ''
-  | 'apply_teacher_grade'
-  | 'apply_room_grade'
-  | 'copy_periods_grade';
-
 function staffCanTeachSubject(s: StaffRow, subjectId: number): boolean {
   const t = s.teachableSubjectIds ?? [];
   if (t.length === 0) return true;
@@ -93,6 +85,8 @@ function pageContent<T>(data: { content?: T[] } | T[] | null | undefined): T[] {
 
 type Props = {
   stepTitle?: string;
+  initialTab?: 'sections' | 'smart' | 'load' | 'overview';
+  allowedTabs?: Array<'sections' | 'smart' | 'load' | 'overview'>;
   classGroups: ClassGroupRow[];
   subjects: SubjectRow[];
   staff: StaffRow[];
@@ -118,6 +112,8 @@ type Props = {
   onSave: () => void;
   savePending: boolean;
   saveError: unknown;
+  /** Cleared on each save; after success parent sets true. */
+  saveSuccess?: boolean;
   formatError: (e: unknown) => string;
   assignmentMeta: Record<string, AssignmentSlotMeta>;
   setAssignmentMeta: React.Dispatch<React.SetStateAction<Record<string, AssignmentSlotMeta>>>;
@@ -140,7 +136,6 @@ export function AcademicStructureSetupStep({
   classDefaultRoomUsage,
   classDefaultRoomHasConflicts,
   autoAssignDefaultRooms,
-  defaultRoomsLoading,
   basicInfo,
   isLoading,
   isError,
@@ -149,30 +144,27 @@ export function AcademicStructureSetupStep({
   onSave,
   savePending,
   saveError,
+  saveSuccess = false,
   formatError,
   assignmentMeta,
   setAssignmentMeta,
-  stepTitle = 'Step 6 — Academic structure',
+  stepTitle: _stepTitle = 'Step 6 — Academic structure',
+  initialTab,
+  allowedTabs,
 }: Props) {
   const [view, setView] = useState<'overview' | 'edit' | 'template'>('overview');
-  const [tab, setTab] = useState<'sections' | 'smart' | 'load' | 'bulk'>('sections');
+  const [tab, setTab] = useState<'sections' | 'smart' | 'load' | 'overview'>(initialTab ?? 'sections');
   const [editingClassId, setEditingClassId] = useState<number | null>(null);
   const [editingGrade, setEditingGrade] = useState<number | null>(null);
   const [subjectFilter, setSubjectFilter] = useState('');
-  const [expandedGrades, setExpandedGrades] = useState<Record<string, boolean>>({});
 
-  const [bulkContextSectionId, setBulkContextSectionId] = useState<string>('');
-  const [bulkAction, setBulkAction] = useState<BulkAction>('');
-  const [bulkTeacherId, setBulkTeacherId] = useState('');
-  const [bulkRoomId, setBulkRoomId] = useState('');
   const [smartGradeFilter, setSmartGradeFilter] = useState<string>('');
   const [smartSubjectFilter, setSmartSubjectFilter] = useState<string>('');
   const [smartTeacherFilter, setSmartTeacherFilter] = useState<string>('');
   const [initialGradePick, setInitialGradePick] = useState<string>('');
-  const [initialSectionPicks, setInitialSectionPicks] = useState<string[]>([]);
-  const [mappingTouched, setMappingTouched] = useState<Record<string, boolean>>({});
   const [mappingSearch, setMappingSearch] = useState('');
   const [overrideDrawer, setOverrideDrawer] = useState<{ open: boolean; classGroupId: number | null }>({ open: false, classGroupId: null });
+  const [overrideSearch, setOverrideSearch] = useState<string>('');
 
   const slotsPerWeek = useMemo(() => estimateSlotsPerWeek(basicInfo), [basicInfo]);
 
@@ -205,16 +197,8 @@ export function AcademicStructureSetupStep({
       });
   }, [classGroups]);
 
-  const byGrade = useMemo(() => {
-    const m = new Map<string, ClassGroupRow[]>();
-    for (const r of sortedClassGroups) {
-      const k = r.gradeLevel != null ? `Class ${r.gradeLevel}` : 'Other';
-      m.set(k, [...(m.get(k) ?? []), r]);
-    }
-    return m;
-  }, [sortedClassGroups]);
-
   const catalogCount = subjects.length;
+  const validSubjectIdSet = useMemo(() => new Set<number>(subjects.map((s) => Number(s.id))), [subjects]);
 
   const loadByStaff = useMemo(() => {
     const m = new Map<number, number>();
@@ -233,12 +217,29 @@ export function AcademicStructureSetupStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classGroups, classSubjectConfigs, sectionSubjectOverrides]);
 
+  // If a subject is deleted from the catalog, it must not remain mapped anywhere.
+  // Purge stale template rows, overrides, and meta for missing subjectIds.
   useEffect(() => {
-    if (!classGroups.length) return;
-    if (bulkContextSectionId === '' && sortedClassGroups[0]) {
-      setBulkContextSectionId(String(sortedClassGroups[0].classGroupId));
-    }
-  }, [classGroups.length, sortedClassGroups, bulkContextSectionId]);
+    if (!subjects.length) return;
+    setClassSubjectConfigs((prev) => prev.filter((c) => validSubjectIdSet.has(Number(c.subjectId))));
+    setSectionSubjectOverrides((prev) => prev.filter((o) => validSubjectIdSet.has(Number(o.subjectId))));
+    setAssignmentMeta((prev) => {
+      const next: Record<string, AssignmentSlotMeta> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const parts = k.split(':');
+        const sid = Number(parts[1]);
+        if (!Number.isFinite(sid) || !validSubjectIdSet.has(sid)) continue;
+        next[k] = v;
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validSubjectIdSet]);
+
+  // Reset override search whenever drawer target changes.
+  useEffect(() => {
+    setOverrideSearch('');
+  }, [overrideDrawer.open, overrideDrawer.classGroupId]);
 
   useEffect(() => {
     if (view === 'edit' && editingClassId != null && !classGroups.some((c) => c.classGroupId === editingClassId)) {
@@ -287,57 +288,6 @@ export function AcademicStructureSetupStep({
     if (gradesInSchool.length === 0) return;
     setInitialGradePick(String(gradesInSchool[0]!));
   }, [initialGradePick, gradesInSchool]);
-
-  const gradeHasAnyEnabledSubject = useMemo(() => {
-    const m = new Map<number, boolean>();
-    for (const g of gradesInSchool) m.set(g, false);
-    for (const a of allocRows) {
-      const cg = classGroups.find((c) => c.classGroupId === a.classGroupId);
-      const g = cg?.gradeLevel;
-      if (g == null) continue;
-      m.set(Number(g), true);
-    }
-    return m;
-  }, [gradesInSchool, allocRows, classGroups]);
-
-  const sectionHasAnyEnabledSubject = useMemo(() => {
-    const m = new Map<number, boolean>();
-    for (const cg of classGroups) m.set(cg.classGroupId, false);
-    for (const a of allocRows) {
-      m.set(a.classGroupId, true);
-    }
-    return m;
-  }, [classGroups, allocRows]);
-
-  const mappingComplete = useMemo(() => {
-    if (classGroups.length === 0) return false;
-    for (const cg of classGroups) {
-      if (!sectionHasAnyEnabledSubject.get(cg.classGroupId)) return false;
-    }
-    return true;
-  }, [classGroups, sectionHasAnyEnabledSubject]);
-
-  // (gradeSelectOptions removed — class mapping uses the left list now)
-
-  const sectionsForInitialGrade = useMemo(() => {
-    const g = Number(initialGradePick);
-    if (!Number.isFinite(g)) return [];
-    return classGroups
-      .filter((c) => Number(c.gradeLevel) === g)
-      .slice()
-      .sort((a, b) => String(a.section ?? '').localeCompare(String(b.section ?? '')))
-      .map((c) => ({ value: String(c.classGroupId), label: `${c.displayName || c.code}${c.section ? ` · ${c.section}` : ''}` }));
-  }, [classGroups, initialGradePick]);
-
-  // When class changes, default to all sections selected.
-  useEffect(() => {
-    if (!initialGradePick) {
-      setInitialSectionPicks([]);
-      return;
-    }
-    const all = sectionsForInitialGrade.map((s) => s.value);
-    setInitialSectionPicks(all);
-  }, [initialGradePick, sectionsForInitialGrade]);
 
   const quickWin = useMemo(() => {
     const grades = new Map<number, { notStarted: number; needsHelp: number; total: number }>();
@@ -396,85 +346,6 @@ export function AcademicStructureSetupStep({
     });
   };
 
-  const applySubjectsToSelectedSections = (grade: number, sectionIds: number[], subjectIds: number[]) => {
-    setMappingTouched((p) => ({ ...p, [String(grade)]: true }));
-    const selected = new Set(sectionIds);
-    if (selected.size === 0) return;
-
-    const desired = new Set(subjectIds.map((x) => Number(x)).filter((n) => Number.isFinite(n)));
-
-    // Current subjects for selected sections (effective)
-    const currentBySection = new Map<number, Set<number>>();
-    for (const sid of selected) currentBySection.set(sid, new Set());
-    for (const a of allocRows) {
-      if (!selected.has(a.classGroupId)) continue;
-      currentBySection.get(a.classGroupId)!.add(a.subjectId);
-    }
-
-    // Ensure template rows exist for subjects that will be enabled in any selected section.
-    const tplSet = new Set(
-      classSubjectConfigs.filter((c) => Number(c.gradeLevel) === Number(grade)).map((c) => Number(c.subjectId)),
-    );
-    const needTpl = new Set<number>();
-    for (const s of desired) needTpl.add(s);
-    // also keep template for subjects already used by other sections in this grade (avoid accidental removal)
-    for (const a of allocRows) {
-      const cg = classGroups.find((c) => c.classGroupId === a.classGroupId);
-      if (cg?.gradeLevel == null) continue;
-      if (Number(cg.gradeLevel) !== Number(grade)) continue;
-      needTpl.add(a.subjectId);
-    }
-    const toAddTpl = [...needTpl].filter((sid) => !tplSet.has(sid));
-    if (toAddTpl.length) {
-      setClassSubjectConfigs((p) => {
-        const out = [...p];
-        for (const sid of toAddTpl) {
-          const sub = subjects.find((s) => Number(s.id) === Number(sid));
-          if (!sub) continue;
-          const freq = sub.weeklyFrequency && sub.weeklyFrequency > 0 ? sub.weeklyFrequency : 4;
-          const tch = teacherOptionsForSubject(staff, sub.id)[0] ?? staff.find((s) => isStaffTeacher(s));
-          out.push({
-            gradeLevel: grade,
-            subjectId: sub.id,
-            defaultPeriodsPerWeek: freq,
-            defaultTeacherId: tch ? tch.id : null,
-            defaultRoomId: null,
-          });
-        }
-        return out;
-      });
-    }
-
-    // Apply enable/disable only for selected sections (others unchanged).
-    for (const sid of selected) {
-      const cur = currentBySection.get(sid) ?? new Set<number>();
-      // disable subjects removed from desired (for this section)
-      for (const subj of cur) {
-        if (!desired.has(subj)) {
-          upsertOverride(sid, subj, { periodsPerWeek: 0 });
-        }
-      }
-      // enable subjects added in desired (for this section)
-      for (const subj of desired) {
-        if (cur.has(subj)) continue;
-        // remove pure-disable override so it inherits template again
-        removeOverrideIfOnlyDisable(sid, subj);
-        // if there is an override row disabling via periodsPerWeek=0 with teacher/room fields, clear periods so it inherits template
-        upsertOverride(sid, subj, { periodsPerWeek: null });
-      }
-    }
-
-    // Cleanup: if a subject is not used by any section in grade after changes, remove the template row.
-    // We recompute usage from allocRows after state settles; keep it simple (no hard delete here).
-  };
-
-  const effectiveForGrade = useMemo(() => {
-    const g = Number(initialGradePick);
-    if (!Number.isFinite(g)) return [];
-    const inGrade = new Set(classGroups.filter((c) => Number(c.gradeLevel) === g).map((c) => c.classGroupId));
-    return allocRows.filter((a) => inGrade.has(a.classGroupId) && a.weeklyFrequency > 0);
-  }, [allocRows, classGroups, initialGradePick]);
-
   const templateSubjectIdsForGrade = useMemo(() => {
     const g = Number(initialGradePick);
     if (!Number.isFinite(g)) return [];
@@ -487,12 +358,109 @@ export function AcademicStructureSetupStep({
     return set;
   }, [templateSubjectIdsForGrade]);
 
+  const [draftClassDefaults, setDraftClassDefaults] = useState<Set<number>>(new Set());
+  const [copyFromGradePick, setCopyFromGradePick] = useState<string>('');
+
+  const templateSubjectIdSetForGrade = useMemo(() => {
+    const m = new Map<number, Set<number>>();
+    for (const row of classSubjectConfigs) {
+      const g = Number(row.gradeLevel);
+      const sid = Number(row.subjectId);
+      if (!Number.isFinite(g) || !Number.isFinite(sid)) continue;
+      // If a subject was deleted from the catalog, ignore stale template rows.
+      if (!validSubjectIdSet.has(sid)) continue;
+      const set = m.get(g) ?? new Set<number>();
+      set.add(sid);
+      m.set(g, set);
+    }
+    return m;
+  }, [classSubjectConfigs, validSubjectIdSet]);
+
+  /**
+   * Mapping step should be driven by mapping state (template + overrides),
+   * not by allocation rows (which are configured later and may be empty).
+   */
+  const mappingEnabledSet = useCallback((classGroupId: number, gradeLevel: number | null | undefined) => {
+    const g = gradeLevel == null ? NaN : Number(gradeLevel);
+    const base = Number.isFinite(g) ? templateSubjectIdSetForGrade.get(g) : null;
+    const set = new Set<number>(base ? [...base] : []);
+    if (!set.size) return set;
+    for (const o of sectionSubjectOverrides) {
+      if (Number(o.classGroupId) !== Number(classGroupId)) continue;
+      const sid = Number(o.subjectId);
+      if (!Number.isFinite(sid)) continue;
+      // periodsPerWeek===0 is the "disabled" flag in mapping step.
+      if (o.periodsPerWeek === 0) set.delete(sid);
+    }
+    return set;
+  }, [templateSubjectIdSetForGrade, sectionSubjectOverrides]);
+
+  const sectionHasAnyEnabledSubject = useMemo(() => {
+    const m = new Map<number, boolean>();
+    for (const cg of classGroups) {
+      const enabled = mappingEnabledSet(cg.classGroupId, cg.gradeLevel);
+      m.set(cg.classGroupId, enabled.size > 0);
+    }
+    return m;
+  }, [classGroups, mappingEnabledSet]);
+
+  const mappingComplete = useMemo(() => {
+    if (classGroups.length === 0) return false;
+    for (const cg of classGroups) {
+      if (!sectionHasAnyEnabledSubject.get(cg.classGroupId)) return false;
+    }
+    return true;
+  }, [classGroups, sectionHasAnyEnabledSubject]);
+
+  const copyFromOptions = useMemo(() => {
+    const current = Number(initialGradePick);
+    return gradesInSchool
+      .slice()
+      .sort((a, b) => Number(a) - Number(b))
+      .filter((g) => !Number.isFinite(current) || Number(g) !== current)
+      .map((g) => ({ value: String(g), label: `Class ${g}` }));
+  }, [gradesInSchool, initialGradePick]);
+
+  const nextPendingGrade = useMemo(() => {
+    const current = Number(initialGradePick);
+    const ordered = gradesInSchool.slice().sort((a, b) => Number(a) - Number(b));
+    const missingInGrade = (g: number) => {
+      const secs = classGroups.filter((c) => Number(c.gradeLevel) === Number(g));
+      if (!secs.length) return false;
+      return secs.some((cg) => !sectionHasAnyEnabledSubject.get(cg.classGroupId));
+    };
+    // Prefer next grades after current; then wrap to beginning.
+    const startIdx = Number.isFinite(current) ? Math.max(0, ordered.indexOf(current) + 1) : 0;
+    for (let i = startIdx; i < ordered.length; i++) if (missingInGrade(Number(ordered[i]))) return Number(ordered[i]);
+    for (let i = 0; i < startIdx; i++) if (missingInGrade(Number(ordered[i]))) return Number(ordered[i]);
+    return null;
+  }, [gradesInSchool, classGroups, sectionHasAnyEnabledSubject, initialGradePick]);
+
+  // Keep a local draft for "Save & apply" flow.
+  useEffect(() => {
+    if (!initialGradePick) {
+      setDraftClassDefaults(new Set());
+      setCopyFromGradePick('');
+      return;
+    }
+    setDraftClassDefaults(new Set(classDefaultsSelected));
+    setCopyFromGradePick('');
+  }, [initialGradePick, classDefaultsSelected]);
+
   const filteredSubjectsForMapping = useMemo(() => {
     const q = mappingSearch.trim().toLowerCase();
     const list = subjects.slice().sort((a, b) => a.name.localeCompare(b.name));
     if (!q) return list;
     return list.filter((s) => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q));
   }, [subjects, mappingSearch]);
+
+  const selectedSubjectsForDraft = useMemo(() => {
+    const byId = new Map<number, SubjectRow>(subjects.map((s) => [Number(s.id), s]));
+    return [...draftClassDefaults]
+      .map((id) => byId.get(Number(id)))
+      .filter(Boolean)
+      .sort((a, b) => (a as SubjectRow).name.localeCompare((b as SubjectRow).name)) as SubjectRow[];
+  }, [subjects, draftClassDefaults]);
 
   const sectionEnabledSet = (classGroupId: number) => {
     const set = new Set<number>();
@@ -502,24 +470,6 @@ export function AcademicStructureSetupStep({
       set.add(a.subjectId);
     }
     return set;
-  };
-
-  const ensureTemplateHas = (grade: number, subjectId: number) => {
-    if (classSubjectConfigs.some((c) => Number(c.gradeLevel) === Number(grade) && Number(c.subjectId) === Number(subjectId))) return;
-    const sub = subjects.find((s) => Number(s.id) === Number(subjectId));
-    if (!sub) return;
-    const freq = sub.weeklyFrequency && sub.weeklyFrequency > 0 ? sub.weeklyFrequency : 4;
-    const tch = teacherOptionsForSubject(staff, sub.id)[0] ?? staff.find((s) => isStaffTeacher(s));
-    setClassSubjectConfigs((p) => [
-      ...p,
-      {
-        gradeLevel: grade,
-        subjectId: sub.id,
-        defaultPeriodsPerWeek: freq,
-        defaultTeacherId: tch ? tch.id : null,
-        defaultRoomId: null,
-      },
-    ]);
   };
 
   const setSectionSubjectEnabled = (classGroupId: number, subjectId: number, enabled: boolean) => {
@@ -532,18 +482,25 @@ export function AcademicStructureSetupStep({
     }
   };
 
-  const saveClassDefaults = (grade: number, selected: Set<number>) => {
-    // Preserve any subject that is enabled in any section of this grade (so section-only adds don't disappear).
-    const keep = new Set<number>(selected);
-    for (const a of effectiveForGrade) keep.add(a.subjectId);
+  const setSectionSubjectAdditionEnabled = (classGroupId: number, subjectId: number, enabled: boolean) => {
+    const sub = subjects.find((s) => Number(s.id) === Number(subjectId));
+    const freq = sub?.weeklyFrequency && sub.weeklyFrequency > 0 ? sub.weeklyFrequency : 4;
+    if (enabled) {
+      // For section-only additions, we must materialize frequency in the override row (no template to inherit from).
+      upsertOverride(classGroupId, subjectId, { periodsPerWeek: freq });
+    } else {
+      upsertOverride(classGroupId, subjectId, { periodsPerWeek: 0 });
+    }
+  };
 
+  const saveClassDefaults = (grade: number, selected: Set<number>) => {
     setClassSubjectConfigs((p) => {
       const rest = p.filter((c) => Number(c.gradeLevel) !== Number(grade));
       const prev = p.filter((c) => Number(c.gradeLevel) === Number(grade));
       const byId = new Map<number, ClassSubjectConfigRow>();
       for (const c of prev) byId.set(Number(c.subjectId), c);
       const out: ClassSubjectConfigRow[] = [...rest];
-      for (const sid of [...keep].sort((a, b) => a - b)) {
+      for (const sid of [...selected].sort((a, b) => a - b)) {
         const existing = byId.get(sid);
         if (existing) {
           out.push(existing);
@@ -563,68 +520,6 @@ export function AcademicStructureSetupStep({
       }
       return out;
     });
-    toast.success('Saved', `Class ${grade} subject defaults updated.`);
-  };
-
-  const runBulk = () => {
-    const sid = Number(bulkContextSectionId);
-    if (!Number.isFinite(sid) || !bulkAction) {
-      toast.error('Bulk action', 'Choose a target section and an action.');
-      return;
-    }
-    if (bulkAction === 'apply_teacher_grade') {
-      const tid = Number(bulkTeacherId);
-      if (!Number.isFinite(tid)) {
-        toast.error('Teacher', 'Pick a teacher.');
-        return;
-      }
-      const g = classGroups.find((c) => c.classGroupId === sid)?.gradeLevel;
-      if (g == null) return;
-      const same = new Set(classGroups.filter((c) => c.gradeLevel === g).map((c) => c.classGroupId));
-      setAllocRows((prev) => prev.map((r) => (same.has(r.classGroupId) ? { ...r, staffId: tid } : r)));
-      toast.success('Updated', 'Teacher set for all rows in this grade.');
-      return;
-    }
-    if (bulkAction === 'apply_room_grade') {
-      const g = classGroups.find((c) => c.classGroupId === sid)?.gradeLevel;
-      if (g == null) return;
-      const same = new Set(classGroups.filter((c) => c.gradeLevel === g).map((c) => c.classGroupId));
-      const roomId = bulkRoomId === '' ? null : Number(bulkRoomId);
-      if (bulkRoomId !== '' && !Number.isFinite(roomId)) return;
-      setAllocRows((prev) => prev.map((r) => (same.has(r.classGroupId) ? { ...r, roomId: roomId as number | null } : r)));
-      toast.success('Updated', 'Room set for all rows in this grade.');
-      return;
-    }
-    if (bulkAction === 'copy_periods_grade') {
-      const g = classGroups.find((c) => c.classGroupId === sid)?.gradeLevel;
-      if (g == null) {
-        toast.error('Grade', 'Target section has no grade.');
-        return;
-      }
-      const inGrade = new Set(classGroups.filter((c) => c.gradeLevel === g).map((c) => c.classGroupId));
-      setAllocRows((prev) => {
-        const bySubject = new Map<number, number>();
-        for (const r of prev) {
-          if (r.classGroupId === sid) bySubject.set(r.subjectId, r.weeklyFrequency);
-        }
-        if (bySubject.size === 0) {
-          toast.info('Nothing to copy', 'Enable subjects on the target section first.');
-          return prev;
-        }
-        let changed = 0;
-        const next = prev.map((r) => {
-          if (!inGrade.has(r.classGroupId) || r.classGroupId === sid) return r;
-          const w = bySubject.get(r.subjectId);
-          if (w == null || w < 1) return r;
-          if (r.weeklyFrequency === w) return r;
-          changed += 1;
-          return { ...r, weeklyFrequency: w };
-        });
-        if (changed > 0) toast.success('Periods copied', `${changed} row(s) updated.`);
-        else toast.info('No change', 'Other sections need matching subjects or already match.');
-        return next;
-      });
-    }
   };
 
   const filterNorm = subjectFilter.trim().toLowerCase();
@@ -676,44 +571,65 @@ export function AcademicStructureSetupStep({
     );
   }
 
+  const tabsAllowed =
+    allowedTabs && allowedTabs.length
+      ? allowedTabs
+      : (['sections', 'smart', 'load', 'overview'] as Array<'sections' | 'smart' | 'load' | 'overview'>);
+
+  useEffect(() => {
+    if (!tabsAllowed.includes(tab)) setTab(tabsAllowed[0] ?? 'sections');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowedTabs?.join(','), tab]);
+
   return (
     <div className="card stack" style={{ gap: 16 }}>
       {/* Header/description intentionally omitted here; wizard already provides it. */}
 
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" className={tab === 'sections' ? 'btn' : 'btn secondary'} onClick={() => setTab('sections')}>
-          Subject → section mapping
-        </button>
-        <button
-          type="button"
-          className={tab === 'smart' ? 'btn' : 'btn secondary'}
-          onClick={() => setTab('smart')}
-          disabled={!mappingComplete}
-          title={!mappingComplete ? 'Complete subject mapping first to unlock smart assignment.' : undefined}
-        >
-          Smart assignment
-        </button>
-        <button
-          type="button"
-          className={tab === 'load' ? 'btn' : 'btn secondary'}
-          onClick={() => setTab('load')}
-          disabled={!mappingComplete}
-          title={!mappingComplete ? 'Complete subject mapping first to unlock teacher load.' : undefined}
-        >
-          Teacher load
-        </button>
-        <button
-          type="button"
-          className={tab === 'bulk' ? 'btn' : 'btn secondary'}
-          onClick={() => setTab('bulk')}
-          disabled={!mappingComplete}
-          title={!mappingComplete ? 'Complete subject mapping first to unlock bulk tools.' : undefined}
-        >
-          Bulk tools
-        </button>
-      </div>
+      {tabsAllowed.length > 1 ? (
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {tabsAllowed.includes('sections') ? (
+            <button type="button" className={tab === 'sections' ? 'btn' : 'btn secondary'} onClick={() => setTab('sections')}>
+              Subject → section mapping
+            </button>
+          ) : null}
+          {tabsAllowed.includes('smart') ? (
+            <button
+              type="button"
+              className={tab === 'smart' ? 'btn' : 'btn secondary'}
+              onClick={() => setTab('smart')}
+              disabled={!mappingComplete}
+              title={!mappingComplete ? 'Complete subject mapping first to unlock smart assignment.' : undefined}
+            >
+              Smart assignment
+            </button>
+          ) : null}
+          {tabsAllowed.includes('load') ? (
+            <button
+              type="button"
+              className={tab === 'load' ? 'btn' : 'btn secondary'}
+              onClick={() => setTab('load')}
+              disabled={!mappingComplete}
+              title={!mappingComplete ? 'Complete subject mapping first to unlock teacher load.' : undefined}
+            >
+              Teacher load
+            </button>
+          ) : null}
+          {/* Bulk tools removed */}
+          {tabsAllowed.includes('overview') ? (
+            <button
+              type="button"
+              className={tab === 'overview' ? 'btn' : 'btn secondary'}
+              onClick={() => setTab('overview')}
+              disabled={!mappingComplete}
+              title={!mappingComplete ? 'Complete subject mapping first to unlock overview.' : undefined}
+            >
+              Overall overview
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
-      {tab === 'smart' || tab === 'load' ? (
+      {tab === 'smart' || tab === 'load' || tab === 'overview' ? (
         <div
           className="row"
           style={{
@@ -733,32 +649,40 @@ export function AcademicStructureSetupStep({
           <span className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
             Filters
           </span>
-          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            <SelectKeeper
-              value={smartSubjectFilter}
-              onChange={setSmartSubjectFilter}
-              options={[{ value: '', label: 'All subjects' }, ...subjects.map((s) => ({ value: String(s.id), label: s.name }))]}
-            />
-            <SelectKeeper
-              value={smartGradeFilter}
-              onChange={setSmartGradeFilter}
-              options={[
-                { value: '', label: 'All grades' },
-                ...Array.from(new Set(classGroups.map((c) => c.gradeLevel).filter((g): g is number => g != null)))
-                  .sort((a, b) => a - b)
-                  .map((g) => ({ value: String(g), label: `Class ${g}` })),
-              ]}
-            />
-            <SelectKeeper
-              value={smartTeacherFilter}
-              onChange={setSmartTeacherFilter}
-              options={[
-                { value: '', label: 'All teachers' },
-                ...staff
-                  .filter((s) => (s.roleNames ?? []).includes('TEACHER'))
-                  .map((s) => ({ value: String(s.id), label: s.fullName || s.email })),
-              ]}
-            />
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ minWidth: 220 }}>
+              <SelectKeeper
+                value={smartSubjectFilter}
+                onChange={setSmartSubjectFilter}
+                options={[{ value: '', label: 'All subjects' }, ...subjects.map((s) => ({ value: String(s.id), label: s.name }))]}
+              />
+            </div>
+            <div style={{ minWidth: 220 }}>
+              <SelectKeeper
+                value={smartGradeFilter}
+                onChange={setSmartGradeFilter}
+                options={[
+                  { value: '', label: 'All grades' },
+                  ...Array.from(new Set(classGroups.map((c) => c.gradeLevel).filter((g): g is number => g != null)))
+                    .sort((a, b) => a - b)
+                    .map((g) => ({ value: String(g), label: `Class ${g}` })),
+                ]}
+              />
+            </div>
+            {tab === 'smart' || tab === 'load' ? (
+              <div style={{ minWidth: 220 }}>
+                <SelectKeeper
+                  value={smartTeacherFilter}
+                  onChange={setSmartTeacherFilter}
+                  options={[
+                    { value: '', label: 'All teachers' },
+                    ...staff
+                      .filter((s) => (s.roleNames ?? []).includes('TEACHER'))
+                      .map((s) => ({ value: String(s.id), label: s.fullName || s.email })),
+                  ]}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -836,7 +760,7 @@ export function AcademicStructureSetupStep({
               <div>
                 <div className="sms-alert__title">Required</div>
                 <div className="sms-alert__msg">
-                  Map at least one subject for <strong>every section</strong> to unlock Smart assignment, Teacher load, and Bulk tools.
+                  Map at least one subject for <strong>every section</strong> to unlock Smart assignment and Teacher load.
                 </div>
               </div>
             </div>
@@ -847,17 +771,22 @@ export function AcademicStructureSetupStep({
             style={{
               gap: 12,
               alignItems: 'stretch',
+              // Responsive: stack columns on small widths, 2-col on desktop.
               flexWrap: 'wrap',
             }}
           >
             <div
-              className="stack"
+              className=""
               style={{
-                flex: '0 0 340px',
-                minWidth: 280,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                flex: '1 1 340px',
+                minWidth: 300,
                 border: '1px solid rgba(15,23,42,0.08)',
                 borderRadius: 12,
-                padding: 10,
+                // Extra padding so focus rings / 2px selected borders don't get clipped by the scroll container.
+                padding: 12,
                 background: 'rgba(255,255,255,0.65)',
                 maxHeight: 520,
                 overflow: 'auto',
@@ -870,30 +799,31 @@ export function AcademicStructureSetupStep({
                   .sort((a, b) => String(a.section ?? '').localeCompare(String(b.section ?? '')));
 
                 const isSelected = Number(initialGradePick) === Number(g);
-                const sectionStatuses = secRows.map((s) => {
-                  const enabled = sectionEnabledSet(s.classGroupId);
-                  const inherited = new Set<number>(
-                    classSubjectConfigs
-                      .filter((c) => Number(c.gradeLevel) === Number(g))
-                      .map((c) => Number(c.subjectId)),
-                  );
-                  const added = [...enabled].filter((x) => !inherited.has(x));
-                  const removed = [...inherited].filter((x) => !enabled.has(x));
-                  const hasOverride = added.length > 0 || removed.length > 0;
-                  const started = enabled.size > 0;
-                  const status: 'inherited' | 'override' | 'missing' | 'not_started' =
-                    !started ? 'missing' : hasOverride ? 'override' : 'inherited';
-                  return { classGroupId: s.classGroupId, label: s.section ?? s.code, status };
-                });
+                const sectionStatuses =
+                  catalogCount === 0
+                    ? secRows.map((s) => ({ classGroupId: s.classGroupId, label: s.section ?? s.code, status: 'missing' as const }))
+                    : secRows.map((s) => {
+                        const enabled = mappingEnabledSet(s.classGroupId, g);
+                        const inherited = new Set<number>(
+                          classSubjectConfigs
+                            .filter((c) => Number(c.gradeLevel) === Number(g))
+                            .map((c) => Number(c.subjectId)),
+                        );
+                        const added = [...enabled].filter((x) => !inherited.has(x));
+                        const removed = [...inherited].filter((x) => !enabled.has(x));
+                        const hasOverride = added.length > 0 || removed.length > 0;
+                        const started = enabled.size > 0;
+                        const status: 'inherited' | 'override' | 'missing' =
+                          !started ? 'missing' : hasOverride ? 'override' : 'inherited';
+                        return { classGroupId: s.classGroupId, label: s.section ?? s.code, status };
+                      });
 
                 let classStatus: 'fully' | 'partial' | 'not_started' = 'not_started';
-                const anyStarted = sectionStatuses.some((x) => x.status !== 'missing' && x.status !== 'not_started');
-                const allInherited = sectionStatuses.every((x) => x.status === 'inherited');
-                const anyOverride = sectionStatuses.some((x) => x.status === 'override');
-                const anyMissing = sectionStatuses.some((x) => x.status === 'missing' || x.status === 'not_started');
-                if (allInherited && anyStarted) classStatus = 'fully';
-                else if (anyStarted || anyOverride) classStatus = 'partial';
-                else classStatus = 'not_started';
+                const anyStarted = sectionStatuses.some((x) => x.status !== 'missing');
+                const missingCount = sectionStatuses.filter((x) => x.status === 'missing').length;
+                if (!anyStarted) classStatus = 'not_started';
+                else if (missingCount === 0) classStatus = 'fully';
+                else classStatus = 'partial';
 
                 const badge =
                   classStatus === 'fully'
@@ -902,16 +832,28 @@ export function AcademicStructureSetupStep({
                       ? { text: '⚠ Partial', bg: 'rgba(234,179,8,0.15)', color: '#a16207' }
                       : { text: '⏳ Not started', bg: 'rgba(100,116,139,0.12)', color: '#64748b' };
 
+                const counts = {
+                  inherited: sectionStatuses.filter((s) => s.status === 'inherited').length,
+                  override: sectionStatuses.filter((s) => s.status === 'override').length,
+                  missing: sectionStatuses.filter((s) => s.status === 'missing').length,
+                };
+
+                const selectedSubjectCount =
+                  catalogCount === 0
+                    ? 0
+                    : classSubjectConfigs.filter((c) => Number(c.gradeLevel) === Number(g) && validSubjectIdSet.has(Number(c.subjectId))).length;
+                const pendingSections = counts.missing;
+
                 return (
                   <div
                     key={g}
-                    className="stack"
                     style={{
                       borderRadius: 12,
                       border: isSelected ? '2px solid var(--color-primary)' : '1px solid rgba(15,23,42,0.08)',
                       background: isSelected ? 'rgba(255,247,237,0.65)' : 'rgba(255,255,255,0.75)',
-                      overflow: 'hidden',
-                      marginBottom: 10,
+                      // Avoid clipping on dense lists.
+                      overflow: 'visible',
+                      paddingBottom: 10,
                     }}
                   >
                     <button
@@ -925,8 +867,16 @@ export function AcademicStructureSetupStep({
                         gap: 10,
                         padding: '10px 12px',
                         border: 'none',
-                        borderRadius: 0,
+                        borderRadius: 12,
                         background: 'transparent',
+                        // Default focus ring gets clipped inside scroll containers; use an inset focus shadow instead.
+                        outline: 'none',
+                      }}
+                      onFocus={(e) => {
+                        (e.currentTarget.style as any).boxShadow = 'inset 0 0 0 2px rgba(249,115,22,0.9)';
+                      }}
+                      onBlur={(e) => {
+                        (e.currentTarget.style as any).boxShadow = '';
                       }}
                       title="Select class"
                     >
@@ -937,40 +887,14 @@ export function AcademicStructureSetupStep({
                         {badge.text}
                       </span>
                     </button>
-                    <div className="stack" style={{ gap: 6, padding: '0 12px 10px' }}>
-                      {sectionStatuses.map((s) => {
-                        const txt =
-                          s.status === 'inherited'
-                            ? '✔ Inherited'
-                            : s.status === 'override'
-                              ? '⚠ Override'
-                              : 'Missing';
-                        const color =
-                          s.status === 'inherited' ? '#166534' : s.status === 'override' ? '#a16207' : '#b91c1c';
-                        return (
-                          <button
-                            key={s.classGroupId}
-                            type="button"
-                            className="btn secondary"
-                            style={{
-                              padding: '6px 10px',
-                              fontSize: 12,
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              border: '1px solid rgba(15,23,42,0.08)',
-                              borderRadius: 10,
-                            }}
-                            onClick={() => {
-                              setInitialGradePick(String(g));
-                              setOverrideDrawer({ open: true, classGroupId: s.classGroupId });
-                            }}
-                            title="Configure section override"
-                          >
-                            <span style={{ fontWeight: 900 }}>{s.label}</span>
-                            <span style={{ fontWeight: 900, color }}>{txt}</span>
-                          </button>
-                        );
-                      })}
+                    <div className="stack" style={{ gap: 2, padding: '0 12px', marginTop: 2 }}>
+                      <div style={{ fontSize: 12, fontWeight: 900, color: badge.color }}>{badge.text}</div>
+                      <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+                        {selectedSubjectCount} subject{selectedSubjectCount === 1 ? '' : 's'} selected
+                      </div>
+                      <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+                        {pendingSections} section{pendingSections === 1 ? '' : 's'} pending
+                      </div>
                     </div>
                   </div>
                 );
@@ -989,15 +913,38 @@ export function AcademicStructureSetupStep({
                     </div>
                   </div>
                   <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+                        Copy from class
+                      </span>
+                      <div style={{ minWidth: 170 }}>
+                        <SelectKeeper
+                          value={copyFromGradePick}
+                          onChange={(v) => setCopyFromGradePick(v)}
+                          options={[{ value: '', label: 'Select…' }, ...copyFromOptions]}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        disabled={!initialGradePick || !copyFromGradePick}
+                        onClick={() => {
+                          const src = Number(copyFromGradePick);
+                          if (!Number.isFinite(src)) return;
+                          const set = templateSubjectIdSetForGrade.get(src) ?? new Set<number>();
+                          setDraftClassDefaults(new Set(set));
+                          toast.success('Copied', `Loaded Class ${src} defaults into draft.`);
+                        }}
+                      >
+                        Copy
+                      </button>
+                    </div>
                     <button
                       type="button"
                       className="btn secondary"
                       onClick={() => {
                         if (!initialGradePick) return;
-                        const g = Number(initialGradePick);
-                        if (!Number.isFinite(g)) return;
-                        const all = new Set(subjects.map((s) => s.id));
-                        saveClassDefaults(g, all);
+                        setDraftClassDefaults(new Set(subjects.map((s) => s.id)));
                       }}
                       disabled={!initialGradePick}
                     >
@@ -1008,9 +955,7 @@ export function AcademicStructureSetupStep({
                       className="btn secondary"
                       onClick={() => {
                         if (!initialGradePick) return;
-                        const g = Number(initialGradePick);
-                        if (!Number.isFinite(g)) return;
-                        saveClassDefaults(g, new Set());
+                        setDraftClassDefaults(new Set());
                       }}
                       disabled={!initialGradePick}
                     >
@@ -1022,14 +967,84 @@ export function AcademicStructureSetupStep({
                       onClick={() => {
                         const g = Number(initialGradePick);
                         if (!Number.isFinite(g)) return;
-                        saveClassDefaults(g, classDefaultsSelected);
+                        saveClassDefaults(g, draftClassDefaults);
+                        const secs = classGroups.filter((c) => Number(c.gradeLevel) === Number(g)).length;
+                        toast.success('Saved', `Applied to ${secs} section${secs === 1 ? '' : 's'}.`);
+                        if (nextPendingGrade != null) setInitialGradePick(String(nextPendingGrade));
                       }}
                       disabled={!initialGradePick}
                     >
-                      Save class defaults
+                      {(() => {
+                        const g = Number(initialGradePick);
+                        const secs = Number.isFinite(g) ? classGroups.filter((c) => Number(c.gradeLevel) === Number(g)).length : 0;
+                        return `Save & apply to ${secs || '—'} section${secs === 1 ? '' : 's'}`;
+                      })()}
                     </button>
                   </div>
                 </div>
+
+                {initialGradePick ? (
+                  <div
+                    style={{
+                      border: '1px solid rgba(15,23,42,0.08)',
+                      borderRadius: 12,
+                      background: 'rgba(255,255,255,0.75)',
+                      padding: 10,
+                    }}
+                  >
+                    <div className="row" style={{ justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ fontWeight: 900, fontSize: 13 }}>Selected subjects</div>
+                      <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+                        {selectedSubjectsForDraft.length} selected
+                      </div>
+                    </div>
+                    {selectedSubjectsForDraft.length === 0 ? (
+                      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                        None selected yet.
+                      </div>
+                    ) : (
+                      <div
+                        className="row"
+                        style={{
+                          gap: 8,
+                          flexWrap: 'wrap',
+                          marginTop: 8,
+                          maxHeight: 92,
+                          overflow: 'auto',
+                          paddingRight: 4,
+                        }}
+                      >
+                        {selectedSubjectsForDraft.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="sms-badge"
+                            style={{
+                              borderRadius: 999,
+                              padding: '6px 10px',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 8,
+                            }}
+                            title="Remove from selection"
+                            onClick={() => {
+                              const next = new Set(draftClassDefaults);
+                              next.delete(s.id);
+                              setDraftClassDefaults(next);
+                            }}
+                          >
+                            <span style={{ fontWeight: 900 }}>{s.name}</span>
+                            <span className="muted" style={{ fontSize: 11, fontWeight: 900 }}>
+                              {s.code}
+                            </span>
+                            <span style={{ fontWeight: 950, marginLeft: 2, color: '#b91c1c' }}>×</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
 
                 <input
                   style={{ maxWidth: 420 }}
@@ -1038,44 +1053,62 @@ export function AcademicStructureSetupStep({
                   placeholder="Search subject by name/code…"
                 />
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8 }}>
-                  {filteredSubjectsForMapping.map((sub) => {
-                    const on = classDefaultsSelected.has(sub.id);
-                    return (
-                      <button
-                        key={sub.id}
-                        type="button"
-                        className="btn secondary"
-                        onClick={() => {
-                          const g = Number(initialGradePick);
-                          if (!Number.isFinite(g)) return;
-                          const next = new Set(classDefaultsSelected);
-                          if (next.has(sub.id)) next.delete(sub.id);
-                          else next.add(sub.id);
-                          saveClassDefaults(g, next);
-                        }}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          gap: 10,
-                          padding: '10px 12px',
-                          borderRadius: 12,
-                          border: on ? '2px solid var(--color-primary)' : '1px solid rgba(15,23,42,0.08)',
-                          background: on ? 'rgba(255,247,237,0.7)' : 'rgba(255,255,255,0.8)',
-                          textAlign: 'left',
-                        }}
-                        title={on ? 'Enabled in class defaults' : 'Disabled'}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 900 }}>{sub.name}</div>
-                          <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>{sub.code}</div>
-                        </div>
-                        <div style={{ fontWeight: 950, fontSize: 16, color: on ? '#16a34a' : '#94a3b8' }}>
-                          {on ? '☑' : '☐'}
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div
+                  style={{
+                    maxHeight: 420,
+                    overflow: 'auto',
+                    paddingRight: 4,
+                  }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8 }}>
+                    {filteredSubjectsForMapping.map((sub) => {
+                      const on = draftClassDefaults.has(sub.id);
+                      return (
+                        <button
+                          key={sub.id}
+                          type="button"
+                          className="btn secondary"
+                          onClick={() => {
+                            const next = new Set(draftClassDefaults);
+                            if (next.has(sub.id)) next.delete(sub.id);
+                            else next.add(sub.id);
+                            setDraftClassDefaults(next);
+                          }}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            gap: 10,
+                            padding: '10px 12px',
+                            borderRadius: 12,
+                            border: on ? '2px solid var(--color-primary)' : '1px solid rgba(15,23,42,0.08)',
+                            background: on ? 'rgba(255,247,237,0.7)' : 'rgba(255,255,255,0.8)',
+                            textAlign: 'left',
+                          }}
+                          title={on ? 'Will be enabled when you save' : 'Will remain disabled until saved'}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 900 }}>{sub.name}</div>
+                            <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>{sub.code}</div>
+                          </div>
+                          <div style={{ fontWeight: 950, fontSize: 16, color: on ? '#16a34a' : '#94a3b8' }}>
+                            {on ? '☑' : '☐'}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  {nextPendingGrade != null ? (
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      Next pending: <strong>{`Class ${nextPendingGrade}`}</strong>
+                    </span>
+                  ) : (
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      Next pending: <strong>—</strong>
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1105,11 +1138,25 @@ export function AcademicStructureSetupStep({
                           const removed = [...inherited].filter((x) => !enabled.has(x));
                           const hasOverride = added.length > 0 || removed.length > 0;
                           const status = enabled.size === 0 ? 'Missing' : hasOverride ? 'Override' : 'Inherited';
+                          const toLabel = (sid: number) => {
+                            const s = subjects.find((x) => Number(x.id) === Number(sid));
+                            if (!s) return `#${sid}`;
+                            return `${s.name}${s.code ? ` (${s.code})` : ''}`;
+                          };
                           const sum =
                             enabled.size === 0
                               ? 'No subjects enabled'
                               : hasOverride
-                                ? `${added.length ? `+${added.length}` : ''}${added.length && removed.length ? ' ' : ''}${removed.length ? `-${removed.length}` : ''}`.trim()
+                                ? [
+                                    ...added
+                                      .map((sid) => ({ sid, text: `+ ${toLabel(sid)}` }))
+                                      .sort((a, b) => a.text.localeCompare(b.text)),
+                                    ...removed
+                                      .map((sid) => ({ sid, text: `- ${toLabel(sid)}` }))
+                                      .sort((a, b) => a.text.localeCompare(b.text)),
+                                  ]
+                                    .map((x) => x.text)
+                                    .join(', ')
                                 : 'Uses class defaults';
                           const statusColor = enabled.size === 0 ? '#b91c1c' : hasOverride ? '#a16207' : '#166534';
                           return (
@@ -1119,7 +1166,11 @@ export function AcademicStructureSetupStep({
                                 <div className="muted" style={{ fontSize: 12 }}>{cg.section ?? ''}</div>
                               </td>
                               <td style={{ fontWeight: 900, color: statusColor }}>{status}</td>
-                              <td>{sum}</td>
+                              <td style={{ maxWidth: 520 }}>
+                                <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={sum}>
+                                  {sum}
+                                </div>
+                              </td>
                               <td style={{ textAlign: 'right' }}>
                                 <button type="button" className="btn secondary" onClick={() => setOverrideDrawer({ open: true, classGroupId: cg.classGroupId })}>
                                   Configure
@@ -1144,18 +1195,17 @@ export function AcademicStructureSetupStep({
               classSubjectConfigs.filter((c) => Number(c.gradeLevel) === Number(grade)).map((c) => Number(c.subjectId)),
             );
             const enabled = sectionEnabledSet(cg.classGroupId);
-            const desired = new Set(enabled);
+            const addedOverrideSubjects = [...enabled].filter((sid) => !inherited.has(sid));
+            const removedOverrideSubjects = [...inherited].filter((sid) => !enabled.has(sid));
             const all = new Set<number>([...inherited, ...enabled]);
             for (const s of subjects) all.add(s.id);
             const list = [...all].map((id) => subjects.find((s) => s.id === id)).filter(Boolean) as SubjectRow[];
             list.sort((a, b) => a.name.localeCompare(b.name));
-
-            const toggle = (sid: number) => {
-              if (desired.has(sid)) desired.delete(sid);
-              else desired.add(sid);
-              // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-              0;
-            };
+            const overrideFiltered = (() => {
+              const q = overrideSearch.trim().toLowerCase();
+              if (!q) return list;
+              return list.filter((s) => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q));
+            })();
 
             return (
               <div
@@ -1200,8 +1250,39 @@ export function AcademicStructureSetupStep({
 
                   <div style={{ marginTop: 14 }}>
                     <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 6 }}>Overrides</div>
+                    {(addedOverrideSubjects.length > 0 || removedOverrideSubjects.length > 0) ? (
+                      <div style={{ marginBottom: 10 }}>
+                        <div className="muted" style={{ fontSize: 12, fontWeight: 800, marginBottom: 6 }}>Overridden subjects</div>
+                        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                          {addedOverrideSubjects.map((sid) => {
+                            const s = subjects.find((x) => x.id === sid);
+                            if (!s) return null;
+                            return (
+                              <span key={`add-${sid}`} className="sms-badge" style={{ padding: '4px 8px', border: '1px solid rgba(22,163,74,0.35)', background: 'rgba(22,163,74,0.10)', color: '#166534' }}>
+                                {`+ ${s.name}`}
+                              </span>
+                            );
+                          })}
+                          {removedOverrideSubjects.map((sid) => {
+                            const s = subjects.find((x) => x.id === sid);
+                            if (!s) return null;
+                            return (
+                              <span key={`rem-${sid}`} className="sms-badge" style={{ padding: '4px 8px', border: '1px solid rgba(185,28,28,0.35)', background: 'rgba(185,28,28,0.08)', color: '#b91c1c' }}>
+                                {`- ${s.name}`}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                    <input
+                      value={overrideSearch}
+                      onChange={(e) => setOverrideSearch(e.target.value)}
+                      placeholder="Search subject by name/code…"
+                      style={{ width: '100%', marginBottom: 10 }}
+                    />
                     <div className="stack" style={{ gap: 8 }}>
-                      {list.map((s) => {
+                      {overrideFiltered.map((s) => {
                         const on = enabled.has(s.id);
                         return (
                           <label key={s.id} className="row" style={{ gap: 10, alignItems: 'center' }}>
@@ -1214,18 +1295,12 @@ export function AcademicStructureSetupStep({
                                 if (!Number.isFinite(Number(grade))) return;
                                 if (on) {
                                   // disable
-                                  setSectionSubjectEnabled(cg.classGroupId, s.id, false);
+                                  if (inherited.has(s.id)) setSectionSubjectEnabled(cg.classGroupId, s.id, false);
+                                  else setSectionSubjectAdditionEnabled(cg.classGroupId, s.id, false);
                                 } else {
-                                  // enable (ensure template exists; disable others to make it an addition if needed)
-                                  ensureTemplateHas(grade, s.id);
-                                  setSectionSubjectEnabled(cg.classGroupId, s.id, true);
-                                  for (const other of classGroups.filter((x) => Number(x.gradeLevel) === Number(grade))) {
-                                    if (other.classGroupId === cg.classGroupId) continue;
-                                    const otherEnabled = sectionEnabledSet(other.classGroupId);
-                                    if (!otherEnabled.has(s.id) && !inherited.has(s.id)) {
-                                      upsertOverride(other.classGroupId, s.id, { periodsPerWeek: 0 });
-                                    }
-                                  }
+                                  // enable
+                                  if (inherited.has(s.id)) setSectionSubjectEnabled(cg.classGroupId, s.id, true);
+                                  else setSectionSubjectAdditionEnabled(cg.classGroupId, s.id, true);
                                 }
                               }}
                             />
@@ -1270,6 +1345,47 @@ export function AcademicStructureSetupStep({
       ) : null}
 
       {tab === 'smart' ? (
+        <div className="stack" style={{ gap: 12 }}>
+          <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Smart teacher assignment</div>
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              Auto-assign teachers by subject skill and balanced workload. Same teacher is preferred across all sections in a class.
+              Lock keeps a row out of rebalance.
+            </p>
+            {!mappingComplete ? (
+              <div className="sms-alert sms-alert--warning">
+                <div>
+                  <div className="sms-alert__title">Locked</div>
+                  <div className="sms-alert__msg">Complete subject mapping for all classes first (Subject → section mapping tab).</div>
+                </div>
+              </div>
+            ) : null}
+            {classDefaultRoomHasConflicts ? (
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c' }}>Homeroom conflict: two classes share a room</span>
+              </div>
+            ) : null}
+            <SmartTeacherAssignmentBlock
+              classGroups={classGroups}
+              subjects={subjects}
+              staff={staff}
+              roomOptions={roomOpts}
+              classSubjectConfigs={classSubjectConfigs}
+              setClassSubjectConfigs={setClassSubjectConfigs}
+              sectionSubjectOverrides={sectionSubjectOverrides}
+              setSectionSubjectOverrides={setSectionSubjectOverrides}
+              assignmentMeta={assignmentMeta}
+              setAssignmentMeta={setAssignmentMeta}
+              subjectsCatalogForLabels={subjects}
+              filters={{ grade: smartGradeFilter, subject: smartSubjectFilter, teacher: smartTeacherFilter }}
+              showBulkActions
+              autoAssignHomerooms={autoAssignDefaultRooms}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {tab === 'overview' ? (
         <div className="stack" style={{ gap: 12 }}>
           <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
             <div style={{ fontWeight: 900, fontSize: 15 }}>Sections overview</div>
@@ -1402,49 +1518,6 @@ export function AcademicStructureSetupStep({
               </table>
             </div>
           </div>
-          <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Smart teacher assignment</div>
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Auto-assign teachers by subject skill and balanced workload. Same teacher is preferred across all sections in a class.
-              Lock keeps a row out of rebalance.
-            </p>
-            {!mappingComplete ? (
-              <div className="sms-alert sms-alert--warning">
-                <div>
-                  <div className="sms-alert__title">Locked</div>
-                  <div className="sms-alert__msg">Complete subject mapping for all classes first (Subject → section mapping tab).</div>
-                </div>
-              </div>
-            ) : null}
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <button
-                type="button"
-                className="btn secondary"
-                disabled={isLoading || defaultRoomsLoading || !mappingComplete}
-                onClick={autoAssignDefaultRooms}
-                title={!mappingComplete ? 'Complete subject mapping first to unlock.' : undefined}
-              >
-                Auto-assign homerooms
-              </button>
-              {classDefaultRoomHasConflicts ? (
-                <span style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c' }}>Homeroom conflict: two classes share a room</span>
-              ) : null}
-            </div>
-            <SmartTeacherAssignmentBlock
-              classGroups={classGroups}
-              subjects={subjects}
-              staff={staff}
-              classSubjectConfigs={classSubjectConfigs}
-              setClassSubjectConfigs={setClassSubjectConfigs}
-              sectionSubjectOverrides={sectionSubjectOverrides}
-              setSectionSubjectOverrides={setSectionSubjectOverrides}
-              assignmentMeta={assignmentMeta}
-              setAssignmentMeta={setAssignmentMeta}
-              subjectsCatalogForLabels={subjects}
-              filters={{ grade: smartGradeFilter, subject: smartSubjectFilter, teacher: smartTeacherFilter }}
-              showBulkActions
-            />
-          </div>
         </div>
       ) : null}
 
@@ -1461,7 +1534,6 @@ export function AcademicStructureSetupStep({
           ) : null}
           <TeacherLoadDashboard
             classGroups={classGroups}
-            subjects={subjects}
             staff={staff}
             classSubjectConfigs={classSubjectConfigs}
             sectionSubjectOverrides={sectionSubjectOverrides}
@@ -1471,60 +1543,7 @@ export function AcademicStructureSetupStep({
         </div>
       ) : null}
 
-      {tab === 'bulk' ? (
-        <div className="stack" style={{ gap: 12 }}>
-          <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Bulk tools</div>
-            <p className="muted" style={{ margin: 0, fontSize: 12, lineHeight: 1.45 }}>
-              Pick the <em>target section</em> (anchor), choose an action, add any extra field, then run it.
-            </p>
-            <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div className="stack" style={{ flex: '1 1 200px' }}>
-                <label style={{ fontSize: 12, fontWeight: 800 }}>Target section</label>
-                <ClassGroupSearchCombobox value={bulkContextSectionId} onChange={setBulkContextSectionId} />
-              </div>
-              <div className="stack" style={{ flex: '1 1 220px' }}>
-                <label style={{ fontSize: 12, fontWeight: 800 }}>Action</label>
-                <SelectKeeper
-                  value={bulkAction}
-                  onChange={(v) => setBulkAction((v || '') as BulkAction)}
-                  options={[
-                    { value: '', label: 'Choose action…' },
-                    { value: 'apply_teacher_grade', label: 'Set same teacher (all rows in grade)' },
-                    { value: 'apply_room_grade', label: 'Set same room (all rows in grade)' },
-                    { value: 'copy_periods_grade', label: 'Copy periods from target to rest of grade' },
-                  ]}
-                />
-              </div>
-            </div>
-            {bulkAction === 'apply_teacher_grade' ? (
-              <div className="stack" style={{ maxWidth: 400 }}>
-                <label style={{ fontSize: 12, fontWeight: 800 }}>Teacher</label>
-                <SelectKeeper
-                  value={bulkTeacherId}
-                  onChange={setBulkTeacherId}
-                  options={staff.filter(isStaffTeacher).map((s) => ({ value: String(s.id), label: s.fullName || s.email }))}
-                  emptyValueLabel="Select teacher…"
-                />
-              </div>
-            ) : null}
-            {bulkAction === 'apply_room_grade' ? (
-              <div className="stack" style={{ maxWidth: 400 }}>
-                <label style={{ fontSize: 12, fontWeight: 800 }}>Room</label>
-                <SelectKeeper
-                  value={bulkRoomId}
-                  onChange={setBulkRoomId}
-                  options={roomOpts.filter((o) => o.value !== '')}
-                  emptyValueLabel="Homeroom / default"
-                />
-              </div>
-            ) : null}
-            <button type="button" className="btn" onClick={runBulk} disabled={!bulkAction || !bulkContextSectionId}>
-              Run bulk action
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {/* Bulk tools removed */}
 
       {tab === 'sections' && view === 'template' && editingGrade != null
         ? (() => {
@@ -1918,7 +1937,7 @@ export function AcademicStructureSetupStep({
                       const row = allocRows.find((r) => sameAllocSlot(r, editingClassId, sub.id));
                       if (!row) return null;
                       const tOpts = teacherOptionsForSubject(staff, sub.id);
-                      const load = loadByStaff.get(row.staffId) ?? 0;
+                      const load = row.staffId == null ? 0 : loadByStaff.get(row.staffId) ?? 0;
                       const overTeacher = slotsPerWeek != null && load > slotsPerWeek;
                       return (
                         <tr key={sub.id}>
@@ -1936,8 +1955,9 @@ export function AcademicStructureSetupStep({
                               value={row.weeklyFrequency ?? ''}
                               onChange={(e) => {
                                 const n = Number(e.target.value);
+                                const v = Number.isFinite(n) ? Math.trunc(n) : 0;
                                 setAllocRows((p) =>
-                                  p.map((x) => (sameAllocSlot(x, editingClassId, sub.id) ? { ...x, weeklyFrequency: n } : x)),
+                                  p.map((x) => (sameAllocSlot(x, editingClassId, sub.id) ? { ...x, weeklyFrequency: v } : x)),
                                 );
                               }}
                             />
@@ -1991,28 +2011,33 @@ export function AcademicStructureSetupStep({
         </div>
       ) : null}
 
-      <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button
-          type="button"
-          className="btn"
-          disabled={savePending || !classGroups.length || classDefaultRoomHasConflicts}
-          onClick={onSave}
-        >
-          {savePending ? 'Saving…' : 'Save to server & continue'}
-        </button>
-        {saveError ? (
-          <div className="sms-alert sms-alert--error">
-            <div>
-              <div className="sms-alert__title">Save failed</div>
-              <div className="sms-alert__msg">{formatError(saveError)}</div>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
       {isLoading ? <div className="muted">Loading classes…</div> : null}
       {!isLoading && !classGroups.length ? (
         <div className="muted">No class groups yet. Complete “Classes & sections” first.</div>
+      ) : null}
+
+      {classGroups.length > 0 ? (
+        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start', marginTop: 4 }}>
+          <button type="button" className="btn" onClick={onSave} disabled={savePending || isLoading}>
+            {savePending ? 'Saving…' : 'Save academic structure'}
+          </button>
+          {saveError ? (
+            <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Save failed</div>
+                <div className="sms-alert__msg">{formatError(saveError)}</div>
+              </div>
+            </div>
+          ) : null}
+          {saveSuccess && !saveError ? (
+            <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+              <div>
+                <div className="sms-alert__title">Saved</div>
+                <div className="sms-alert__msg">Academic structure is updated and synced.</div>
+              </div>
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

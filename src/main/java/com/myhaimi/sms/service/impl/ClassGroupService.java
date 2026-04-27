@@ -3,14 +3,25 @@ package com.myhaimi.sms.service.impl;
 import com.myhaimi.sms.DTO.ClassGroupDTO;
 import com.myhaimi.sms.DTO.ClassGroupSectionSummaryDTO;
 import com.myhaimi.sms.DTO.ClassTeacherBatchAssignDTO;
+import com.myhaimi.sms.DTO.ClassGroupUpdateDTO;
+import com.myhaimi.sms.DTO.ClassGroupDeleteSummaryDTO;
 import com.myhaimi.sms.entity.ClassGroup;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.entity.Staff;
 import com.myhaimi.sms.entity.User;
 import com.myhaimi.sms.repository.ClassGroupRepo;
+import com.myhaimi.sms.repository.ClassSubjectConfigRepo;
+import com.myhaimi.sms.repository.SubjectAllocationRepo;
+import com.myhaimi.sms.repository.SubjectClassGroupRepo;
+import com.myhaimi.sms.repository.SubjectSectionOverrideRepo;
 import com.myhaimi.sms.repository.SchoolRepo;
 import com.myhaimi.sms.repository.StaffRepo;
 import com.myhaimi.sms.repository.StudentRepo;
+import com.myhaimi.sms.repository.AttendanceSessionRepo;
+import com.myhaimi.sms.repository.LectureRepo;
+import com.myhaimi.sms.repository.TimetableEntryRepo;
+import com.myhaimi.sms.repository.TimetableSlotRepo;
+import com.myhaimi.sms.repository.AnnouncementTargetClassRepo;
 import com.myhaimi.sms.repository.UserRepo;
 import com.myhaimi.sms.security.RoleNames;
 import com.myhaimi.sms.utils.TenantContext;
@@ -34,6 +45,15 @@ public class ClassGroupService {
     private final SchoolRepo schoolRepo;
     private final StaffRepo staffRepo;
     private final StudentRepo studentRepo;
+    private final SubjectAllocationRepo subjectAllocationRepo;
+    private final ClassSubjectConfigRepo classSubjectConfigRepo;
+    private final SubjectSectionOverrideRepo subjectSectionOverrideRepo;
+    private final SubjectClassGroupRepo subjectClassGroupRepo;
+    private final TimetableEntryRepo timetableEntryRepo;
+    private final TimetableSlotRepo timetableSlotRepo;
+    private final AttendanceSessionRepo attendanceSessionRepo;
+    private final LectureRepo lectureRepo;
+    private final AnnouncementTargetClassRepo announcementTargetClassRepo;
     private final UserRepo userRepo;
 
     private Integer requireSchoolId() {
@@ -142,6 +162,119 @@ public class ClassGroupService {
             }
             classGroupRepo.save(cg);
         }
+    }
+
+    @Transactional
+    public void deleteAllForSchool(String actorEmail) {
+        User actor =
+                userRepo.findFirstByEmailIgnoreCase(actorEmail.trim()).orElseThrow(() -> new AccessDeniedException(
+                        "Actor not found"));
+        Integer schoolId = requireSchoolId();
+        if (actor.getSchool() == null || !actor.getSchool().getId().equals(schoolId)) {
+            throw new AccessDeniedException("Tenant mismatch");
+        }
+        boolean ok = actor.getRoles().stream()
+                .map(r -> r.getName())
+                .anyMatch(n -> RoleNames.SCHOOL_ADMIN.equals(n) || RoleNames.PRINCIPAL.equals(n));
+        if (!ok) {
+            throw new AccessDeniedException("Only school owner or principal can delete all classes");
+        }
+
+        // Dependent data first (FKs point to class groups).
+        announcementTargetClassRepo.deleteBySchool_Id(schoolId);
+        timetableEntryRepo.deleteBySchool_Id(schoolId);
+        timetableSlotRepo.deleteBySchool_Id(schoolId);
+        attendanceSessionRepo.deleteBySchool_Id(schoolId);
+        lectureRepo.deleteBySchool_Id(schoolId);
+
+        subjectAllocationRepo.deleteBySchool_Id(schoolId);
+        subjectSectionOverrideRepo.deleteBySubjectSchool_Id(schoolId);
+        subjectClassGroupRepo.deleteBySubjectSchool_Id(schoolId);
+        classSubjectConfigRepo.deleteBySchool_Id(schoolId);
+
+        // Students reference class_group_id; remove them as they are fully dependent on class structure here.
+        studentRepo.deleteBySchool_Id(schoolId);
+
+        // Soft delete class groups.
+        List<ClassGroup> groups = classGroupRepo.findAllBySchool_IdAndIsDeletedFalseOrderByGradeLevelAscCodeAsc(schoolId);
+        for (ClassGroup cg : groups) {
+            cg.setDeleted(true);
+            cg.setUpdatedBy(actorEmail == null || actorEmail.isBlank() ? "system" : actorEmail.trim());
+            classGroupRepo.save(cg);
+        }
+    }
+
+    @Transactional
+    public ClassGroup update(int classGroupId, ClassGroupUpdateDTO dto, String actorEmail) {
+        User actor =
+                userRepo.findFirstByEmailIgnoreCase(actorEmail.trim()).orElseThrow(() -> new AccessDeniedException(
+                        "Actor not found"));
+        Integer schoolId = requireSchoolId();
+        if (actor.getSchool() == null || !actor.getSchool().getId().equals(schoolId)) {
+            throw new AccessDeniedException("Tenant mismatch");
+        }
+        boolean ok = actor.getRoles().stream()
+                .map(r -> r.getName())
+                .anyMatch(n -> RoleNames.SCHOOL_ADMIN.equals(n) || RoleNames.PRINCIPAL.equals(n));
+        if (!ok) {
+            throw new AccessDeniedException("Only school owner or principal can edit classes");
+        }
+
+        ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(classGroupId, schoolId).orElseThrow();
+        cg.setCode(dto.code());
+        cg.setDisplayName(dto.displayName());
+        cg.setGradeLevel(dto.gradeLevel());
+        cg.setSection(dto.section());
+        cg.setCapacity(dto.capacity());
+        cg.setUpdatedBy(actorEmail == null || actorEmail.isBlank() ? "system" : actorEmail.trim());
+        return classGroupRepo.save(cg);
+    }
+
+    @Transactional
+    public ClassGroupDeleteSummaryDTO deleteOne(int classGroupId, String actorEmail) {
+        User actor =
+                userRepo.findFirstByEmailIgnoreCase(actorEmail.trim()).orElseThrow(() -> new AccessDeniedException(
+                        "Actor not found"));
+        Integer schoolId = requireSchoolId();
+        if (actor.getSchool() == null || !actor.getSchool().getId().equals(schoolId)) {
+            throw new AccessDeniedException("Tenant mismatch");
+        }
+        boolean ok = actor.getRoles().stream()
+                .map(r -> r.getName())
+                .anyMatch(n -> RoleNames.SCHOOL_ADMIN.equals(n) || RoleNames.PRINCIPAL.equals(n));
+        if (!ok) {
+            throw new AccessDeniedException("Only school owner or principal can delete classes");
+        }
+
+        ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(classGroupId, schoolId).orElseThrow();
+
+        int announcementTargetsDeleted = announcementTargetClassRepo.deleteBySchool_IdAndClassGroup_Id(schoolId, classGroupId);
+        int timetableEntriesDeleted = timetableEntryRepo.deleteBySchool_IdAndClassGroup_Id(schoolId, classGroupId);
+        int attendanceSessionsDeleted = attendanceSessionRepo.deleteBySchool_IdAndClassGroup_Id(schoolId, classGroupId);
+        int lecturesDeleted = lectureRepo.deleteBySchool_IdAndClassGroup_Id(schoolId, classGroupId);
+
+        int subjectAllocationsDeleted = subjectAllocationRepo.deleteBySchool_IdAndClassGroup_Id(schoolId, classGroupId);
+        int subjectSectionOverridesDeleted = subjectSectionOverrideRepo.deleteBySchool_IdAndClassGroup_Id(schoolId, classGroupId);
+        int subjectClassMappingsDeleted = subjectClassGroupRepo.deleteBySchool_IdAndClassGroup_Id(schoolId, classGroupId);
+        int studentsDeleted = studentRepo.deleteBySchool_IdAndClassGroup_Id(schoolId, classGroupId);
+
+        cg.setDeleted(true);
+        cg.setUpdatedBy(actorEmail == null || actorEmail.isBlank() ? "system" : actorEmail.trim());
+        classGroupRepo.save(cg);
+
+        // Note: ClassSubjectConfig is grade-scoped (not section-scoped), so we don't delete it here.
+        return new ClassGroupDeleteSummaryDTO(
+                1,
+                studentsDeleted,
+                subjectAllocationsDeleted,
+                0,
+                subjectSectionOverridesDeleted,
+                subjectClassMappingsDeleted,
+                timetableEntriesDeleted,
+                attendanceSessionsDeleted,
+                lecturesDeleted,
+                announcementTargetsDeleted
+        );
     }
 }
 

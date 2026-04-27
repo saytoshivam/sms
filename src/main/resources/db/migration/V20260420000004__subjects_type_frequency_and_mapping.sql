@@ -47,9 +47,7 @@ SET @stmt := IF(
     '  PRIMARY KEY (id),\n'
     '  UNIQUE KEY uk_subject_class_groups (subject_id, class_group_id),\n'
     '  KEY idx_scg_subject (subject_id),\n'
-    '  KEY idx_scg_class_group (class_group_id),\n'
-    '  CONSTRAINT fk_scg_subject FOREIGN KEY (subject_id) REFERENCES subjects(id),\n'
-    '  CONSTRAINT fk_scg_class_group FOREIGN KEY (class_group_id) REFERENCES class_groups(id)\n'
+    '  KEY idx_scg_class_group (class_group_id)\n'
     ') ENGINE=InnoDB'
 );
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;

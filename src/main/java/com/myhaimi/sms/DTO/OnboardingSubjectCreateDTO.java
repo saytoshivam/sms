@@ -2,6 +2,8 @@ package com.myhaimi.sms.DTO;
 
 import jakarta.annotation.Nullable;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 
 public record OnboardingSubjectCreateDTO(
         @NotBlank String name,
@@ -13,6 +15,6 @@ public record OnboardingSubjectCreateDTO(
          * Structure. These fields are accepted for backwards compatibility but are not required.</p>
          */
         @Nullable String type,
-        @Nullable Integer weeklyFrequency
+        @NotNull @Positive Integer weeklyFrequency
 ) {}
 

@@ -5,6 +5,7 @@ import com.myhaimi.sms.entity.Subject;
 import com.myhaimi.sms.DTO.SubjectDeleteInfoDTO;
 import com.myhaimi.sms.DTO.SubjectUpdateDTO;
 import com.myhaimi.sms.repository.ClassGroupRepo;
+import com.myhaimi.sms.repository.ClassSubjectConfigRepo;
 import com.myhaimi.sms.repository.SubjectClassGroupRepo;
 import com.myhaimi.sms.repository.SchoolRepo;
 import com.myhaimi.sms.repository.SubjectRepo;
@@ -32,6 +33,7 @@ public class SubjectService {
     private final SchoolRepo schoolRepo;
     private final SubjectClassGroupRepo subjectClassGroupRepo;
     private final ClassGroupRepo classGroupRepo;
+    private final ClassSubjectConfigRepo classSubjectConfigRepo;
     private final SubjectAllocationRepo subjectAllocationRepo;
     private final TimetableEntryRepo timetableEntryRepo;
     private final StaffTeachableSubjectRepository staffTeachableSubjectRepository;
@@ -111,6 +113,11 @@ public class SubjectService {
         }
         subj.setName(name);
         subj.setCode(code);
+        Integer wf = dto.weeklyFrequency();
+        if (wf != null) {
+            if (wf <= 0) throw new IllegalArgumentException("weeklyFrequency must be positive.");
+            subj.setWeeklyFrequency(wf);
+        }
         subj.setUpdatedBy(actorEmailOrSystem());
         return subjectRepo.save(subj);
     }
@@ -151,6 +158,8 @@ public class SubjectService {
         }
 
         // Clean materialized / legacy mapping data for this subject.
+        // IMPORTANT: also remove "class defaults" template mappings so they don't reappear if subject is re-added later.
+        classSubjectConfigRepo.deleteBySchool_IdAndSubject_Id(schoolId, subj.getId());
         subjectClassGroupRepo.deleteBySubject_Id(subj.getId());
         subjectSectionOverrideRepo.deleteBySubject_Id(subj.getId());
         subjectClassMappingRepo.deleteBySubject_Id(subj.getId());
@@ -160,6 +169,30 @@ public class SubjectService {
         subj.setDeleted(true);
         subj.setUpdatedBy(actorEmailOrSystem());
         subjectRepo.save(subj);
+    }
+
+    @Transactional
+    public void deleteAllForSchool() {
+        Integer schoolId = requireSchoolId();
+        List<Subject> subjects = subjectRepo.findBySchool_IdAndIsDeletedFalseOrderByCodeAsc(schoolId);
+        if (subjects.isEmpty()) return;
+
+        // Validate first so we either delete all or none.
+        java.util.List<String> blocked = new java.util.ArrayList<>();
+        for (Subject s : subjects) {
+            SubjectDeleteInfoDTO info = deleteInfo(s.getId());
+            if (!info.canDelete()) {
+                String reasons = info.reasons() == null || info.reasons().isEmpty() ? "In use." : String.join(" ", info.reasons());
+                blocked.add(s.getCode() + " — " + reasons);
+            }
+        }
+        if (!blocked.isEmpty()) {
+            throw new IllegalStateException("Cannot delete all subjects. Blocked: " + String.join(" | ", blocked));
+        }
+
+        for (Subject s : subjects) {
+            delete(s.getId());
+        }
     }
 }
 

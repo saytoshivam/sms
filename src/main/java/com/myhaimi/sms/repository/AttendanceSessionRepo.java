@@ -4,6 +4,7 @@ import com.myhaimi.sms.entity.AttendanceSession;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -29,5 +30,13 @@ public interface AttendanceSessionRepo extends JpaRepository<AttendanceSession, 
 
     Optional<AttendanceSession> findBySchool_IdAndClassGroup_IdAndDateAndLectureIsNull(
             Integer schoolId, Integer classGroupId, LocalDate date);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from AttendanceSession s where s.school.id = :schoolId")
+    void deleteBySchool_Id(@Param("schoolId") Integer schoolId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from AttendanceSession s where s.school.id = :schoolId and s.classGroup.id = :classGroupId")
+    int deleteBySchool_IdAndClassGroup_Id(@Param("schoolId") Integer schoolId, @Param("classGroupId") Integer classGroupId);
 }
 

@@ -19,6 +19,7 @@ public interface StaffRepo extends JpaRepository<Staff, Integer> {
 
     // Backwards compatible methods used by demo seeders / runners
     Optional<Staff> findFirstBySchool_IdAndEmailIgnoreCase(Integer schoolId, String email);
+    Optional<Staff> findFirstBySchool_IdAndEmployeeNoIgnoreCase(Integer schoolId, String employeeNo);
     List<Staff> findBySchool_IdOrderByEmployeeNoAsc(Integer schoolId);
 
     Optional<Staff> findByIdAndSchool_Id(Integer id, Integer schoolId);

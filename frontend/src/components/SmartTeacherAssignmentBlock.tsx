@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { SelectKeeper } from './SelectKeeper';
 import { toast } from '../lib/toast';
 import { buildEffectiveAllocRows, type ClassSubjectConfigRow, type SectionSubjectOverrideRow } from '../lib/academicStructureUtils';
@@ -18,6 +18,7 @@ type StaffRow = {
   email: string;
   teachableSubjectIds: number[];
   roleNames: string[];
+  // Keep aligned with smart-assign heuristics: optional fields still treated as "unset" (null) for TS.
   maxWeeklyLectureLoad?: number | null;
   preferredClassGroupIds?: number[] | null;
 };
@@ -29,6 +30,7 @@ type Props = {
   classGroups: ClassG[];
   subjects: Sub[];
   staff: StaffRow[];
+  roomOptions: { value: string; label: string }[];
   classSubjectConfigs: ClassSubjectConfigRow[];
   setClassSubjectConfigs: React.Dispatch<React.SetStateAction<ClassSubjectConfigRow[]>>;
   sectionSubjectOverrides: SectionSubjectOverrideRow[];
@@ -38,24 +40,36 @@ type Props = {
   subjectsCatalogForLabels: { id: number; name: string; code: string }[];
   filters?: { grade: string; subject: string; teacher: string };
   showBulkActions?: boolean;
+  autoAssignHomerooms?: () => void;
 };
 
 export function SmartTeacherAssignmentBlock({
   classGroups,
   subjects,
   staff,
+  roomOptions,
   classSubjectConfigs,
   setClassSubjectConfigs,
   sectionSubjectOverrides,
   setSectionSubjectOverrides,
   assignmentMeta,
   setAssignmentMeta,
-  subjectsCatalogForLabels,
+  subjectsCatalogForLabels: _subjectsCatalogForLabels,
   filters,
   showBulkActions = false,
+  autoAssignHomerooms,
 }: Props) {
   const [manualOverrideMode, setManualOverrideMode] = useState(false);
+  const [bulkDrawerOpen, setBulkDrawerOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const [bulkTid, setBulkTid] = useState<string>('');
+  const [bulkRoomId, setBulkRoomId] = useState<string>('');
+  const [expandedKey, setExpandedKey] = useState<string>('');
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [onlyLocked, setOnlyLocked] = useState(false);
+  const [onlyOverloaded, setOnlyOverloaded] = useState(false);
+  const [onlyConflicts, setOnlyConflicts] = useState(false);
+  const [sectionSearch, setSectionSearch] = useState('');
 
   const gradeFilter = filters?.grade ?? '';
   const subjFilter = filters?.subject ?? '';
@@ -71,18 +85,47 @@ export function SmartTeacherAssignmentBlock({
     [cgs, classSubjectConfigs, sectionSubjectOverrides],
   );
 
+  const staffNorm = useMemo(
+    () =>
+      staff.map((s) => ({
+        ...s,
+        maxWeeklyLectureLoad: s.maxWeeklyLectureLoad ?? null,
+        preferredClassGroupIds: s.preferredClassGroupIds ?? null,
+      })),
+    [staff],
+  );
+
   const loadRows = useMemo(() => {
-    const rows = buildTeacherLoadRows(
+    const base = buildTeacherLoadRows(
       effective,
-      staff,
-      subjectsCatalogForLabels.map((s) => ({ id: s.id, name: s.name, code: s.code })),
+      staffNorm,
+      subjects.map((s) => ({ id: s.id, name: s.name, code: s.code })),
     );
-    if (!teacherFilter) return rows;
-    return rows.filter((r) => String(r.id) === teacherFilter);
-  }, [effective, staff, subjectsCatalogForLabels, teacherFilter]);
+    return base;
+  }, [effective, staffNorm, subjects]);
+
+  const teacherLoadById = useMemo(() => {
+    const m = new Map<number, { load: number; max: number; status: 'healthy' | 'near' | 'over' }>();
+    for (const r of loadRows) m.set(Number(r.id), { load: r.load, max: r.max, status: r.status });
+    return m;
+  }, [loadRows]);
+
+  const subjectCodeById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const s of subjects) m.set(Number(s.id), String(s.code ?? '').trim());
+    return m;
+  }, [subjects]);
 
   const flatRows = useMemo(() => {
-    const out: { classGroupId: number; subId: number; subName: string; periods: number; staffId: number | null; k: string }[] = [];
+    const out: {
+      classGroupId: number;
+      subId: number;
+      subName: string;
+      periods: number;
+      staffId: number | null;
+      roomId: number | null;
+      k: string;
+    }[] = [];
     for (const a of effective) {
       if (subjFilter && String(a.subjectId) !== subjFilter) continue;
       if (gradeFilter) {
@@ -91,22 +134,404 @@ export function SmartTeacherAssignmentBlock({
       }
       if (teacherFilter && String(a.staffId ?? '') !== teacherFilter) continue;
       const s = subjects.find((x) => x.id === a.subjectId);
+      // If the subject catalog is empty or doesn't contain this subjectId anymore (e.g. after bulk delete),
+      // hide the row instead of showing "Subject 11".
+      if (!s) continue;
       out.push({
         classGroupId: a.classGroupId,
         subId: a.subjectId,
-        subName: s ? s.name : `Subject ${a.subjectId}`,
+        subName: s.name,
         periods: a.weeklyFrequency,
         staffId: a.staffId,
+        roomId: (a as any).roomId ?? null,
         k: slotKey(a.classGroupId, a.subjectId),
       });
     }
-    return out;
-  }, [effective, classGroups, gradeFilter, subjFilter, teacherFilter, subjects]);
+    const q = sectionSearch.trim().toLowerCase();
+    return out.filter((r) => {
+      const m = assignmentMeta[r.k];
+      const locked = m?.locked ?? false;
+      const isUnassigned = r.staffId == null;
+      if (onlyUnassigned && !isUnassigned) return false;
+      if (onlyLocked && !locked) return false;
+      if (onlyConflicts && m?.source !== 'conflict') return false;
+      if (onlyOverloaded) {
+        const tl = r.staffId != null ? teacherLoadById.get(Number(r.staffId)) : null;
+        if (!tl || tl.status !== 'over') return false;
+      }
+      if (q) {
+        const sec = classGroups.find((c) => c.classGroupId === r.classGroupId);
+        const label = `${sec?.displayName ?? ''} ${sec?.code ?? ''} ${sec?.section ?? ''}`.toLowerCase();
+        if (!label.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [
+    effective,
+    classGroups,
+    gradeFilter,
+    subjFilter,
+    teacherFilter,
+    subjects,
+    assignmentMeta,
+    onlyUnassigned,
+    onlyLocked,
+    onlyConflicts,
+    onlyOverloaded,
+    sectionSearch,
+    teacherLoadById,
+  ]);
+
+  const kpis = useMemo(() => {
+    const total = flatRows.length;
+    const assigned = flatRows.filter((r) => r.staffId != null).length;
+    const pending = total - assigned;
+    const conflicts = flatRows.filter((r) => assignmentMeta[r.k]?.source === 'conflict').length;
+    const overloadedTeachers = loadRows.filter((r) => r.status === 'over').length;
+    return { total, assigned, pending, conflicts, overloadedTeachers };
+  }, [flatRows, assignmentMeta, loadRows]);
+
+  const preferredRoomTypeBySubjectId = useMemo(() => {
+    const m = new Map<number, string | null>();
+    for (const s of subjects) {
+      m.set(Number(s.id), detectPreferredRoom(s.name, s.code));
+    }
+    return m;
+  }, [subjects]);
+
+  const needsAttention = useMemo(() => {
+    const needs: typeof flatRows = [];
+    const healthy: typeof flatRows = [];
+    for (const r of flatRows) {
+      const m = assignmentMeta[r.k];
+      const locked = m?.locked ?? false;
+      const src = m?.source ?? null;
+      const teacherOver = r.staffId != null ? teacherLoadById.get(Number(r.staffId))?.status === 'over' : false;
+
+      const pref = preferredRoomTypeBySubjectId.get(Number(r.subId)) ?? null;
+      // roomId null means "homeroom" in our UI. Treat it as "needs attention" only when the subject strongly prefers a lab-like room.
+      const noRoomForPreferred = pref != null && r.roomId == null;
+
+      const missingTeacher = r.staffId == null;
+      const conflict = src === 'conflict';
+
+      const isNeeds =
+        missingTeacher ||
+        teacherOver ||
+        noRoomForPreferred ||
+        conflict ||
+        (locked && (missingTeacher || teacherOver || noRoomForPreferred || conflict));
+
+      if (isNeeds) needs.push(r);
+      else healthy.push(r);
+    }
+    return { needs, healthy };
+  }, [flatRows, assignmentMeta, teacherLoadById, preferredRoomTypeBySubjectId]);
+
+  const missingTeacherReport = useMemo(() => {
+    const byKey = new Map<
+      string,
+      { subjectId: number; subjectName: string; subjectCode: string; grade: number | null; sections: string[] }
+    >();
+    for (const r of needsAttention.needs) {
+      if (r.staffId != null) continue;
+      const cg = classGroups.find((c) => Number(c.classGroupId) === Number(r.classGroupId));
+      const grade = cg?.gradeLevel ?? null;
+      const sectionLabel = cg?.section ? String(cg.section) : String(cg?.displayName || cg?.code || r.classGroupId);
+      const code = subjectCodeById.get(Number(r.subId)) ?? '';
+      const key = `${Number(r.subId)}:${grade ?? ''}`;
+      const cur = byKey.get(key) ?? {
+        subjectId: r.subId,
+        subjectName: r.subName,
+        subjectCode: code,
+        grade,
+        sections: [],
+      };
+      cur.sections.push(sectionLabel);
+      byKey.set(key, cur);
+    }
+    const rows = [...byKey.values()].map((x) => ({
+      ...x,
+      sections: Array.from(new Set(x.sections)).sort((a, b) => a.localeCompare(b)),
+    }));
+    rows.sort((a, b) => {
+      const ga = a.grade ?? 999;
+      const gb = b.grade ?? 999;
+      if (ga !== gb) return ga - gb;
+      return `${a.subjectName} ${a.subjectCode}`.localeCompare(`${b.subjectName} ${b.subjectCode}`);
+    });
+    return rows;
+  }, [needsAttention.needs, classGroups, subjectCodeById]);
+
+  const groupRows = useCallback(
+    (rows: typeof flatRows) => {
+      const byCg = new Map<number, ClassG>(classGroups.map((c) => [Number(c.classGroupId), c]));
+      const byGrade = new Map<number, Map<number, { cg: ClassG; rows: typeof flatRows }>>();
+      for (const r of rows) {
+        const cg = byCg.get(Number(r.classGroupId));
+        const grade = cg?.gradeLevel != null ? Number(cg.gradeLevel) : NaN;
+        if (!Number.isFinite(grade) || !cg) continue;
+        const gMap = byGrade.get(grade) ?? new Map<number, { cg: ClassG; rows: typeof flatRows }>();
+        const sec = gMap.get(Number(cg.classGroupId)) ?? { cg, rows: [] as any };
+        (sec.rows as any).push(r);
+        gMap.set(Number(cg.classGroupId), sec as any);
+        byGrade.set(grade, gMap);
+      }
+      const grades = [...byGrade.entries()].sort((a, b) => a[0] - b[0]);
+      return grades.map(([grade, secMap]) => {
+        const secs = [...secMap.values()].sort((a, b) => String(a.cg.section ?? a.cg.code).localeCompare(String(b.cg.section ?? b.cg.code)));
+        const totalRows = secs.reduce((a, s) => a + (s.rows as any).length, 0);
+        return { grade, sections: secs as any[], totalRows };
+      });
+    },
+    [classGroups],
+  );
+
+  const groupedNeeds = useMemo(() => groupRows(needsAttention.needs), [groupRows, needsAttention.needs]);
+  const groupedHealthy = useMemo(() => groupRows(needsAttention.healthy), [groupRows, needsAttention.healthy]);
+
+  const renderRow = (row: (typeof flatRows)[number]) => {
+    const m = assignmentMeta[row.k];
+    const src: AssignmentSource | '—' = m?.source ?? '—';
+    const lo = m?.locked ?? false;
+    const tl = row.staffId != null ? teacherLoadById.get(Number(row.staffId)) : null;
+    const load = tl?.load ?? 0;
+    const max = tl?.max ?? 0;
+    const ratio = max > 0 ? load / max : 0;
+    const barColor = ratio > 1 ? '#b91c1c' : ratio > 0.85 ? '#c2410c' : '#16a34a';
+
+    const statusLabel =
+      src === 'auto'
+        ? 'AUTO'
+        : src === 'manual'
+          ? 'MANUAL'
+          : src === 'rebalanced'
+            ? 'REBALANCED'
+            : src === 'conflict'
+              ? 'CONFLICT'
+              : '—';
+
+    const conflictReasonLabel =
+      src !== 'conflict'
+        ? null
+        : m?.conflictReason === 'NO_ELIGIBLE_TEACHER'
+          ? 'No eligible teacher'
+          : m?.conflictReason === 'CAPACITY_OVERFLOW'
+            ? 'Teacher overloaded'
+            : 'Needs review';
+
+    const sec = classGroups.find((c) => c.classGroupId === row.classGroupId);
+    const roomLabel = row.roomId != null ? roomOptions.find((r) => String(r.value) === String(row.roomId))?.label ?? 'Room' : '';
+    const showRoomInline = row.roomId != null;
+    const expanded = expandedKey === row.k;
+
+    return (
+      <div
+        key={row.k}
+        style={{
+          border: '1px solid rgba(15,23,42,0.08)',
+          borderRadius: 12,
+          background: 'rgba(255,255,255,0.9)',
+          padding: 10,
+        }}
+      >
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(220px, 1.3fr) minmax(220px, 1fr) minmax(180px, 0.7fr) minmax(160px, 0.6fr) minmax(140px, 0.5fr)',
+            gap: 10,
+            alignItems: 'center',
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 950, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {sec?.displayName ?? sec?.code} · {row.subName}
+            </div>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+              {row.periods} / wk {showRoomInline ? ` · ${roomLabel}` : ''}
+            </div>
+          </div>
+
+          <div>
+            <SelectKeeper value={row.staffId != null ? String(row.staffId) : ''} onChange={(v) => setTeacherOnSlot(row.classGroupId, row.subId, v)} options={teachOpts(row.subId)} />
+          </div>
+
+          <div>
+            {row.staffId != null && tl ? (
+              <div>
+                <div style={{ height: 8, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.min(140, Math.round((load / Math.max(1, max)) * 100))}%`, height: '100%', background: barColor }} />
+                </div>
+                <div className="muted" style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>
+                  {load}/{max}{ratio > 1 ? ` · Overloaded +${Math.max(0, load - max)}` : ''}
+                </div>
+              </div>
+            ) : (
+              <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>—</div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span
+              style={{
+                display: 'inline-block',
+                padding: '2px 8px',
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 900,
+                background:
+                  statusLabel === 'AUTO'
+                    ? 'rgba(249,115,22,0.12)'
+                    : statusLabel === 'MANUAL'
+                      ? 'rgba(37,99,235,0.12)'
+                      : statusLabel === 'REBALANCED'
+                        ? 'rgba(22,163,74,0.12)'
+                        : statusLabel === 'CONFLICT'
+                          ? 'rgba(220,38,38,0.10)'
+                          : 'rgba(100,116,139,0.10)',
+                color:
+                  statusLabel === 'AUTO'
+                    ? '#c2410c'
+                    : statusLabel === 'MANUAL'
+                      ? '#1d4ed8'
+                      : statusLabel === 'REBALANCED'
+                        ? '#166534'
+                        : statusLabel === 'CONFLICT'
+                          ? '#b91c1c'
+                          : '#64748b',
+              }}
+              title={conflictReasonLabel ?? undefined}
+            >
+              {lo ? 'LOCKED' : statusLabel}
+            </span>
+            {conflictReasonLabel ? (
+              <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 900, background: 'rgba(220,38,38,0.10)', color: '#b91c1c' }}>
+                {conflictReasonLabel}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="row" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+            <label className="row" style={{ gap: 6, fontSize: 12, fontWeight: 900, cursor: 'pointer' }} title="Lock">
+              <input
+                type="checkbox"
+                checked={lo}
+                onChange={(e) => {
+                  const locked = e.target.checked;
+                  setAssignmentMeta((prev) => ({
+                    ...prev,
+                    [row.k]: { source: m?.source ?? 'manual', locked, conflictReason: m?.conflictReason },
+                  }));
+                }}
+              />
+              Lock
+            </label>
+            <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '2px 8px' }} onClick={() => setTeacherOnSlot(row.classGroupId, row.subId, '')}>
+              Clear
+            </button>
+            <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '2px 8px' }} onClick={() => setExpandedKey(expanded ? '' : row.k)}>
+              {expanded ? 'Hide' : 'More'}
+            </button>
+          </div>
+        </div>
+
+        {expanded ? (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(15,23,42,0.08)' }}>
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ minWidth: 240 }}>
+                <div className="muted" style={{ fontSize: 12, fontWeight: 900, marginBottom: 4 }}>Room</div>
+                <SelectKeeper value={row.roomId != null ? String(row.roomId) : ''} onChange={(v) => setRoomOnSlot(row.classGroupId, row.subId, v)} options={roomOptions} />
+                <div className="muted" style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>
+                  {row.roomId == null ? '🏠 Homeroom' : 'Custom room'}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderGrouped = (
+    groups: { grade: number; sections: Array<{ cg: ClassG; rows: typeof flatRows }>; totalRows: number }[],
+    defaultOpen: boolean,
+  ) => {
+    return (
+      <div className="stack" style={{ gap: 10 }}>
+        {groups.map((g) => (
+          <details
+            key={g.grade}
+            open={defaultOpen}
+            style={{ border: '1px solid rgba(15,23,42,0.08)', borderRadius: 12, background: 'rgba(255,255,255,0.75)' }}
+          >
+            <summary
+              className="row"
+              style={{ cursor: 'pointer', padding: '10px 12px', listStyle: 'none', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}
+            >
+              <div style={{ fontWeight: 950 }}>{`Grade ${g.grade}`}</div>
+              <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
+                {g.sections.length} section{g.sections.length === 1 ? '' : 's'} · {g.totalRows} row{g.totalRows === 1 ? '' : 's'}
+              </div>
+            </summary>
+            <div className="stack" style={{ gap: 10, padding: 12, paddingTop: 0 }}>
+              {g.sections.map(({ cg, rows }) => (
+                <details
+                  key={cg.classGroupId}
+                  open={defaultOpen}
+                  style={{ border: '1px solid rgba(15,23,42,0.08)', borderRadius: 12, background: 'rgba(255,255,255,0.9)' }}
+                >
+                  <summary
+                    className="row"
+                    style={{ cursor: 'pointer', padding: '10px 12px', listStyle: 'none', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}
+                  >
+                    <div style={{ fontWeight: 900 }}>{cg.displayName || cg.code}</div>
+                    <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
+                      {rows.length} subject{rows.length === 1 ? '' : 's'}
+                    </div>
+                  </summary>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="data-table" style={{ fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ position: 'sticky', top: 0, background: 'white' }}>Subject</th>
+                          <th style={{ position: 'sticky', top: 0, background: 'white' }}>Periods / wk</th>
+                          <th style={{ position: 'sticky', top: 0, background: 'white' }}>Assigned teacher</th>
+                          <th style={{ position: 'sticky', top: 0, background: 'white' }}>Teacher load</th>
+                          <th style={{ position: 'sticky', top: 0, background: 'white' }}>Room</th>
+                          <th style={{ position: 'sticky', top: 0, background: 'white' }}>Source</th>
+                          <th
+                            style={{ position: 'sticky', top: 0, background: 'white' }}
+                            title="Lock keeps this row out of auto and rebalance"
+                          >
+                            Lock
+                          </th>
+                          <th style={{ position: 'sticky', top: 0, background: 'white' }} />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td colSpan={8}>
+                            <div className="stack" style={{ gap: 8, padding: 8 }}>
+                              {rows.map(renderRow)}
+                            </div>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              ))}
+            </div>
+          </details>
+        ))}
+      </div>
+    );
+  };
 
   const run = (mode: 'auto' | 'rebalance' | 'reset', subjectOnly: number | null = null) => {
     const r = runSmartTeacherAssignment(
       cgs,
-      staff,
+      staffNorm,
       subjects,
       classSubjectConfigs,
       sectionSubjectOverrides,
@@ -117,7 +542,34 @@ export function SmartTeacherAssignmentBlock({
     setClassSubjectConfigs(r.classSubjectConfigs);
     setSectionSubjectOverrides(r.sectionSubjectOverrides);
     setAssignmentMeta(r.assignmentMeta);
-    for (const w of r.warnings) toast.info('Assignment', w);
+    if (r.warnings.length) {
+      const uniq = Array.from(new Set(r.warnings.map((w) => String(w).trim()).filter(Boolean)));
+      const teacherMissing: string[] = [];
+      const other: string[] = [];
+      for (const w of uniq) {
+        const m = w.match(/^No teacher tagged to teach (.+?) in Class (\d+)\./i);
+        if (m) {
+          const subj = String(m[1] ?? '').trim();
+          const g = String(m[2] ?? '').trim();
+          teacherMissing.push(`${subj} — Class ${g}`);
+        } else {
+          other.push(w);
+        }
+      }
+
+      const parts: string[] = [];
+      if (teacherMissing.length) {
+        parts.push(
+          `Missing teacher mappings: ${teacherMissing.length} row(s). Open Insights for the detailed report.`,
+        );
+      }
+      if (other.length) {
+        const head = other.slice(0, 2);
+        const more = other.length - head.length;
+        parts.push(`${head.join(' · ')}${more > 0 ? ` (+${more} more)` : ''}`);
+      }
+      toast.info('Assignment', parts.join(' | '));
+    }
     if (r.warnings.length === 0 && mode === 'auto') {
       toast.success('Smart assign', 'Teachers applied by skill, grade cohesion, and load.');
     } else if (r.warnings.length === 0 && mode === 'rebalance') {
@@ -125,6 +577,77 @@ export function SmartTeacherAssignmentBlock({
     } else if (mode === 'reset') {
       toast.info('Reset', 'Auto and rebalanced assignments were cleared. Manual / locked kept.');
     }
+  };
+
+  function detectPreferredRoom(subjectName: string, subjectCode: string) {
+    const s = `${subjectName} ${subjectCode}`.toLowerCase();
+    if (s.includes('physics') || s.includes('chemistry') || s.includes('biology') || s.includes('science')) return 'LAB';
+    if (s.includes('computer') || s.includes('informatics') || s.includes('it ') || s.includes('csc') || s.includes('ip ')) return 'COMPUTER';
+    if (s.includes('music')) return 'MUSIC';
+    return null;
+  }
+
+  function pickRoomForSubject(subjectName: string, subjectCode: string) {
+    const pref = detectPreferredRoom(subjectName, subjectCode);
+    // roomOptions only contains labels; best-effort match by label keywords.
+    if (pref === 'LAB') {
+      const lab = roomOptions.find((r) => r.value && /lab/i.test(r.label));
+      if (lab) return lab.value;
+    }
+    if (pref === 'COMPUTER') {
+      const comp = roomOptions.find((r) => r.value && /(computer|cs)\b/i.test(r.label));
+      if (comp) return comp.value;
+      const lab = roomOptions.find((r) => r.value && /lab/i.test(r.label));
+      if (lab) return lab.value;
+    }
+    if (pref === 'MUSIC') {
+      const mus = roomOptions.find((r) => r.value && /music/i.test(r.label));
+      if (mus) return mus.value;
+    }
+    // default: use homeroom (null / empty selection)
+    return '';
+  }
+
+  const autoAssignRooms = () => {
+    const targets = flatRows.filter((r) => {
+      const m = assignmentMeta[r.k];
+      if (m?.locked) return false;
+      if (m?.source === 'manual') return false;
+      // only fill missing room
+      return r.roomId == null;
+    });
+    if (!targets.length) {
+      toast.info('Rooms', 'No rows need a room assignment.');
+      return;
+    }
+    setSectionSubjectOverrides((prev) => {
+      const next = prev.slice();
+      const idxByKey = new Map<string, number>();
+      for (let i = 0; i < next.length; i++) idxByKey.set(`${next[i]!.classGroupId}:${next[i]!.subjectId}`, i);
+      for (const t of targets) {
+        const sub = subjects.find((s) => s.id === t.subId);
+        if (!sub) continue;
+        const picked = pickRoomForSubject(sub.name, sub.code);
+        const rid = picked && picked.trim() !== '' ? Number(picked) : null;
+        const key = `${t.classGroupId}:${t.subId}`;
+        const idx = idxByKey.get(key);
+        if (idx != null) {
+          next[idx] = { ...next[idx]!, roomId: rid };
+        } else {
+          next.push({ classGroupId: t.classGroupId, subjectId: t.subId, periodsPerWeek: null, teacherId: null, roomId: rid });
+        }
+      }
+      return next;
+    });
+    toast.success('Rooms', 'Room suggestions applied (labs where possible, otherwise homeroom).');
+  };
+
+  const fixAllPossibleIssues = () => {
+    // Best-effort: fill teachers -> rebalance -> fill rooms.
+    run('auto', null);
+    run('rebalance', null);
+    autoAssignRooms();
+    toast.success('Fix all', 'Applied best-effort fixes. Remaining rows (if any) need manual decisions.');
   };
 
   const setTeacherOnSlot = (classGroupId: number, subjectId: number, newId: string) => {
@@ -161,22 +684,63 @@ export function SmartTeacherAssignmentBlock({
     }));
   };
 
+  const setRoomOnSlot = (classGroupId: number, subjectId: number, newId: string) => {
+    const lock = manualOverrideMode;
+    const rid = newId && String(newId).trim() !== '' ? Number(newId) : null;
+    if (newId && rid != null && !Number.isFinite(rid)) return;
+
+    setSectionSubjectOverrides((prev) => {
+      const next = prev.slice();
+      const idx = next.findIndex((r) => Number(r.classGroupId) === Number(classGroupId) && Number(r.subjectId) === Number(subjectId));
+      if (idx >= 0) {
+        next[idx] = { ...next[idx], roomId: rid };
+        return next;
+      }
+      // Create a minimal override row (inherit periods/teacher unless explicitly overridden elsewhere).
+      next.push({ classGroupId, subjectId, periodsPerWeek: null, teacherId: null, roomId: rid });
+      return next;
+    });
+
+    setAssignmentMeta((m) => ({
+      ...m,
+      [slotKey(classGroupId, subjectId)]: { source: 'manual' as const, locked: lock },
+    }));
+  };
+
   const teachOpts = (subjectId: number) =>
-    staff
-      .filter(
-        (s) =>
-          (s.roleNames ?? []).includes('TEACHER') ||
-          ((s.roleNames?.length ?? 0) === 0 && (s.teachableSubjectIds?.length ?? 0) > 0),
-      )
+    staffNorm
+      .filter((s) => (s.roleNames ?? []).includes('TEACHER'))
       .filter((s) => !s.teachableSubjectIds?.length || s.teachableSubjectIds.includes(subjectId))
       .map((s) => ({ value: String(s.id), label: s.fullName || s.email }));
 
   return (
-    <div
-      className="stack"
-      style={{ gap: 12 }}
-    >
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+    <div className="stack" style={{ gap: 12 }}>
+      <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap', flex: '1 1 auto' }}>
+          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
+            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Total rows</div>
+            <div style={{ fontSize: 18, fontWeight: 950 }}>{kpis.total}</div>
+          </div>
+          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
+            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Assigned</div>
+            <div style={{ fontSize: 18, fontWeight: 950, color: '#166534' }}>{kpis.assigned}</div>
+          </div>
+          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
+            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Pending</div>
+            <div style={{ fontSize: 18, fontWeight: 950, color: kpis.pending ? '#b91c1c' : '#166534' }}>{kpis.pending}</div>
+          </div>
+          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
+            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Overloaded</div>
+            <div style={{ fontSize: 18, fontWeight: 950, color: kpis.overloadedTeachers ? '#c2410c' : '#166534' }}>{kpis.overloadedTeachers}</div>
+          </div>
+          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
+            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Conflicts</div>
+            <div style={{ fontSize: 18, fontWeight: 950, color: kpis.conflicts ? '#b91c1c' : '#166534' }}>{kpis.conflicts}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', position: 'sticky', top: 0, zIndex: 5, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)' }}>
         <button type="button" className="btn" onClick={() => run('auto', null)} disabled={!classSubjectConfigs.length}>
           Auto assign teachers
         </button>
@@ -189,7 +753,18 @@ export function SmartTeacherAssignmentBlock({
           Rebalance loads
         </button>
         <button type="button" className="btn secondary" onClick={() => run('reset', null)} disabled={!classSubjectConfigs.length}>
-          Reset auto assignments
+          Clear Auto Assigned Rows
+        </button>
+        <button type="button" className="btn secondary" onClick={autoAssignRooms} disabled={!classSubjectConfigs.length}>
+          Auto assign rooms
+        </button>
+        {autoAssignHomerooms ? (
+          <button type="button" className="btn secondary" onClick={autoAssignHomerooms}>
+            Auto assign homerooms
+          </button>
+        ) : null}
+        <button type="button" className="btn" onClick={fixAllPossibleIssues} disabled={!classSubjectConfigs.length}>
+          Fix all possible issues
         </button>
         {subjFilter ? (
           <button type="button" className="btn secondary" onClick={() => run('rebalance', Number(subjFilter) || null)}>
@@ -198,130 +773,406 @@ export function SmartTeacherAssignmentBlock({
         ) : null}
         <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
           <input type="checkbox" checked={manualOverrideMode} onChange={(e) => setManualOverrideMode(e.target.checked)} />
-          Manual override mode (locks edits)
+          Manual Edit Mode (locks edits)
         </label>
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+            <input type="checkbox" checked={onlyUnassigned} onChange={(e) => setOnlyUnassigned(e.target.checked)} />
+            Only unassigned
+          </label>
+          <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+            <input type="checkbox" checked={onlyLocked} onChange={(e) => setOnlyLocked(e.target.checked)} />
+            Only locked
+          </label>
+          <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+            <input type="checkbox" checked={onlyOverloaded} onChange={(e) => setOnlyOverloaded(e.target.checked)} />
+            Only overloaded
+          </label>
+          <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+            <input type="checkbox" checked={onlyConflicts} onChange={(e) => setOnlyConflicts(e.target.checked)} />
+            Only conflicts
+          </label>
+          <input
+            value={sectionSearch}
+            onChange={(e) => setSectionSearch(e.target.value)}
+            placeholder="Search section…"
+            style={{ width: 220 }}
+          />
+        </div>
         {showBulkActions ? (
-          <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <SelectKeeper
-              value={bulkTid}
-              onChange={setBulkTid}
-              options={[
-                { value: '', label: 'Bulk: pick teacher' },
-                ...staff
-                  .filter((s) => (s.roleNames ?? []).includes('TEACHER'))
-                  .map((s) => ({ value: String(s.id), label: s.fullName })),
-              ]}
-            />
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={!bulkTid || !gradeFilter || !subjFilter}
-              onClick={() => {
-                const g = Number(gradeFilter);
-                const s = Number(subjFilter);
-                const t = Number(bulkTid);
-                if (!Number.isFinite(g) || !Number.isFinite(s) || !Number.isFinite(t)) return;
-                const r = applyUniformGradeSubjectTeacher(classSubjectConfigs, sectionSubjectOverrides, cgs, g, s, t);
-                setClassSubjectConfigs(r.cfg);
-                setSectionSubjectOverrides(r.ovs);
-                setAssignmentMeta((m) => {
-                  const n = { ...m };
-                  for (const cg of classGroups) {
-                    if (Number(cg.gradeLevel) !== g) continue;
-                    n[slotKey(cg.classGroupId, s)] = { source: 'manual' as const, locked: true };
-                  }
-                  return n;
-                });
-                toast.success('Bulk', `Teacher applied to all sections in class ${g} for the selected subject.`);
-              }}
-              title="Apply teacher to all sections in this grade for the selected subject"
-            >
-              Apply to all sections (grade)
-            </button>
-          </div>
+          <button type="button" className="btn secondary" onClick={() => setBulkDrawerOpen(true)}>
+            Bulk actions
+          </button>
         ) : null}
+        <button type="button" className="btn secondary" onClick={() => setInsightsOpen(true)} style={{ marginLeft: 'auto' }}>
+          Insights ▸
+        </button>
       </div>
-      <div>
-        <div style={{ overflowX: 'auto' }}>
-          <table className="data-table" style={{ fontSize: 13 }}>
-            <thead>
-              <tr>
-                <th>Section</th>
-                <th>Subject</th>
-                <th>Periods / wk</th>
-                <th>Assigned teacher</th>
-                <th>Source</th>
-                <th title="Lock keeps this row out of auto and rebalance">Lock</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {flatRows.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="muted" style={{ padding: 12 }}>
-                    No section mappings yet. First click <strong>Configure class</strong> for a grade to enable subjects and set default periods.
-                    Then come back and click <strong>Auto assign teachers</strong>.
-                  </td>
-                </tr>
-              ) : (
-                flatRows.map((row) => {
-                  const m = assignmentMeta[row.k];
-                  const src: AssignmentSource | '—' = m?.source ?? '—';
-                  const lo = m?.locked ?? false;
-                  const label =
-                    src === 'auto' ? 'Auto' : src === 'manual' ? 'Manual' : src === 'rebalanced' ? 'Rebalanced' : '—';
-                  const sec = classGroups.find((c) => c.classGroupId === row.classGroupId);
-                  return (
-                    <tr key={row.k}>
-                      <td>{sec?.displayName ?? sec?.code}</td>
-                      <td style={{ fontWeight: 800 }}>{row.subName}</td>
-                      <td>{row.periods}</td>
-                      <td style={{ minWidth: 200 }}>
-                        <SelectKeeper
-                          value={row.staffId != null ? String(row.staffId) : ''}
-                          onChange={(v) => setTeacherOnSlot(row.classGroupId, row.subId, v)}
-                          options={teachOpts(row.subId)}
-                        />
-                      </td>
-                      <td title="Auto-assigned based on subject skill + balanced workload.">{label}</td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={lo}
-                          onChange={(e) => {
-                            const locked = e.target.checked;
-                            setAssignmentMeta((prev) => ({
-                              ...prev,
-                              [row.k]: { source: m?.source ?? 'manual', locked },
-                            }));
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn secondary"
-                          style={{ fontSize: 12, padding: '2px 8px' }}
-                          onClick={() => setTeacherOnSlot(row.classGroupId, row.subId, '')}
-                        >
-                          Clear
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+
+      <div className="row" style={{ gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 100%', minWidth: 320 }}>
+          {flatRows.length === 0 ? (
+            <div className="muted" style={{ padding: 12 }}>
+              No section mappings yet. First click <strong>Configure class</strong> for a grade to enable subjects and set default periods.
+              Then come back and click <strong>Auto assign teachers</strong>.
+            </div>
+          ) : (
+            <div className="stack" style={{ gap: 10 }}>
+              <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
+                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 950 }}>{`Needs attention (${needsAttention.needs.length} row${needsAttention.needs.length === 1 ? '' : 's'})`}</div>
+                  <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+                    Showing: missing teacher · overload · preferred room missing · conflicts · locked conflicts
+                  </div>
+                </div>
+                {needsAttention.needs.length === 0 ? (
+                  <div className="muted">No issues found in the current filters.</div>
+                ) : (
+                  renderGrouped(groupedNeeds, true)
+                )}
+              </div>
+
+              <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
+                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 950 }}>Healthy assignments</div>
+                  <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Collapsed by default</div>
+                </div>
+                {needsAttention.healthy.length === 0 ? (
+                  <div className="muted">No healthy rows for current filters.</div>
+                ) : (
+                  renderGrouped(groupedHealthy, false)
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {insightsOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2,6,23,0.35)',
+            zIndex: 55,
+            display: 'flex',
+            justifyContent: 'flex-end',
+          }}
+          onClick={() => setInsightsOpen(false)}
+        >
+          <div
+            style={{ width: 'min(520px, 92vw)', height: '100%', background: 'white', padding: 14, overflow: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontWeight: 950, fontSize: 16 }}>Insights</div>
+              <button type="button" className="btn secondary" onClick={() => setInsightsOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div className="stack" style={{ gap: 12, marginTop: 12 }}>
+              <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
+                <div style={{ fontWeight: 950 }}>Recommendations</div>
+                <div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
+                  {kpis.pending > 0 ? (
+                    <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                      <div>⚠ {kpis.pending} rows missing teacher</div>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        style={{ fontSize: 12, padding: '2px 8px' }}
+                        onClick={() => {
+                          setOnlyUnassigned(true);
+                          setOnlyConflicts(false);
+                          setOnlyOverloaded(false);
+                          setSectionSearch('');
+                          setInsightsOpen(false);
+                        }}
+                      >
+                        View
+                      </button>
+                    </div>
+                  ) : (
+                    <div>• All rows have a teacher</div>
+                  )}
+                  {missingTeacherReport.length ? (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 950, marginBottom: 6 }}>
+                        Missing teacher mappings for
+                      </div>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="data-table" style={{ fontSize: 12 }}>
+                          <thead>
+                            <tr>
+                              <th>Subject</th>
+                              <th>Code</th>
+                              <th>Class</th>
+                              <th>Sections</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {missingTeacherReport.slice(0, 12).map((r) => (
+                              <tr key={`${r.subjectId}:${r.grade ?? ''}`}>
+                                <td style={{ fontWeight: 900 }}>{r.subjectName}</td>
+                                <td className="muted" style={{ fontWeight: 900 }}>{r.subjectCode || '—'}</td>
+                                <td>{r.grade != null ? `Class ${r.grade}` : '—'}</td>
+                                <td title={r.sections.join(', ')}>
+                                  {r.sections.length <= 3 ? r.sections.join(', ') : `${r.sections.slice(0, 3).join(', ')} (+${r.sections.length - 3} more)`}
+                                </td>
+                              </tr>
+                            ))}
+                            {missingTeacherReport.length > 12 ? (
+                              <tr>
+                                <td colSpan={4} className="muted" style={{ padding: 10 }}>
+                                  Showing top 12. Use <strong>View</strong> to open the full list in the grid.
+                                </td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {kpis.overloadedTeachers > 0 ? (
+                    <div>
+                      • {kpis.overloadedTeachers} teacher(s) overloaded — try <strong>Rebalance loads</strong>
+                      <div style={{ marginTop: 4 }}>
+                        {loadRows
+                          .filter((r) => r.status === 'over')
+                          .slice(0, 8)
+                          .map((r) => (
+                            <div key={r.id} className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                              <div>
+                                ⚠ {r.name} overloaded by {Math.max(0, r.load - r.max)}
+                              </div>
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                style={{ fontSize: 12, padding: '2px 8px' }}
+                                onClick={() => {
+                                  setOnlyOverloaded(true);
+                                  setInsightsOpen(false);
+                                }}
+                              >
+                                Fix now
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>• No overloaded teachers</div>
+                  )}
+
+                  {kpis.conflicts > 0 ? (
+                    <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                      <div>⚠ {kpis.conflicts} conflicts</div>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        style={{ fontSize: 12, padding: '2px 8px' }}
+                        onClick={() => {
+                          setOnlyConflicts(true);
+                          setOnlyUnassigned(false);
+                          setInsightsOpen(false);
+                        }}
+                      >
+                        Open
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
+                <div style={{ fontWeight: 950 }}>Teacher load</div>
+                <div className="stack" style={{ gap: 8 }}>
+                  {loadRows
+                    .slice()
+                    .sort((a, b) => b.load - a.load)
+                    .map((r) => {
+                      const ratio = r.max > 0 ? r.load / r.max : 0;
+                      const barColor = ratio > 1 ? '#b91c1c' : ratio > 0.85 ? '#c2410c' : '#16a34a';
+                      return (
+                        <div key={r.id}>
+                          <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                            <div style={{ fontWeight: 800, fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {r.name}
+                            </div>
+                            <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
+                              {r.load}/{r.max}
+                            </div>
+                          </div>
+                          <div style={{ height: 8, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden', marginTop: 4 }}>
+                            <div style={{ width: `${Math.min(140, Math.round((r.load / Math.max(1, r.max)) * 100))}%`, height: '100%', background: barColor }} />
+                          </div>
+                          {r.status === 'over' ? (
+                            <div style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c', marginTop: 4 }}>
+                              Overloaded +{Math.max(0, r.load - r.max)}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {bulkDrawerOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2,6,23,0.35)',
+            zIndex: 60,
+            display: 'flex',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <div style={{ width: 'min(520px, 92vw)', height: '100%', background: 'white', padding: 14, overflow: 'auto' }}>
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 950, fontSize: 16 }}>Bulk actions</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  Scope uses current filters: {gradeFilter ? `Class ${gradeFilter}` : 'All grades'} {subjFilter ? `· Subject ${subjFilter}` : ''}
+                </div>
+              </div>
+              <button type="button" className="btn secondary" onClick={() => setBulkDrawerOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div style={{ marginTop: 12 }} className="stack">
+              <div className="sms-alert sms-alert--info">
+                <div>
+                  <div className="sms-alert__title">Preview</div>
+                  <div className="sms-alert__msg">
+                    This will affect <strong>{flatRows.length}</strong> row(s) in the current view.
+                  </div>
+                </div>
+              </div>
+
+              <div className="stack">
+                <label style={{ fontSize: 12, fontWeight: 900 }}>Teacher (grade+subject)</label>
+                <SelectKeeper
+                  value={bulkTid}
+                  onChange={setBulkTid}
+                  options={[
+                    { value: '', label: 'Select teacher…' },
+                    ...staff.filter((s) => (s.roleNames ?? []).includes('TEACHER')).map((s) => ({ value: String(s.id), label: s.fullName || s.email })),
+                  ]}
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!bulkTid || !gradeFilter || !subjFilter}
+                  onClick={() => {
+                    const g = Number(gradeFilter);
+                    const s = Number(subjFilter);
+                    const t = Number(bulkTid);
+                    if (!Number.isFinite(g) || !Number.isFinite(s) || !Number.isFinite(t)) return;
+                    const r = applyUniformGradeSubjectTeacher(classSubjectConfigs, sectionSubjectOverrides, cgs, g, s, t);
+                    setClassSubjectConfigs(r.cfg);
+                    setSectionSubjectOverrides(r.ovs);
+                    setAssignmentMeta((m) => {
+                      const n = { ...m };
+                      for (const cg of classGroups) {
+                        if (Number(cg.gradeLevel) !== g) continue;
+                        n[slotKey(cg.classGroupId, s)] = { source: 'manual' as const, locked: true };
+                      }
+                      return n;
+                    });
+                    toast.success('Bulk', `Teacher applied to all sections in class ${g} for the selected subject.`);
+                  }}
+                >
+                  Apply teacher
+                </button>
+              </div>
+
+              <div className="stack">
+                <label style={{ fontSize: 12, fontWeight: 900 }}>Room (grade+subject)</label>
+                <SelectKeeper
+                  value={bulkRoomId}
+                  onChange={setBulkRoomId}
+                  options={[
+                    { value: '', label: '🏠 Homeroom' },
+                    ...roomOptions.filter((r) => r.value !== ''),
+                  ]}
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!gradeFilter || !subjFilter}
+                  onClick={() => {
+                    const g = Number(gradeFilter);
+                    const s = Number(subjFilter);
+                    if (!Number.isFinite(g) || !Number.isFinite(s)) return;
+                    const rid = bulkRoomId && bulkRoomId.trim() !== '' ? Number(bulkRoomId) : null;
+                    if (bulkRoomId && bulkRoomId.trim() !== '' && !Number.isFinite(rid)) return;
+                    const inGrade = classGroups.filter((cg) => Number(cg.gradeLevel) === g).map((cg) => cg.classGroupId);
+                    setSectionSubjectOverrides((prev) => {
+                      const next = prev.slice();
+                      const idxByKey = new Map<string, number>();
+                      for (let i = 0; i < next.length; i++) idxByKey.set(`${next[i]!.classGroupId}:${next[i]!.subjectId}`, i);
+                      for (const cid of inGrade) {
+                        const key = `${cid}:${s}`;
+                        const idx = idxByKey.get(key);
+                        if (idx != null) next[idx] = { ...next[idx]!, roomId: rid };
+                        else next.push({ classGroupId: cid, subjectId: s, periodsPerWeek: null, teacherId: null, roomId: rid });
+                      }
+                      return next;
+                    });
+                    toast.success('Bulk', `Room applied to all sections in class ${g} for the selected subject.`);
+                  }}
+                >
+                  Apply room
+                </button>
+              </div>
+
+              <div className="stack">
+                <label style={{ fontSize: 12, fontWeight: 900 }}>Lock</label>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={!gradeFilter}
+                  onClick={() => {
+                    const g = Number(gradeFilter);
+                    if (!Number.isFinite(g)) return;
+                    const inGrade = classGroups.filter((cg) => Number(cg.gradeLevel) === g).map((cg) => cg.classGroupId);
+                    setAssignmentMeta((m) => {
+                      const n = { ...m };
+                      for (const row of flatRows) {
+                        if (!inGrade.includes(row.classGroupId)) continue;
+                        const cur = n[row.k];
+                        n[row.k] = { source: cur?.source ?? 'manual', locked: true, conflictReason: cur?.conflictReason };
+                      }
+                      return n;
+                    });
+                    toast.success('Bulk', `Locked all rows in class ${g}.`);
+                  }}
+                >
+                  Lock grade
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 export function TeacherLoadDashboard({
   classGroups,
-  subjects,
   staff,
   classSubjectConfigs,
   sectionSubjectOverrides,
@@ -329,7 +1180,6 @@ export function TeacherLoadDashboard({
   subjectsCatalogForLabels,
 }: {
   classGroups: ClassG[];
-  subjects: Sub[];
   staff: StaffRow[];
   classSubjectConfigs: ClassSubjectConfigRow[];
   sectionSubjectOverrides: SectionSubjectOverrideRow[];
@@ -347,14 +1197,24 @@ export function TeacherLoadDashboard({
   const anyAssigned = useMemo(() => effective.some((e) => e.staffId != null), [effective]);
   const teacherFilter = filters?.teacher ?? '';
 
+  const staffNorm = useMemo(
+    () =>
+      staff.map((s) => ({
+        ...s,
+        maxWeeklyLectureLoad: s.maxWeeklyLectureLoad ?? null,
+        preferredClassGroupIds: s.preferredClassGroupIds ?? null,
+      })),
+    [staff],
+  );
+
   const rows = useMemo(() => {
     const base = buildTeacherLoadRows(
       effective,
-      staff,
+      staffNorm,
       subjectsCatalogForLabels.map((s) => ({ id: s.id, name: s.name, code: s.code })),
     );
     return teacherFilter ? base.filter((r) => String(r.id) === teacherFilter) : base;
-  }, [effective, staff, subjectsCatalogForLabels, teacherFilter]);
+  }, [effective, staffNorm, subjectsCatalogForLabels, teacherFilter]);
 
   if (!classSubjectConfigs.length) {
     return <div className="muted">No load data yet. First configure a class template.</div>;

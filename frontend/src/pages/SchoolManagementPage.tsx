@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -66,38 +66,6 @@ export function SchoolManagementPage() {
     onError: (e) => toast.error('Request failed', formatApiError(e)),
   });
 
-  const canViewAttendanceSettings = (me.data?.roles ?? []).some((r) =>
-    ['SCHOOL_ADMIN', 'PRINCIPAL', 'VICE_PRINCIPAL', 'HOD'].includes(r),
-  );
-  const canEditAttendanceMode = (me.data?.roles ?? []).some((r) => ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(r));
-
-  const attendanceSettings = useQuery({
-    queryKey: ['attendance-settings'],
-    queryFn: async () =>
-      (await api.get<{ attendanceMode: 'DAILY' | 'LECTURE_WISE' }>('/api/v1/school/management/attendance-settings'))
-        .data,
-    enabled: canViewAttendanceSettings,
-  });
-
-  const [attendanceModeDraft, setAttendanceModeDraft] = useState<'DAILY' | 'LECTURE_WISE' | ''>('');
-
-  const saveAttendanceMode = useMutation({
-    mutationFn: async (attendanceMode: 'DAILY' | 'LECTURE_WISE') =>
-      api.put('/api/v1/school/management/attendance-settings', { attendanceMode }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['attendance-settings'] });
-      await qc.invalidateQueries({ queryKey: ['me'] });
-      toast.success('Saved', 'Attendance strategy updated.');
-    },
-    onError: (e) => toast.error('Save failed', formatApiError(e)),
-  });
-
-  useEffect(() => {
-    if (attendanceSettings.data?.attendanceMode) {
-      setAttendanceModeDraft(attendanceSettings.data.attendanceMode);
-    }
-  }, [attendanceSettings.data?.attendanceMode]);
-
   const growth = useMemo(() => {
     const v = overview.data?.enrollmentGrowthPercent;
     if (v == null) return '—';
@@ -163,58 +131,6 @@ export function SchoolManagementPage() {
             </div>
           </div>
         </>
-      ) : null}
-
-      {canViewAttendanceSettings ? (
-        <div className="workspace-panel">
-          <h2 className="workspace-panel__title">Attendance strategy</h2>
-          <p className="muted" style={{ margin: '0 0 12px', fontSize: 14, lineHeight: 1.55 }}>
-            <strong>Daily</strong>: class teacher marks once per class for the whole day.{' '}
-            <strong>Lecture-wise</strong>: each period&apos;s teacher marks their own lecture.
-          </p>
-          {attendanceSettings.isLoading ? (
-            <div className="muted">Loading…</div>
-          ) : attendanceSettings.isError ? (
-            <div style={{ color: '#b91c1c' }}>{formatApiError(attendanceSettings.error)}</div>
-          ) : (
-            <form
-              className="row"
-              style={{ flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!attendanceModeDraft) return;
-                saveAttendanceMode.mutate(attendanceModeDraft);
-              }}
-            >
-              <div className="stack" style={{ minWidth: 220, flex: '1 1 260px' }}>
-                <label htmlFor="attendance-mode">Mode</label>
-                <SelectKeeper
-                  id="attendance-mode"
-                  value={attendanceModeDraft}
-                  onChange={(v) => setAttendanceModeDraft((v || '') as 'DAILY' | 'LECTURE_WISE' | '')}
-                  options={[
-                    { value: 'LECTURE_WISE', label: 'Lecture-wise (per period)' },
-                    { value: 'DAILY', label: 'Daily (whole day, per class)' },
-                  ]}
-                  emptyValueLabel="Select…"
-                  disabled={!canEditAttendanceMode}
-                />
-              </div>
-              {canEditAttendanceMode ? (
-                <button type="submit" className="btn" disabled={saveAttendanceMode.isPending || !attendanceModeDraft}>
-                  {saveAttendanceMode.isPending ? 'Saving…' : 'Save'}
-                </button>
-              ) : (
-                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Only <strong>SCHOOL_ADMIN</strong> or <strong>PRINCIPAL</strong> can change this setting.
-                </p>
-              )}
-            </form>
-          )}
-          {saveAttendanceMode.isError ? (
-            <div style={{ color: '#b91c1c', marginTop: 8, fontSize: 14 }}>{formatApiError(saveAttendanceMode.error)}</div>
-          ) : null}
-        </div>
       ) : null}
 
       <div className="workspace-panel">

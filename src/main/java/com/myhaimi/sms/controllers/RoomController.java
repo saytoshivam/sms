@@ -43,6 +43,13 @@ public class RoomController {
         return ResponseEntity.noContent().build();
     }
 
+    @DeleteMapping("/delete-all")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<Void> deleteAll() {
+        roomService.deleteAllForSchool();
+        return ResponseEntity.noContent().build();
+    }
+
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public ResponseEntity<Room> update(@PathVariable Integer id, @RequestBody RoomUpdateDTO body) {

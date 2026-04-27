@@ -76,6 +76,7 @@ export default function App() {
         <Route path="admin/schools/:schoolId" element={<PlatformSchoolEditPage />} />
         <Route path="school-theme" element={<SchoolThemePage />} />
         <Route path="school/management" element={<SchoolManagementPage />} />
+        {/* Kept for existing deep links; dashboard no longer exposes the wizard directly. */}
         <Route path="onboarding" element={<SchoolOnboardingWizardPage />} />
         <Route path="user-access" element={<UserAccessManagementPage />} />
         <Route path="class-groups" element={<ClassGroupsPage />} />

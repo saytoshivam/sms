@@ -19,5 +19,21 @@ public interface SubjectSectionOverrideRepo extends JpaRepository<SubjectSection
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from SubjectSectionOverride sso where sso.subject.id = :subjectId")
     void deleteBySubject_Id(@Param("subjectId") Integer subjectId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update SubjectSectionOverride sso set sso.room = null where sso.classGroup.school.id = :schoolId")
+    int clearRoomsBySchool_Id(@Param("schoolId") Integer schoolId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update SubjectSectionOverride sso set sso.room = null where sso.classGroup.school.id = :schoolId and sso.room.id = :roomId")
+    int clearRoomsBySchool_IdAndRoom_Id(@Param("schoolId") Integer schoolId, @Param("roomId") Integer roomId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from SubjectSectionOverride sso where sso.classGroup.school.id = :schoolId and sso.classGroup.id = :classGroupId")
+    int deleteBySchool_IdAndClassGroup_Id(@Param("schoolId") Integer schoolId, @Param("classGroupId") Integer classGroupId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update SubjectSectionOverride sso set sso.staff = null where sso.classGroup.school.id = :schoolId and sso.staff.id = :staffId")
+    int clearStaffBySchool_IdAndStaff_Id(@Param("schoolId") Integer schoolId, @Param("staffId") Integer staffId);
 }
 

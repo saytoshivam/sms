@@ -25,5 +25,9 @@ public interface SubjectClassGroupRepo extends JpaRepository<SubjectClassGroup, 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from SubjectClassGroup scg where scg.subject.id = :subjectId")
     void deleteBySubject_Id(@Param("subjectId") Integer subjectId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from SubjectClassGroup scg where scg.classGroup.school.id = :schoolId and scg.classGroup.id = :classGroupId")
+    int deleteBySchool_IdAndClassGroup_Id(@Param("schoolId") Integer schoolId, @Param("classGroupId") Integer classGroupId);
 }
 
