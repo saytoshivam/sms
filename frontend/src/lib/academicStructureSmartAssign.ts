@@ -44,10 +44,10 @@ export function eligibleForAuto(s: StaffLite, subjectId: number): boolean {
   return t.length > 0 && t.includes(subjectId);
 }
 
-function effectiveMaxLoad(s: StaffLite): number {
-  return s.maxWeeklyLectureLoad != null && s.maxWeeklyLectureLoad > 0
-    ? s.maxWeeklyLectureLoad
-    : DEFAULT_MAX_WEEKLY_LECTURE_LOAD;
+function effectiveMaxLoad(s: StaffLite, fallbackMaxLoad: number | null | undefined): number {
+  if (s.maxWeeklyLectureLoad != null && s.maxWeeklyLectureLoad > 0) return s.maxWeeklyLectureLoad;
+  if (fallbackMaxLoad != null && fallbackMaxLoad > 0) return fallbackMaxLoad;
+  return DEFAULT_MAX_WEEKLY_LECTURE_LOAD;
 }
 
 function clamp(n: number, a: number, b: number) {
@@ -214,6 +214,7 @@ export function runSmartTeacherAssignment(
   assignmentMeta: Record<string, AssignmentSlotMeta>,
   mode: 'auto' | 'rebalance' | 'reset',
   subjectIdFilter: number | null = null,
+  schoolSlotsPerWeek: number | null = null,
 ): {
   classSubjectConfigs: ClassSubjectConfigRow[];
   sectionSubjectOverrides: SectionSubjectOverrideRow[];
@@ -235,8 +236,10 @@ export function runSmartTeacherAssignment(
     for (const a of eff()) {
       const k = slotKey(a.classGroupId, a.subjectId);
       const m = meta[k];
-      if (m?.locked) continue;
-      if (m?.source === 'manual') continue;
+      // If locked but empty, allow reset/auto to populate; lock should protect an existing pick.
+      if (m?.locked && a.staffId != null) continue;
+      // If user manually set a teacher, keep it. If it's manual-but-empty, allow reset/auto to manage it.
+      if (m?.source === 'manual' && a.staffId != null) continue;
       const g = classGroups.find((c) => c.classGroupId === a.classGroupId)?.gradeLevel;
       if (g == null) continue;
       const r = applyUniformGradeSubjectTeacher(cfg, ov, classGroups, Number(g), a.subjectId, null);
@@ -257,8 +260,10 @@ export function runSmartTeacherAssignment(
     if (g == null) continue;
     const k = slotKey(a.classGroupId, a.subjectId);
     const m = meta[k];
-    if (m?.locked) continue;
-    if (m?.source === 'manual') continue;
+    // If locked but empty, allow auto-assign to fill; lock should protect an existing pick.
+    if (m?.locked && a.staffId != null) continue;
+    // If user manually set a teacher, keep it. If it's manual-but-empty, allow auto-assign to fill it.
+    if (m?.source === 'manual' && a.staffId != null) continue;
     const sk = `${Number(g)}:${a.subjectId}`;
     const d: Demand = {
       classGroupId: a.classGroupId,
@@ -306,7 +311,7 @@ export function runSmartTeacherAssignment(
     const scored = cands
       .map((t) => {
         const baseLoad = base.load.get(t.id) ?? 0;
-        const max = effectiveMaxLoad(t);
+        const max = effectiveMaxLoad(t, schoolSlotsPerWeek);
         const gradeCount = (base.grades.get(t.id)?.size ?? 0) || 0;
         const prefersAny = (t.preferredClassGroupIds ?? []).some((id) => classGroupIdsInGrade.includes(id));
         const alreadyTeaches = base.byGSub.get(`${t.id}:${grade}:${subjectId}`) != null;
@@ -330,11 +335,16 @@ export function runSmartTeacherAssignment(
     // Prefer a single teacher for all sections in this grade+subject when possible.
     const single = scored.find((x) => x.baseLoad + totalP <= x.max) ?? null;
     if (single) {
-      const r = applyUniformGradeSubjectTeacher(cfg, ov, classGroups, grade, subjectId, single.t.id);
-      cfg = r.cfg;
-      ov = r.ovs;
       const label: AssignmentSource = mode === 'rebalance' ? 'rebalanced' : 'auto';
-      for (const d of demands) meta[d.k] = { source: label, locked: false };
+      // IMPORTANT: Some subjects exist only via section overrides (not in grade template).
+      // Using grade-template assignment would clear override teachers and leave rows unassigned.
+      // So we apply the same teacher per-section to guarantee assignment.
+      for (const d of demands) {
+        const r1 = applySectionTeacher(cfg, ov, classGroups, d.classGroupId, d.subjectId, single.t.id);
+        cfg = r1.cfg;
+        ov = r1.ovs;
+        meta[d.k] = { source: label, locked: false };
+      }
       continue;
     }
 
@@ -347,7 +357,7 @@ export function runSmartTeacherAssignment(
       const scored2 = cands
         .map((t) => {
           const baseLoad = localLoad.get(t.id) ?? 0;
-          const max = effectiveMaxLoad(t);
+          const max = effectiveMaxLoad(t, schoolSlotsPerWeek);
           const gradeCount = (base.grades.get(t.id)?.size ?? 0) || 0;
           const prefersAny = (t.preferredClassGroupIds ?? []).includes(d.classGroupId);
           const alreadyTeaches = base.byGSub.get(`${t.id}:${grade}:${subjectId}`) != null;
@@ -375,7 +385,9 @@ export function runSmartTeacherAssignment(
       const pick = scored2[0]!;
       if (!pick.fits) {
         warnings.push(`Could not fit grade ${grade} subject into capacity; assigned best effort (may overload).`);
-        meta[d.k] = { source: 'conflict', locked: false, conflictReason: 'CAPACITY_OVERFLOW' };
+        // Keep the assignment source as AUTO/REBALANCED (we still assign a teacher),
+        // but attach a conflictReason so UI can flag it without inflating "hard conflicts".
+        meta[d.k] = { source: label, locked: false, conflictReason: 'CAPACITY_OVERFLOW' };
       } else {
         meta[d.k] = { source: label, locked: false };
       }
@@ -391,9 +403,9 @@ export function runSmartTeacherAssignment(
     const effective = eff();
     const base = buildLoadAndFragmentation(effective, classGroups);
     const maxById = new Map<number, number>();
-    for (const s of staff) maxById.set(s.id, effectiveMaxLoad(s));
+    for (const s of staff) maxById.set(s.id, effectiveMaxLoad(s, schoolSlotsPerWeek));
 
-    const over = [...base.load.entries()].filter(([tid, l]) => l > (maxById.get(tid) ?? DEFAULT_MAX_WEEKLY_LECTURE_LOAD));
+    const over = [...base.load.entries()].filter(([tid, l]) => l > (maxById.get(tid) ?? 0));
     if (over.length > 0) {
       // Try biggest rows first for each overloaded teacher.
       for (const [tid] of over) {
@@ -404,8 +416,10 @@ export function runSmartTeacherAssignment(
         for (const r of rows) {
           const k = slotKey(r.classGroupId, r.subjectId);
           const m = meta[k];
-          if (m?.locked) continue;
-          if (m?.source === 'manual') continue;
+          // If locked but empty, allow rebalance to populate; lock should protect an existing pick.
+          if (m?.locked && r.staffId != null) continue;
+          // Don't rebalance away a manual pick, but allow rebalancing manual-but-empty rows.
+          if (m?.source === 'manual' && r.staffId != null) continue;
           // only move non-manual
           const cg = classGroups.find((c) => c.classGroupId === r.classGroupId);
           const grade = cg?.gradeLevel;
@@ -416,7 +430,7 @@ export function runSmartTeacherAssignment(
           const scored = cands
             .map((t) => {
               const curLoad = base.load.get(t.id) ?? 0;
-              const max = effectiveMaxLoad(t);
+              const max = effectiveMaxLoad(t, schoolSlotsPerWeek);
               const fits = curLoad + r.weeklyFrequency <= max;
               const gradeCount = (base.grades.get(t.id)?.size ?? 0) || 0;
               const prefersAny = (t.preferredClassGroupIds ?? []).includes(r.classGroupId);
@@ -449,9 +463,34 @@ export function runSmartTeacherAssignment(
           base.load.set(pick.t.id, (base.load.get(pick.t.id) ?? 0) + r.weeklyFrequency);
 
           // stop early once teacher no longer overloaded
-          if ((base.load.get(tid) ?? 0) <= (maxById.get(tid) ?? DEFAULT_MAX_WEEKLY_LECTURE_LOAD)) break;
+          if ((base.load.get(tid) ?? 0) <= (maxById.get(tid) ?? 0)) break;
         }
       }
+    }
+  }
+
+  // Final pass: mark still-unassigned enabled slots with a clear reason.
+  // This makes the UI explain why some rows remain pending after an auto-assign attempt.
+  for (const a of eff()) {
+    if (a.weeklyFrequency <= 0) continue;
+    if (subjectIdFilter != null && a.subjectId !== subjectIdFilter) continue;
+    const k = slotKey(a.classGroupId, a.subjectId);
+    const m = meta[k];
+    if (m?.locked && a.staffId != null) continue;
+    if (m?.source === 'manual' && a.staffId != null) continue;
+    if (a.staffId != null) continue;
+
+    const eligible = candidatesAll.filter((s) => eligibleForAuto(s, a.subjectId));
+    if (eligible.length === 0) {
+      meta[k] = { source: 'conflict', locked: m?.locked ?? false, conflictReason: 'NO_ELIGIBLE_TEACHER' };
+    } else {
+      // There are eligible teachers but none got assigned (usually due to load constraints).
+      // Keep source if present; attach a reason for visibility.
+      meta[k] = {
+        source: (m?.source ?? 'auto') as AssignmentSource,
+        locked: m?.locked ?? false,
+        conflictReason: 'CAPACITY_OVERFLOW',
+      };
     }
   }
 
@@ -462,8 +501,14 @@ export function buildTeacherLoadRows(
   effective: AcademicAllocRow[],
   staff: StaffLite[],
   subjects: { id: number; name: string; code: string }[],
+  schoolSlotsPerWeek: number | null = null,
 ) {
-  const subBy = new Map(subjects.map((s) => [s.id, s.name]));
+  const subBy = new Map(
+    subjects.map((s) => [
+      s.id,
+      `${String(s.code ?? '').trim() || `S${s.id}`} — ${String(s.name ?? '').trim() || `Subject ${s.id}`}`,
+    ]),
+  );
   const loadBy: Record<number, { n: number; subj: Set<number> }> = {};
   for (const a of effective) {
     if (a.staffId == null) continue;
@@ -479,7 +524,7 @@ export function buildTeacherLoadRows(
         .map((id) => subBy.get(id) ?? `S${id}`)
         .sort()
         .join(', ');
-      const max = effectiveMaxLoad(s);
+      const max = effectiveMaxLoad(s, schoolSlotsPerWeek);
       const load = entry.n;
       let status: 'healthy' | 'near' | 'over' = 'healthy';
       if (load > max) status = 'over';

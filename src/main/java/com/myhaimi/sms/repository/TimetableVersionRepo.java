@@ -8,6 +8,7 @@ import java.util.Optional;
 
 public interface TimetableVersionRepo extends JpaRepository<TimetableVersion, Integer> {
     Optional<TimetableVersion> findTopBySchool_IdAndStatusOrderByVersionDesc(Integer schoolId, TimetableStatus status);
+    Optional<TimetableVersion> findTopBySchool_IdOrderByVersionDesc(Integer schoolId);
     Optional<TimetableVersion> findByIdAndSchool_Id(Integer id, Integer schoolId);
     long countBySchool_Id(Integer schoolId);
 }

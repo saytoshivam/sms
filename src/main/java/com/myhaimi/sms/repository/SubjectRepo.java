@@ -16,6 +16,9 @@ public interface SubjectRepo extends JpaRepository<Subject, Integer> {
 
     Optional<Subject> findBySchool_IdAndCode(Integer schoolId, String code);
 
+    /** Includes soft-deleted rows (needed for safe normalization by subject code). */
+    List<Subject> findBySchool_IdOrderByCodeAsc(Integer schoolId);
+
     @Query("select s from Subject s where s.isDeleted = true")
     List<Subject> findAllSoftDeleted();
 }

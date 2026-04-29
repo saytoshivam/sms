@@ -1238,6 +1238,9 @@ textarea:disabled {
 .container--school-leader-app {
   width: 100%;
   max-width: 1100px;
+  /* School leader screens (incl. onboarding) feel cramped with the default container padding on desktop.
+     Tighten the gutter a bit while keeping a safe mobile padding. */
+  padding: clamp(10px, 2.2vw, 18px);
 }
 
 .container--platform-app {
@@ -4194,6 +4197,9 @@ textarea:disabled {
 .select-keeper__value {
   flex: 1;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .select-keeper__chev {

@@ -252,12 +252,16 @@ public class TimetableGridV2Service {
                 .orElse(null);
         if (v != null) return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
 
-        long existing = timetableVersionRepo.countBySchool_Id(schoolId);
         School school = schoolRepo.findById(schoolId).orElseThrow();
+        // Use max(version) + 1 (not count) to avoid collisions when versions have gaps.
+        int nextVersion = timetableVersionRepo.findTopBySchool_IdOrderByVersionDesc(schoolId)
+                .map(TimetableVersion::getVersion)
+                .map(ver -> ver + 1)
+                .orElse(1);
         TimetableVersion nv = new TimetableVersion();
         nv.setSchool(school);
         nv.setStatus(TimetableStatus.DRAFT);
-        nv.setVersion((int) existing + 1);
+        nv.setVersion(nextVersion);
         nv = timetableVersionRepo.save(nv);
         return new TimetableVersionViewDTO(nv.getId(), nv.getStatus().name(), nv.getVersion());
     }

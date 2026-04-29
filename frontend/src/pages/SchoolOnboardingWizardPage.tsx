@@ -32,6 +32,7 @@ type BasicInfo = {
   startMonth: number;
   workingDays: string[];
   attendanceMode: 'DAILY' | 'LECTURE_WISE';
+  openWindows?: { startTime: string; endTime: string }[];
   schoolStartTime: string;
   schoolEndTime: string;
   lectureDurationMinutes: number;
@@ -405,8 +406,9 @@ function parseRoomsCsv(text: string): RoomDraft[] {
 
 export function SchoolOnboardingWizardPage() {
   const qc = useQueryClient();
-  const [schoolStartTime, setSchoolStartTime] = useState('09:00');
-  const [schoolEndTime, setSchoolEndTime] = useState('17:00');
+  const [openWindows, setOpenWindows] = useState<{ startTime: string; endTime: string }[]>([
+    { startTime: '09:00', endTime: '17:00' },
+  ]);
   const [lectureDurationMinutes, setLectureDurationMinutes] = useState<number | ''>(45);
   const [fromGrade, setFromGrade] = useState(1);
   const [toGrade, setToGrade] = useState(12);
@@ -1018,8 +1020,11 @@ export function SchoolOnboardingWizardPage() {
     setStartMonth(d.startMonth || 4);
     setWorkingDays(Array.isArray(d.workingDays) && d.workingDays.length ? d.workingDays : workingDays);
     setAttendanceMode((d.attendanceMode || 'LECTURE_WISE') as 'DAILY' | 'LECTURE_WISE');
-    setSchoolStartTime(d.schoolStartTime || '09:00');
-    setSchoolEndTime(d.schoolEndTime || '17:00');
+    if (Array.isArray(d.openWindows) && d.openWindows.length) {
+      setOpenWindows(d.openWindows);
+    } else {
+      setOpenWindows([{ startTime: d.schoolStartTime || '09:00', endTime: d.schoolEndTime || '17:00' }]);
+    }
     setLectureDurationMinutes(typeof d.lectureDurationMinutes === 'number' ? d.lectureDurationMinutes : 45);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basicInfo.data]);
@@ -1073,8 +1078,10 @@ export function SchoolOnboardingWizardPage() {
         startMonth,
         workingDays,
         attendanceMode,
-        schoolStartTime,
-        schoolEndTime,
+        openWindows,
+        // Back-compat fields (older consumers still read these)
+        schoolStartTime: openWindows[0]?.startTime ?? '09:00',
+        schoolEndTime: openWindows[openWindows.length - 1]?.endTime ?? '17:00',
         lectureDurationMinutes: lectureDurationMinutes === '' ? null : Number(lectureDurationMinutes),
       }),
     onMutate: () => {
@@ -1665,9 +1672,8 @@ export function SchoolOnboardingWizardPage() {
     academicYear.trim().length >= 4 &&
     workingDays.length > 0 &&
     Boolean(attendanceMode) &&
-    Boolean(schoolStartTime) &&
-    Boolean(schoolEndTime) &&
-    schoolStartTime < schoolEndTime &&
+    openWindows.length > 0 &&
+    openWindows.every((w) => w.startTime && w.endTime && w.startTime < w.endTime) &&
     lectureDurationMinutes !== '' &&
     Number(lectureDurationMinutes) >= 10 &&
     !saveBasic.isPending;
@@ -1893,19 +1899,54 @@ export function SchoolOnboardingWizardPage() {
 
         <div className="stack" style={{ gap: 10 }}>
           <label>School open timings</label>
+          <div className="stack" style={{ gap: 10 }}>
+            {openWindows.map((w, idx) => (
+              <div key={idx} className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div className="stack" style={{ minWidth: 160 }}>
+                  <label className="muted" style={{ fontSize: 12 }}>
+                    Start
+                  </label>
+                  <TimeKeeper
+                    id={`onboarding-school-start-${idx}`}
+                    value={w.startTime}
+                    onChange={(v) => setOpenWindows((p) => p.map((x, i) => (i === idx ? { ...x, startTime: v } : x)))}
+                  />
+                </div>
+                <div className="stack" style={{ minWidth: 160 }}>
+                  <label className="muted" style={{ fontSize: 12 }}>
+                    End
+                  </label>
+                  <TimeKeeper
+                    id={`onboarding-school-end-${idx}`}
+                    value={w.endTime}
+                    onChange={(v) => setOpenWindows((p) => p.map((x, i) => (i === idx ? { ...x, endTime: v } : x)))}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={openWindows.length <= 1}
+                  onClick={() => setOpenWindows((p) => p.filter((_, i) => i !== idx))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setOpenWindows((p) => [...p, { startTime: '14:00', endTime: '17:00' }])}
+              >
+                + Add window
+              </button>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Example: 09:00–13:00 and 14:00–17:00
+              </span>
+            </div>
+          </div>
+
           <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div className="stack" style={{ minWidth: 160 }}>
-              <label className="muted" style={{ fontSize: 12 }}>
-                Start
-              </label>
-              <TimeKeeper id="onboarding-school-start" value={schoolStartTime} onChange={setSchoolStartTime} />
-            </div>
-            <div className="stack" style={{ minWidth: 160 }}>
-              <label className="muted" style={{ fontSize: 12 }}>
-                End
-              </label>
-              <TimeKeeper id="onboarding-school-end" value={schoolEndTime} onChange={setSchoolEndTime} />
-            </div>
             <div className="stack" style={{ minWidth: 220 }}>
               <label className="muted" style={{ fontSize: 12 }}>
                 Default lecture duration (minutes)
@@ -1925,14 +1966,14 @@ export function SchoolOnboardingWizardPage() {
             </div>
           </div>
           <p className="onboarding-inline-help" style={{ margin: 0 }}>
-            We’ll auto-generate consecutive timetable slots of this duration inside the open window (no gaps). You can still
+            We’ll auto-generate consecutive timetable slots of this duration inside each open window (no gaps). You can still
             add/edit time slots later in the timetable screen.
           </p>
-          {schoolStartTime && schoolEndTime && schoolStartTime >= schoolEndTime ? (
+          {openWindows.some((w) => w.startTime && w.endTime && w.startTime >= w.endTime) ? (
             <div className="sms-alert sms-alert--warn">
               <div>
                 <div className="sms-alert__title">Check timings</div>
-                <div className="sms-alert__msg">End time must be after start time.</div>
+                <div className="sms-alert__msg">Each window must have End after Start.</div>
               </div>
             </div>
           ) : null}
@@ -3687,6 +3728,7 @@ export function SchoolOnboardingWizardPage() {
                                       <thead>
                                         <tr>
                                           <th>Room</th>
+                                          <th>Type</th>
                                           <th>Capacity</th>
                                           <th>Usage</th>
                                           <th>Assigned to</th>
@@ -3698,7 +3740,18 @@ export function SchoolOnboardingWizardPage() {
                                         <tr key={r.id}>
                                             <td style={{ fontWeight: 900 }}>
                                               {(() => {
+                                                return (
+                                                  <span className="row" style={{ gap: 10, flexWrap: 'nowrap' }}>
+                                                    <span style={{ width: 62 }}>{r.roomNumber}</span>
+                                                    {r.isSchedulable === false ? <span className="muted">(Not bookable)</span> : null}
+                                                  </span>
+                                                );
+                                              })()}
+                                            </td>
+                                            <td className="muted" style={{ fontWeight: 900 }}>
+                                              {(() => {
                                                 const t = String(r.type ?? '').trim().toUpperCase();
+                                                if (!t) return '—';
                                                 const icon =
                                                   t === 'CLASSROOM'
                                                     ? '🏫'
@@ -3722,13 +3775,10 @@ export function SchoolOnboardingWizardPage() {
                                                           ? 'Library'
                                                           : t === 'CLASSROOM'
                                                             ? 'Classroom'
-                                                            : t || 'Room';
+                                                            : t;
                                                 return (
-                                                  <span className="row" style={{ gap: 10, flexWrap: 'nowrap' }}>
-                                                    <span style={{ width: 62 }}>{r.roomNumber}</span>
-                                                    <span aria-hidden>{icon}</span>
-                                                    <span>{label}</span>
-                                                    {r.isSchedulable === false ? <span className="muted">(Not bookable)</span> : null}
+                                                  <span style={{ whiteSpace: 'nowrap' }}>
+                                                    <span aria-hidden>{icon}</span> {label}
                                                   </span>
                                                 );
                                               })()}

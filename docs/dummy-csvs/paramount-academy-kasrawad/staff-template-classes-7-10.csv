@@ -1,0 +1,23 @@
+fullName,email,phone,employeeNo,designation,roles,subjects,createLoginAccount
+Anika Sharma,anika.sharma@paramountkasrawad.edu,9876510001,TCH0701,English Teacher,TEACHER,ENG007|ENG008|ENG009|ENG010,true
+Ravi Verma,ravi.verma@paramountkasrawad.edu,9876510002,TCH0702,Hindi Teacher,TEACHER,HIN007|HIN008|HIN009|HIN010,true
+Riya Iyer,riya.iyer@paramountkasrawad.edu,9876510009,TCH0709,Sanskrit Teacher,TEACHER,SNK007|SNK008|SNK009|SNK010,true
+Seema Sharma,seema.sharma@paramountkasrawad.edu,9876510012,TCH0712,Punjabi Teacher,TEACHER,PNJ007|PNJ008|PNJ009|PNJ010,true
+Faizan Ali,faizan.ali@paramountkasrawad.edu,9876510013,TCH0713,Urdu Teacher,TEACHER,URD007|URD008|URD009|URD010,true
+
+Meera Singh,meera.singh@paramountkasrawad.edu,9876510003,TCH0703,Mathematics Teacher,TEACHER,MTH007|MTH008|MTH009|MTH010|BMT009|BMT010,true
+Kabir Khan,kabir.khan@paramountkasrawad.edu,9876510004,TCH0704,Science Teacher,TEACHER,SCI007|SCI008|SCI009|SCI010,true
+Priya Joshi,priya.joshi@paramountkasrawad.edu,9876510005,TCH0705,Social Science Teacher,TEACHER,SSC007|SSC008|SSC009|SSC010|HIS009|HIS010|GEO009|GEO010|POL009|POL010|ECO009|ECO010|CIV009|CIV010,true
+
+Neel Patel,neel.patel@paramountkasrawad.edu,9876510008,TCH0708,French Teacher,TEACHER,FRE007|FRE008|FRE009|FRE010,true
+Arjun Mehta,arjun.mehta@paramountkasrawad.edu,9876510014,TCH0714,German Teacher,TEACHER,GER007|GER008|GER009|GER010,true
+
+Isha Gupta,isha.gupta@paramountkasrawad.edu,9876510007,TCH0707,General Knowledge Teacher,TEACHER,GKE007|GKE008,true
+Nikhil Soni,nikhil.soni@paramountkasrawad.edu,9876510015,TCH0715,Computer Applications Teacher,TEACHER,CAP007|CAP008,true
+
+Aman Bansal,aman.bansal@paramountkasrawad.edu,9876510010,TCH0710,AI Teacher,TEACHER,AI0009|AI0010,true
+Pooja Nair,pooja.nair@paramountkasrawad.edu,9876510011,TCH0711,IT Teacher,TEACHER,ITO009|ITO010,true
+
+Devika Rao,devika.rao@paramountkasrawad.edu,9876510016,TCH0716,Yoga Teacher,TEACHER,YOG007|YOG008|YOG009|YOG010,true
+Harsh Vardhan,harsh.vardhan@paramountkasrawad.edu,9876510017,TCH0717,Work Education Teacher,TEACHER,WED007|WED008|WED009|WED010,true
+Kiran Desai,kiran.desai@paramountkasrawad.edu,9876510018,TCH0718,Value Education Teacher,TEACHER,VED007|VED008|VED009|VED010,true

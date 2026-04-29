@@ -178,7 +178,7 @@ export function AcademicStructureSetupStep({
         return a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true });
       });
     return [
-      { value: '', label: 'Class default (homeroom)' },
+      { value: '', label: '🏠 Homeroom' },
       ...list.map((r) => ({
         value: String(r.id),
         label: `${String(r.buildingName ?? r.building ?? '').trim()} ${r.roomNumber}${r.type ? ` · ${r.type}` : ''}`.trim(),
@@ -272,6 +272,25 @@ export function AcademicStructureSetupStep({
     }).length;
     return { pct: Math.round((ready / total) * 100), withIssues };
   }, [classGroups, allocRows, catalogCount, staff, slotsPerWeek]);
+
+  const overCapacitySections = useMemo(() => {
+    if (slotsPerWeek == null) return [];
+    const out: Array<{ classGroupId: number; label: string; totalPeriods: number; capacity: number; overBy: number }> = [];
+    for (const cg of sortedClassGroups) {
+      const h = computeSectionHealth(cg.classGroupId, allocRows, catalogCount, staff, slotsPerWeek);
+      if (!h.overCapacity) continue;
+      const label = String(cg.displayName || cg.code || `Section ${cg.classGroupId}`).trim();
+      out.push({
+        classGroupId: cg.classGroupId,
+        label,
+        totalPeriods: h.totalPeriods,
+        capacity: slotsPerWeek,
+        overBy: Math.max(1, h.totalPeriods - slotsPerWeek),
+      });
+    }
+    out.sort((a, b) => b.overBy - a.overBy || a.label.localeCompare(b.label));
+    return out;
+  }, [slotsPerWeek, sortedClassGroups, allocRows, catalogCount, staff]);
 
   const gradesInSchool = useMemo(() => {
     const set = new Set<number>();
@@ -695,6 +714,31 @@ export function AcademicStructureSetupStep({
               Your school day allows about <strong>{slotsPerWeek}</strong> teachable slots per week. Keep each section’s total
               subject periods at or under this when possible.
             </div>
+            {overCapacitySections.length ? (
+              <div className="sms-alert__msg" style={{ marginTop: 8 }}>
+                <details>
+                  <summary style={{ cursor: 'pointer', fontWeight: 900 }}>
+                    {overCapacitySections.length} section{overCapacitySections.length === 1 ? '' : 's'} over capacity
+                  </summary>
+                  <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+                    {overCapacitySections.slice(0, 12).map((s) => (
+                      <div key={s.classGroupId} className="row" style={{ gap: 10, justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 800 }}>{s.label}</span>
+                        <span className="muted" style={{ fontWeight: 900 }}>
+                          {s.totalPeriods} / {s.capacity} (+
+                          {s.overBy})
+                        </span>
+                      </div>
+                    ))}
+                    {overCapacitySections.length > 12 ? (
+                      <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
+                        +{overCapacitySections.length - 12} more…
+                      </div>
+                    ) : null}
+                  </div>
+                </details>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -1380,6 +1424,7 @@ export function AcademicStructureSetupStep({
               filters={{ grade: smartGradeFilter, subject: smartSubjectFilter, teacher: smartTeacherFilter }}
               showBulkActions
               autoAssignHomerooms={autoAssignDefaultRooms}
+              slotsPerWeek={slotsPerWeek}
             />
           </div>
         </div>
@@ -1539,6 +1584,7 @@ export function AcademicStructureSetupStep({
             sectionSubjectOverrides={sectionSubjectOverrides}
             filters={{ grade: smartGradeFilter, subject: smartSubjectFilter, teacher: smartTeacherFilter }}
             subjectsCatalogForLabels={subjects}
+            slotsPerWeek={slotsPerWeek}
           />
         </div>
       ) : null}
@@ -1653,7 +1699,12 @@ export function AcademicStructureSetupStep({
                             const tOpts = teacherOptionsForSubject(staff, sub.id);
                             const sid = row.defaultTeacherId;
                             const load = sid == null ? 0 : (loadByStaff.get(sid) ?? 0);
-                            const overTeacher = slotsPerWeek != null && load > slotsPerWeek;
+                            const teacherCap =
+                              sid != null
+                                ? staff.find((s) => Number(s.id) === Number(sid))?.maxWeeklyLectureLoad ?? null
+                                : null;
+                            const overTeacher = (teacherCap != null && teacherCap > 0 ? teacherCap : slotsPerWeek) != null &&
+                              load > (teacherCap != null && teacherCap > 0 ? teacherCap : (slotsPerWeek ?? 0));
                             return (
                               <tr key={sub.id}>
                                 <td>
@@ -1823,13 +1874,25 @@ export function AcademicStructureSetupStep({
               placeholder="Filter by name or code (MTH)…"
             />
             <div
-              className="academic-subject-toggles"
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                gap: 8,
+                maxHeight: 'min(360px, 42vh)',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                paddingRight: 4,
+                borderRadius: 10,
+                border: '1px solid rgba(15,23,42,0.08)',
+                background: 'rgba(255,255,255,0.5)',
               }}
             >
+              <div
+                className="academic-subject-toggles"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                  gap: 8,
+                  padding: 8,
+                }}
+              >
               {subjectsFiltered.map((sub) => {
                 const cg = classGroups.find((c) => c.classGroupId === editingClassId);
                 const grade = cg?.gradeLevel ?? null;
@@ -1876,6 +1939,7 @@ export function AcademicStructureSetupStep({
                   </div>
                 );
               })}
+              </div>
             </div>
           </div>
 
@@ -1938,7 +2002,13 @@ export function AcademicStructureSetupStep({
                       if (!row) return null;
                       const tOpts = teacherOptionsForSubject(staff, sub.id);
                       const load = row.staffId == null ? 0 : loadByStaff.get(row.staffId) ?? 0;
-                      const overTeacher = slotsPerWeek != null && load > slotsPerWeek;
+                      const teacherCap =
+                        row.staffId != null
+                          ? staff.find((s) => Number(s.id) === Number(row.staffId))?.maxWeeklyLectureLoad ?? null
+                          : null;
+                      const overTeacher =
+                        (teacherCap != null && teacherCap > 0 ? teacherCap : slotsPerWeek) != null &&
+                        load > (teacherCap != null && teacherCap > 0 ? teacherCap : (slotsPerWeek ?? 0));
                       return (
                         <tr key={sub.id}>
                           <td>

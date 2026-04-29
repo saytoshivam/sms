@@ -3,6 +3,7 @@ package com.myhaimi.sms.service.impl;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myhaimi.sms.DTO.OnboardingBasicInfoDTO;
+import com.myhaimi.sms.DTO.OnboardingBasicInfoTimeWindowDTO;
 import com.myhaimi.sms.DTO.OnboardingClassesSetupDTO;
 import com.myhaimi.sms.DTO.OnboardingClassesSetupResultDTO;
 import com.myhaimi.sms.DTO.OnboardingProgressDTO;
@@ -180,6 +181,27 @@ public class SchoolOnboardingService {
     @Transactional
     public void saveBasicInfo(OnboardingBasicInfoDTO dto) {
         School s = schoolRepo.findById(requireSchoolId()).orElseThrow();
+        // Back-compat: if openWindows provided, derive schoolStartTime/endTime for older consumers.
+        // We store the full DTO JSON as-is.
+        if (dto.openWindows() != null && !dto.openWindows().isEmpty()) {
+            java.util.List<OnboardingBasicInfoTimeWindowDTO> wins = dto.openWindows().stream()
+                    .filter(w -> w != null && w.startTime() != null && w.endTime() != null)
+                    .toList();
+            if (!wins.isEmpty()) {
+                String minStart = wins.stream().map(OnboardingBasicInfoTimeWindowDTO::startTime).min(String::compareTo).orElse(dto.schoolStartTime());
+                String maxEnd = wins.stream().map(OnboardingBasicInfoTimeWindowDTO::endTime).max(String::compareTo).orElse(dto.schoolEndTime());
+                dto = new OnboardingBasicInfoDTO(
+                        dto.academicYear(),
+                        dto.startMonth(),
+                        dto.workingDays(),
+                        dto.attendanceMode(),
+                        dto.openWindows(),
+                        minStart,
+                        maxEnd,
+                        dto.lectureDurationMinutes()
+                );
+            }
+        }
         try {
             s.setOnboardingBasicInfoJson(objectMapper.writeValueAsString(dto));
         } catch (Exception e) {
@@ -1230,14 +1252,32 @@ public class SchoolOnboardingService {
                                 s.getId(), s.getCode(), s.getName(), s.getWeeklyFrequency()))
                         .toList();
 
+        // Normalize by code so staff teachables keep working even if a subject row was recreated/revived.
+        java.util.Map<String, Integer> activeSubjectIdByCode = new java.util.HashMap<>();
+        for (Subject s : subjects) {
+            if (s.getCode() == null) continue;
+            String code = s.getCode().trim().toUpperCase(java.util.Locale.ROOT);
+            if (!code.isBlank()) activeSubjectIdByCode.put(code, s.getId());
+        }
+        java.util.Map<Integer, String> anySubjectCodeById = new java.util.HashMap<>();
+        for (Subject s : subjectRepo.findBySchool_IdOrderByCodeAsc(schoolId)) {
+            if (s.getCode() == null) continue;
+            String code = s.getCode().trim().toUpperCase(java.util.Locale.ROOT);
+            if (!code.isBlank()) anySubjectCodeById.put(s.getId(), code);
+        }
+
         List<Staff> staff = staffRepo.findBySchool_IdOrderByEmployeeNoAsc(schoolId);
         List<StaffTeachableSubject> allTeachable = staffTeachableSubjectRepository.findByStaff_School_Id(schoolId);
         java.util.Map<Integer, List<Integer>> teachableByStaff = new java.util.HashMap<>();
         for (StaffTeachableSubject t : allTeachable) {
             if (t.getStaff() == null || t.getSubject() == null) continue;
+            String rawCode = t.getSubject().getCode();
+            if (rawCode == null || rawCode.isBlank()) continue;
+            Integer activeId = activeSubjectIdByCode.get(rawCode.trim().toUpperCase(java.util.Locale.ROOT));
+            if (activeId == null) continue;
             teachableByStaff
                     .computeIfAbsent(t.getStaff().getId(), k -> new java.util.ArrayList<>())
-                    .add(t.getSubject().getId());
+                    .add(activeId);
         }
         java.util.Map<Integer, List<String>> roleNamesByStaff = new java.util.HashMap<>();
         for (User u : userRepo.findBySchool_IdWithProfilesOrderByEmailAsc(schoolId)) {
@@ -1269,7 +1309,11 @@ public class SchoolOnboardingService {
                         a -> new OnboardingAcademicAllocationItemDTO(
                                 a.getId(),
                                 a.getClassGroup().getId(),
-                                a.getSubject().getId(),
+                                activeSubjectIdByCode.getOrDefault(
+                                        (a.getSubject() != null && a.getSubject().getCode() != null)
+                                                ? a.getSubject().getCode().trim().toUpperCase(java.util.Locale.ROOT)
+                                                : "",
+                                        a.getSubject().getId()),
                                 a.getStaff() == null ? null : a.getStaff().getId(),
                                 a.getWeeklyFrequency(),
                                 a.getRoom() == null ? null : a.getRoom().getId()))
@@ -1278,7 +1322,11 @@ public class SchoolOnboardingService {
         List<OnboardingClassSubjectConfigDTO> classCfg = classSubjectConfigRepo.findBySchool_Id(schoolId).stream()
                 .map(c -> new OnboardingClassSubjectConfigDTO(
                         c.getGradeLevel(),
-                        c.getSubject().getId(),
+                        activeSubjectIdByCode.getOrDefault(
+                                (c.getSubject() != null && c.getSubject().getCode() != null)
+                                        ? c.getSubject().getCode().trim().toUpperCase(java.util.Locale.ROOT)
+                                        : "",
+                                c.getSubject().getId()),
                         c.getDefaultPeriodsPerWeek(),
                         c.getStaff() == null ? null : c.getStaff().getId(),
                         c.getRoom() == null ? null : c.getRoom().getId()
@@ -1288,14 +1336,30 @@ public class SchoolOnboardingService {
         List<OnboardingSectionSubjectOverrideDTO> secOv = subjectSectionOverrideRepo.findBySubject_School_Id(schoolId).stream()
                 .map(o -> new OnboardingSectionSubjectOverrideDTO(
                         o.getClassGroup().getId(),
-                        o.getSubject().getId(),
+                        activeSubjectIdByCode.getOrDefault(
+                                (o.getSubject() != null && o.getSubject().getCode() != null)
+                                        ? o.getSubject().getCode().trim().toUpperCase(java.util.Locale.ROOT)
+                                        : "",
+                                o.getSubject().getId()),
                         o.getPeriodsPerWeek(),
                         o.getStaff() == null ? null : o.getStaff().getId(),
                         o.getRoom() == null ? null : o.getRoom().getId()
                 ))
                 .toList();
 
-        return new OnboardingAcademicStructureViewDTO(sRows, stRows, cgRows, aRows, classCfg, secOv, slotMeta);
+        // Normalize slot meta subjectIds too, so lock/source follows the active subject row.
+        List<OnboardingAcademicSlotMetaDTO> slotMetaNorm = slotMeta.stream()
+                .map(m -> {
+                    String code = anySubjectCodeById.get(m.subjectId());
+                    if (code == null || code.isBlank()) return null;
+                    Integer activeId = activeSubjectIdByCode.get(code);
+                    if (activeId == null) return null;
+                    return new OnboardingAcademicSlotMetaDTO(m.classGroupId(), activeId, m.source(), m.locked());
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+
+        return new OnboardingAcademicStructureViewDTO(sRows, stRows, cgRows, aRows, classCfg, secOv, slotMetaNorm);
     }
 
     @Transactional
@@ -1568,10 +1632,23 @@ public class SchoolOnboardingService {
         if (subjectIds == null || subjectIds.isEmpty()) {
             return;
         }
+        // Normalize incoming subjectIds by code → active (non-deleted) subject row.
+        // This prevents stale teachables when subjects were deleted/re-created.
+        java.util.Map<String, Integer> activeByCode = new java.util.HashMap<>();
+        for (Subject s : subjectRepo.findBySchool_IdAndIsDeletedFalseOrderByCodeAsc(schoolId)) {
+            if (s.getCode() == null) continue;
+            String c = s.getCode().trim().toUpperCase(java.util.Locale.ROOT);
+            if (!c.isBlank()) activeByCode.put(c, s.getId());
+        }
         for (Integer sid : new LinkedHashSet<>(subjectIds)) {
             if (sid == null) continue;
             Subject sub = subjectRepo.findById(sid).filter(s -> schoolId.equals(s.getSchool().getId())).orElseThrow(
                     () -> new IllegalArgumentException("Unknown subject id for this school: " + sid));
+            String rawCode = sub.getCode() == null ? "" : sub.getCode().trim().toUpperCase(java.util.Locale.ROOT);
+            Integer activeId = rawCode.isBlank() ? null : activeByCode.get(rawCode);
+            if (activeId != null && !activeId.equals(sub.getId())) {
+                sub = subjectRepo.findById(activeId).orElse(sub);
+            }
             StaffTeachableSubject st = new StaffTeachableSubject();
             st.setStaff(staff);
             st.setSubject(sub);
@@ -1625,6 +1702,7 @@ public class SchoolOnboardingService {
                             dto.startMonth(),
                             dto.workingDays(),
                             s.getAttendanceMode(),
+                            dto.openWindows(),
                             dto.schoolStartTime(),
                             dto.schoolEndTime(),
                             dto.lectureDurationMinutes()
@@ -1673,6 +1751,7 @@ public class SchoolOnboardingService {
                         startMonth,
                         workingDays,
                         s.getAttendanceMode(),
+                        null,
                         schoolStartTime,
                         schoolEndTime,
                         lectureDurationMinutes

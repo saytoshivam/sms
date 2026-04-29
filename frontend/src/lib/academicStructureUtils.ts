@@ -10,6 +10,7 @@ export type AcademicAllocRow = {
 type BasicInfoLite = {
   schoolStartTime: string;
   schoolEndTime: string;
+  openWindows?: { startTime: string; endTime: string }[];
   lectureDurationMinutes: number;
   workingDays: string[];
 } | null | undefined;
@@ -24,12 +25,24 @@ export function estimateSlotsPerWeek(b: BasicInfoLite): number | null {
   if (!b) return null;
   const days = b.workingDays?.length ?? 0;
   if (days < 1) return null;
-  const start = parseHm(b.schoolStartTime);
-  const end = parseHm(b.schoolEndTime);
   const dur = b.lectureDurationMinutes;
-  if (start == null || end == null || !dur || dur < 1) return null;
-  const perDay = Math.max(1, Math.floor((end - start) / dur));
-  return days * perDay;
+  if (!dur || dur < 1) return null;
+  const wins = (b.openWindows ?? []).filter(Boolean);
+  const perDay = wins.length
+    ? wins.reduce((acc, w) => {
+        const s = parseHm(w.startTime);
+        const e = parseHm(w.endTime);
+        if (s == null || e == null || e <= s) return acc;
+        return acc + Math.max(0, Math.floor((e - s) / dur));
+      }, 0)
+    : (() => {
+        const start = parseHm(b.schoolStartTime);
+        const end = parseHm(b.schoolEndTime);
+        if (start == null || end == null || end <= start) return null;
+        return Math.max(0, Math.floor((end - start) / dur));
+      })();
+  if (perDay == null) return null;
+  return days * Math.max(1, perDay);
 }
 
 export type SectionHealth = {
@@ -44,7 +57,13 @@ export type SectionHealth = {
   completenessPct: number;
 };
 
-type StaffTeachable = { id: number; teachableSubjectIds: number[]; roleNames: string[] };
+type StaffTeachable = {
+  id: number;
+  teachableSubjectIds: number[];
+  roleNames: string[];
+  /** Optional teacher cap override; when set, it overrides school-wide slotsPerWeek capacity checks. */
+  maxWeeklyLectureLoad?: number | null;
+};
 
 const TEACHER = 'TEACHER';
 
@@ -114,7 +133,11 @@ export function computeSectionHealth(
   for (const r of rows) {
     if (r.staffId == null) continue;
     const load = loadByStaff.get(r.staffId) ?? 0;
-    if (slotsPerWeek != null && load > slotsPerWeek) {
+    const t = staff.find((s) => Number(s.id) === Number(r.staffId));
+    // If teacher has an explicit cap, it overrides school-wide slot estimate.
+    const teacherCap =
+      t?.maxWeeklyLectureLoad != null && t.maxWeeklyLectureLoad > 0 ? t.maxWeeklyLectureLoad : slotsPerWeek;
+    if (teacherCap != null && load > teacherCap) {
       hasTeacherLoadWarn = true;
       break;
     }

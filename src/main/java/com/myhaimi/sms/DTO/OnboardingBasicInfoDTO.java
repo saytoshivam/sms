@@ -17,6 +17,8 @@ public record OnboardingBasicInfoDTO(
         @NotEmpty List<String> workingDays,
         /** How attendance is taken: DAILY (homeroom) vs LECTURE_WISE (per lecture). */
         @NotNull AttendanceMode attendanceMode,
+        /** Optional: multiple open windows in a day (e.g. 09:00-13:00 and 14:00-17:00). */
+        List<OnboardingBasicInfoTimeWindowDTO> openWindows,
         /** School open time (HH:mm) e.g. "09:00" */
         @NotBlank String schoolStartTime,
         /** School close time (HH:mm) e.g. "17:00" */

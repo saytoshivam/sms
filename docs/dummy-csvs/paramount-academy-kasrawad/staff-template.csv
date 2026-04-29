@@ -1,0 +1,73 @@
+fullName,email,phone,employeeNo,designation,roles,subjects,createLoginAccount
+Aarav Patel,aarav.patel@paramountkasrawad.edu,9876500001,TCH0001,Teacher,TEACHER,ENG010,true
+Diya Patel,diya.patel@paramountkasrawad.edu,9876500002,TCH0002,Teacher,TEACHER,HIN010,true
+Rohan Patel,rohan.patel@paramountkasrawad.edu,9876500003,TCH0003,Teacher,TEACHER,SNK010,true
+Ananya Patel,ananya.patel@paramountkasrawad.edu,9876500004,TCH0004,Teacher,TEACHER,URD010,true
+Arjun Patel,arjun.patel@paramountkasrawad.edu,9876500005,TCH0005,Teacher,TEACHER,MTH010,true
+Meera Patel,meera.patel@paramountkasrawad.edu,9876500006,TCH0006,Teacher,TEACHER,BMT010,true
+Kabir Patel,kabir.patel@paramountkasrawad.edu,9876500007,TCH0007,Teacher,TEACHER,SCI010,true
+Simran Patel,simran.patel@paramountkasrawad.edu,9876500008,TCH0008,Teacher,TEACHER,SSC010,true
+Yash Patel,yash.patel@paramountkasrawad.edu,9876500009,TCH0009,Teacher,TEACHER,HIS010,true
+Riya Patel,riya.patel@paramountkasrawad.edu,9876500010,TCH0010,Teacher,TEACHER,GEO010,true
+Ishaan Patel,ishaan.patel@paramountkasrawad.edu,9876500011,TCH0011,Teacher,TEACHER,POL010,true
+Sara Patel,sara.patel@paramountkasrawad.edu,9876500012,TCH0012,Teacher,TEACHER,ECO010,true
+Vihaan Patel,vihaan.patel@paramountkasrawad.edu,9876500013,TCH0013,Teacher,TEACHER,CIV010,true
+Aditi Patel,aditi.patel@paramountkasrawad.edu,9876500014,TCH0014,Teacher,TEACHER,EVS005,true
+Kunal Patel,kunal.patel@paramountkasrawad.edu,9876500015,TCH0015,Teacher,TEACHER,GKE008,true
+Nisha Patel,nisha.patel@paramountkasrawad.edu,9876500016,TCH0016,Teacher,TEACHER,CAP008,true
+Rahul Patel,rahul.patel@paramountkasrawad.edu,9876500017,TCH0017,Teacher,TEACHER,AI0010,true
+Pooja Patel,pooja.patel@paramountkasrawad.edu,9876500018,TCH0018,Teacher,TEACHER,ITO010,true
+Imran Patel,imran.patel@paramountkasrawad.edu,9876500019,TCH0019,Teacher,TEACHER,CSC012,true
+Seema Patel,seema.patel@paramountkasrawad.edu,9876500020,TCH0020,Teacher,TEACHER,IPR012,true
+Neha Patel,neha.patel@paramountkasrawad.edu,9876500021,TCH0021,Teacher,TEACHER,PHY012,true
+Sanjay Patel,sanjay.patel@paramountkasrawad.edu,9876500022,TCH0022,Teacher,TEACHER,CHE012,true
+Priya Patel,priya.patel@paramountkasrawad.edu,9876500023,TCH0023,Teacher,TEACHER,BIO012,true
+Vikram Patel,vikram.patel@paramountkasrawad.edu,9876500024,TCH0024,Teacher,TEACHER,BTN012,true
+Sonia Patel,sonia.patel@paramountkasrawad.edu,9876500025,TCH0025,Teacher,TEACHER,ACT012,true
+Aarav Sharma,aarav.sharma@paramountkasrawad.edu,9876500026,TCH0026,Teacher,TEACHER,ACT011,true
+Diya Sharma,diya.sharma@paramountkasrawad.edu,9876500027,TCH0027,Teacher,TEACHER,BST012,true
+Rohan Sharma,rohan.sharma@paramountkasrawad.edu,9876500028,TCH0028,Teacher,TEACHER,ENT012,true
+Ananya Sharma,ananya.sharma@paramountkasrawad.edu,9876500029,TCH0029,Teacher,TEACHER,LST012,true
+Arjun Sharma,arjun.sharma@paramountkasrawad.edu,9876500030,TCH0030,Teacher,TEACHER,PSY012,true
+Meera Sharma,meera.sharma@paramountkasrawad.edu,9876500031,TCH0031,Teacher,TEACHER,SOC012,true
+Kabir Sharma,kabir.sharma@paramountkasrawad.edu,9876500032,TCH0032,Teacher,TEACHER,HSC012,true
+Simran Sharma,simran.sharma@paramountkasrawad.edu,9876500033,TCH0033,Teacher,TEACHER,PED012,true
+Yash Sharma,yash.sharma@paramountkasrawad.edu,9876500034,TCH0034,Teacher,TEACHER,HPE005,true
+Riya Sharma,riya.sharma@paramountkasrawad.edu,9876500035,TCH0035,Teacher,TEACHER,YOG010,true
+Ishaan Sharma,ishaan.sharma@paramountkasrawad.edu,9876500036,TCH0036,Teacher,TEACHER,FAR012,true
+Sara Sharma,sara.sharma@paramountkasrawad.edu,9876500037,TCH0037,Teacher,TEACHER,MUS012,true
+Vihaan Sharma,vihaan.sharma@paramountkasrawad.edu,9876500038,TCH0038,Teacher,TEACHER,DAN012,true
+Aditi Sharma,aditi.sharma@paramountkasrawad.edu,9876500039,TCH0039,Teacher,TEACHER,PNT012,true
+Kunal Sharma,kunal.sharma@paramountkasrawad.edu,9876500040,TCH0040,Teacher,TEACHER,WED010,true
+Nisha Sharma,nisha.sharma@paramountkasrawad.edu,9876500041,TCH0041,Teacher,TEACHER,VED010,true
+Rahul Sharma,rahul.sharma@paramountkasrawad.edu,9876500042,TCH0042,Teacher,TEACHER,FRE010,true
+Pooja Sharma,pooja.sharma@paramountkasrawad.edu,9876500043,TCH0043,Teacher,TEACHER,GER010,true
+Imran Sharma,imran.sharma@paramountkasrawad.edu,9876500044,TCH0044,Teacher,TEACHER,PNJ010,true
+Seema Sharma,seema.sharma@paramountkasrawad.edu,9876500045,TCH0045,Teacher,TEACHER,ENG008,true
+Neha Sharma,neha.sharma@paramountkasrawad.edu,9876500046,TCH0046,Teacher,TEACHER,HIN008,true
+Sanjay Sharma,sanjay.sharma@paramountkasrawad.edu,9876500047,TCH0047,Teacher,TEACHER,MTH008,true
+Priya Sharma,priya.sharma@paramountkasrawad.edu,9876500048,TCH0048,Teacher,TEACHER,SCI008,true
+Vikram Sharma,vikram.sharma@paramountkasrawad.edu,9876500049,TCH0049,Teacher,TEACHER,SSC008,true
+Sonia Sharma,sonia.sharma@paramountkasrawad.edu,9876500050,TCH0050,Teacher,TEACHER,PHY011,true
+Aarav Verma,aarav.verma@paramountkasrawad.edu,9876500051,TCH0051,Teacher,TEACHER,CHE011,true
+Diya Verma,diya.verma@paramountkasrawad.edu,9876500052,TCH0052,Teacher,TEACHER,BIO011,true
+Rohan Verma,rohan.verma@paramountkasrawad.edu,9876500053,TCH0053,Teacher,TEACHER,CSC011,true
+Ananya Verma,ananya.verma@paramountkasrawad.edu,9876500054,TCH0054,Teacher,TEACHER,EVS004,true
+Arjun Verma,arjun.verma@paramountkasrawad.edu,9876500055,TCH0055,Teacher,TEACHER,ENG004,true
+Meera Verma,meera.verma@paramountkasrawad.edu,9876500056,TCH0056,Teacher,TEACHER,HIN004,true
+Kabir Verma,kabir.verma@paramountkasrawad.edu,9876500057,TCH0057,Teacher,TEACHER,MTH004,true
+Simran Verma,simran.verma@paramountkasrawad.edu,9876500058,TCH0058,Teacher,TEACHER,EVS005,true
+Yash Verma,yash.verma@paramountkasrawad.edu,9876500059,TCH0059,Teacher,TEACHER,ENG006,true
+Riya Verma,riya.verma@paramountkasrawad.edu,9876500060,TCH0060,Teacher,TEACHER,MTH006,true
+Sara Singh,sara.singh@paramountkasrawad.edu,9876400061,EMP0061,Principal,PRINCIPAL,,true
+Vihaan Singh,vihaan.singh@paramountkasrawad.edu,9876400062,EMP0062,Vice principal,VICE_PRINCIPAL,,true
+Aditi Singh,aditi.singh@paramountkasrawad.edu,9876400063,EMP0063,School admin,SCHOOL_ADMIN,,true
+Kunal Singh,kunal.singh@paramountkasrawad.edu,9876400064,EMP0064,Accountant,ACCOUNTANT,,true
+Nisha Singh,nisha.singh@paramountkasrawad.edu,9876400065,EMP0065,HOD,HOD,,true
+Rahul Singh,rahul.singh@paramountkasrawad.edu,9876400066,EMP0066,Principal,PRINCIPAL,,true
+Pooja Singh,pooja.singh@paramountkasrawad.edu,9876400067,EMP0067,Vice principal,VICE_PRINCIPAL,,true
+Imran Singh,imran.singh@paramountkasrawad.edu,9876400068,EMP0068,School admin,SCHOOL_ADMIN,,true
+Seema Singh,seema.singh@paramountkasrawad.edu,9876400069,EMP0069,Accountant,ACCOUNTANT,,true
+Neha Singh,neha.singh@paramountkasrawad.edu,9876400070,EMP0070,HOD,HOD,,true
+Sanjay Singh,sanjay.singh@paramountkasrawad.edu,9876400071,EMP0071,Principal,PRINCIPAL,,true
+Priya Singh,priya.singh@paramountkasrawad.edu,9876400072,EMP0072,Vice principal,VICE_PRINCIPAL,,true

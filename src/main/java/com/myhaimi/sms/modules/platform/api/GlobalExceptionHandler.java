@@ -81,7 +81,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiErrorResponse> fallback(Exception ex) {
         org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class)
                 .error("Unhandled error", ex);
-        return error(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "An unexpected error occurred");
+        String msg = ex.getMessage();
+        if (msg == null || msg.isBlank()) msg = "An unexpected error occurred";
+        return error(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", msg);
     }
 
     private static ResponseEntity<ApiErrorResponse> error(HttpStatus status, String code, String message) {

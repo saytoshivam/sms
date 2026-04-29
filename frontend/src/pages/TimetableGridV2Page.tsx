@@ -27,7 +27,12 @@ type Subject = { id: number; code: string; name: string };
 type Staff = { id: number; fullName: string };
 type Room = { id: number; building: string; roomNumber: string; type: string };
 type SpringPage<T> = { content: T[] };
-type OnboardingBasicInfo = { schoolStartTime: string; schoolEndTime: string; lectureDurationMinutes: number };
+type OnboardingBasicInfo = {
+  schoolStartTime: string;
+  schoolEndTime: string;
+  openWindows?: { startTime: string; endTime: string }[];
+  lectureDurationMinutes: number;
+};
 type AutoFillResult = {
   placedCount: number;
   skippedFilledCount: number;
@@ -103,29 +108,35 @@ export function TimetableGridV2Page() {
       const info = basicInfo.data;
       if (!info) throw new Error('No onboarding timings found. Complete School onboarding → Basic setup first.');
 
-      const startMin = hhmmToMinutes(info.schoolStartTime);
-      const endMin = hhmmToMinutes(info.schoolEndTime);
       const duration = Number(info.lectureDurationMinutes);
-      if (startMin == null || endMin == null || !Number.isFinite(duration) || duration < 10) {
+      if (!Number.isFinite(duration) || duration < 10) {
         throw new Error('Invalid onboarding timings. Please re-save Basic setup (open timings + lecture duration).');
       }
-      if (startMin >= endMin) throw new Error('Onboarding open timings are invalid (end must be after start).');
 
-      // Create consecutive slots within the open window, no gaps.
-      let cursor = startMin;
+      const windows = (info.openWindows ?? []).length
+        ? (info.openWindows ?? [])
+        : [{ startTime: info.schoolStartTime, endTime: info.schoolEndTime }];
+
+      // Create consecutive slots within each open window, no gaps.
       let order = 1;
-      while (cursor + duration <= endMin) {
-        const startTime = minutesToHHMM(cursor);
-        const endTime = minutesToHHMM(cursor + duration);
-        // eslint-disable-next-line no-await-in-loop
-        await api.post('/api/v2/timetable/time-slots', {
-          startTime,
-          endTime,
-          slotOrder: order,
-          isBreak: false,
-        });
-        cursor += duration;
-        order += 1;
+      for (const w of windows) {
+        const startMin = hhmmToMinutes(w.startTime);
+        const endMin = hhmmToMinutes(w.endTime);
+        if (startMin == null || endMin == null || startMin >= endMin) continue;
+        let cursor = startMin;
+        while (cursor + duration <= endMin) {
+          const startTime = minutesToHHMM(cursor);
+          const endTime = minutesToHHMM(cursor + duration);
+          // eslint-disable-next-line no-await-in-loop
+          await api.post('/api/v2/timetable/time-slots', {
+            startTime,
+            endTime,
+            slotOrder: order,
+            isBreak: false,
+          });
+          cursor += duration;
+          order += 1;
+        }
       }
       if (order === 1) {
         throw new Error('No slots could be generated within the open timings. Check your duration and timings.');
