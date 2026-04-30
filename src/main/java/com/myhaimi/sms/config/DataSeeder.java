@@ -81,7 +81,7 @@ public class DataSeeder implements CommandLineRunner {
                 .findFirstByEmailIgnoreCase(superAdminEmail)
                 .or(() -> userRepository.findFirstByUsernameIgnoreCase(superAdminUsername))
                 .or(() -> userRepository.findFirstByEmailIgnoreCase("platform-admin@myhaimi.com"))
-                .or(() -> userRepository.findFirstByUsernameIgnoreCase("Kashish"))
+                .or(() -> userRepository.findFirstByUsernameIgnoreCase("Purva bae"))
                 .orElseGet(User::new);
 
         user.setEmail(superAdminEmail.trim());

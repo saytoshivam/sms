@@ -4672,9 +4672,14 @@ export function SchoolOnboardingWizardPage() {
                   />
                 );
 
+                const formatRoleLabel = (r: string) =>
+                  r
+                    .replace(/_/g, ' ')
+                    .toLowerCase()
+                    .replace(/\b\w/g, (c) => c.toUpperCase());
                 const roleChip = (r: string) => (
                   <span key={r} className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-extrabold text-slate-800">
-                    {r}
+                    {formatRoleLabel(r)}
                   </span>
                 );
 
