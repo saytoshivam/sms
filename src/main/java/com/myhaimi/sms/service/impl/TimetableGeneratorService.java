@@ -80,7 +80,7 @@ public class TimetableGeneratorService {
             Map<Integer, Map<DayOfWeek, BitSet>> classDayFilledOrders = new HashMap<>();
             Map<Integer, Map<DayOfWeek, Map<Integer, Integer>>> classDaySubjectCount = new HashMap<>();
 
-            // Shuffle sessions to avoid bias
+            // Shuffle sessions to provide diverse search seeds across attempts.
             List<Session> shuffled = new ArrayList<>(sessions);
             Collections.shuffle(shuffled, rnd);
 
@@ -88,6 +88,7 @@ public class TimetableGeneratorService {
             Map<Session, String> lastReject = new HashMap<>();
 
             int[] nodesLeft = new int[]{nodeBudget};
+            // First try the cheap greedy placer (fast path for easy inputs).
             boolean ok = greedyPlaceAll(
                     attempt,
                     shuffled,
@@ -113,6 +114,7 @@ public class TimetableGeneratorService {
             if (ok) {
                 Map<String, Object> stats = new LinkedHashMap<>();
                 stats.put("attemptsUsed", attempt);
+                stats.put("strategy", "greedy");
                 stats.put("nodeBudget", nodeBudget);
                 stats.put("nodesRemaining", nodesLeft[0]);
                 stats.put("placedCount", placed.size());
@@ -121,6 +123,63 @@ public class TimetableGeneratorService {
                 return new GenerateResult(true, new ArrayList<>(placed), stats, lastReject);
             }
 
+            if (placed.size() > bestCount) {
+                bestCount = placed.size();
+                bestPlaced = new ArrayList<>(placed);
+                bestReasons = new HashMap<>(lastReject);
+            }
+        }
+
+        // Greedy could not fit everything in the per-attempt budget. Fall back to a proper CSP backtracking
+        // solver (MRV + forward-checking + LCV) which handles tight schedules where greedy paints itself
+        // into corners. This runs once with a generous budget; if it still cannot satisfy, we surface
+        // diagnostics from the best greedy attempt so the UI can guide the user.
+        {
+            Map<Integer, Set<String>> classOcc = deepCopyOcc(seededClassOcc);
+            Map<Integer, Set<String>> teacherOcc = deepCopyOcc(seededTeacherOcc);
+            Map<String, TimetableEntry> existingByCell = new HashMap<>(seededExistingByCell);
+            Map<String, Integer> preferredPeriodByBundle = new HashMap<>();
+            Map<Integer, Map<DayOfWeek, BitSet>> classDayFilledOrders = new HashMap<>();
+            Map<Integer, Map<DayOfWeek, Map<Integer, Integer>>> classDaySubjectCount = new HashMap<>();
+            List<TimetableEntry> placed = new ArrayList<>();
+            Map<Session, String> lastReject = new HashMap<>();
+
+            int btBudget = Math.max(nodeBudget, sessions.size() * 4_000);
+            int[] nodesLeft = new int[]{btBudget};
+            BacktrackResult br = backtrackPlace(
+                    sessions,
+                    allSlots,
+                    weights,
+                    school,
+                    version,
+                    classById,
+                    subjectById,
+                    staffById,
+                    slotById,
+                    classOcc,
+                    teacherOcc,
+                    existingByCell,
+                    preferredPeriodByBundle,
+                    classDayFilledOrders,
+                    classDaySubjectCount,
+                    placed,
+                    lastReject,
+                    nodesLeft
+            );
+
+            if (br.success) {
+                Map<String, Object> stats = new LinkedHashMap<>();
+                stats.put("attemptsUsed", maxAttempts);
+                stats.put("strategy", "backtrack");
+                stats.put("nodeBudget", btBudget);
+                stats.put("nodesRemaining", nodesLeft[0]);
+                stats.put("placedCount", placed.size());
+                stats.put("totalSessions", sessions.size());
+                stats.put("success", true);
+                return new GenerateResult(true, new ArrayList<>(placed), stats, lastReject);
+            }
+
+            // Use the best-of (greedy vs backtrack partial) for diagnostics.
             if (placed.size() > bestCount) {
                 bestCount = placed.size();
                 bestPlaced = new ArrayList<>(placed);
@@ -237,6 +296,278 @@ public class TimetableGeneratorService {
             }
         }
         return true;
+    }
+
+    private record BacktrackResult(boolean success) {}
+
+    /**
+     * CSP-style backtracking placer with MRV variable ordering, LCV-ish value ordering (best score first),
+     * and forward checking. Used as a fallback when greedy retries can't fit everything.
+     *
+     * Variables: each session i must be assigned exactly one slot s.
+     * Hard constraints: same-class no double-booking; same-teacher no double-booking; can't reuse a cell
+     *   already occupied by a locked/manual entry seeded into classOcc/teacherOcc.
+     * Domain pruning: every time we place session i at slot s, we remove s from the candidate domains of
+     *   every other unplaced session that shares either i's class group or i's teacher.
+     */
+    private BacktrackResult backtrackPlace(
+            List<Session> sessions,
+            List<Slot> allSlots,
+            TimetableGeneratorWeights w,
+            School school,
+            TimetableVersion version,
+            Map<Integer, ClassGroup> classById,
+            Map<Integer, Subject> subjectById,
+            Map<Integer, Staff> staffById,
+            Map<Integer, SchoolTimeSlot> slotById,
+            Map<Integer, Set<String>> classOcc,
+            Map<Integer, Set<String>> teacherOcc,
+            Map<String, TimetableEntry> existingByCell,
+            Map<String, Integer> preferredPeriodByBundle,
+            Map<Integer, Map<DayOfWeek, BitSet>> classDayFilledOrders,
+            Map<Integer, Map<DayOfWeek, Map<Integer, Integer>>> classDaySubjectCount,
+            List<TimetableEntry> placedOut,
+            Map<Session, String> lastReject,
+            int[] nodesLeft
+    ) {
+        int n = sessions.size();
+        int m = allSlots.size();
+        if (n == 0) return new BacktrackResult(true);
+
+        // Initial domain per session = slots not blocked by seeded class/teacher occupancy.
+        BitSet[] domain = new BitSet[n];
+        for (int i = 0; i < n; i++) {
+            Session s = sessions.get(i);
+            Set<String> classBusy = classOcc.getOrDefault(s.classGroupId(), Set.of());
+            Set<String> teacherBusy = teacherOcc.getOrDefault(s.teacherId(), Set.of());
+            BitSet d = new BitSet(m);
+            for (int k = 0; k < m; k++) {
+                Slot slot = allSlots.get(k);
+                String cell = slot.key();
+                if (classBusy.contains(cell)) continue;
+                if (teacherBusy.contains(cell)) continue;
+                d.set(k);
+            }
+            if (d.isEmpty()) {
+                Session last = sessions.get(i);
+                lastReject.put(last,
+                        "No valid slot. checked=" + m
+                                + ", blockedByClass=" + classBusy.size()
+                                + ", blockedByTeacher=" + teacherBusy.size()
+                                + " (pre-search)");
+                return new BacktrackResult(false);
+            }
+            domain[i] = d;
+        }
+
+        // Adjacency: which sessions share a class or teacher with i (only those need domain pruning when i is placed).
+        int[][] sharesByIdx = new int[n][];
+        {
+            // Group by class and teacher.
+            Map<Integer, List<Integer>> byClass = new HashMap<>();
+            Map<Integer, List<Integer>> byTeacher = new HashMap<>();
+            for (int i = 0; i < n; i++) {
+                Session s = sessions.get(i);
+                byClass.computeIfAbsent(s.classGroupId(), k -> new ArrayList<>()).add(i);
+                byTeacher.computeIfAbsent(s.teacherId(), k -> new ArrayList<>()).add(i);
+            }
+            for (int i = 0; i < n; i++) {
+                Session s = sessions.get(i);
+                Set<Integer> set = new HashSet<>();
+                for (Integer j : byClass.getOrDefault(s.classGroupId(), List.of())) if (j != i) set.add(j);
+                for (Integer j : byTeacher.getOrDefault(s.teacherId(), List.of())) if (j != i) set.add(j);
+                int[] arr = new int[set.size()];
+                int p = 0;
+                for (Integer j : set) arr[p++] = j;
+                sharesByIdx[i] = arr;
+            }
+        }
+
+        boolean[] assigned = new boolean[n];
+        int[] assignedSlot = new int[n];
+        Arrays.fill(assignedSlot, -1);
+
+        // Track per-step pruning so we can restore on backtrack: stack of (sessionIdx, slotIdx) that we removed.
+        Deque<long[]> pruneStack = new ArrayDeque<>();
+
+        boolean ok = solve(
+                0, n, m, sessions, allSlots, w, classById, subjectById, staffById,
+                domain, assigned, assignedSlot, sharesByIdx, pruneStack,
+                classOcc, teacherOcc, existingByCell,
+                preferredPeriodByBundle, classDayFilledOrders, classDaySubjectCount,
+                lastReject, nodesLeft
+        );
+
+        if (!ok) return new BacktrackResult(false);
+
+        // Materialize placements into TimetableEntry objects in placement order.
+        for (int i = 0; i < n; i++) {
+            int slotIdx = assignedSlot[i];
+            if (slotIdx < 0) continue; // shouldn't happen on success
+            Session s = sessions.get(i);
+            Slot slot = allSlots.get(slotIdx);
+            TimetableEntry e = new TimetableEntry();
+            e.setSchool(school);
+            e.setTimetableVersion(version);
+            e.setClassGroup(classById.get(s.classGroupId()));
+            e.setSubject(subjectById.get(s.subjectId()));
+            e.setStaff(staffById.get(s.teacherId()));
+            e.setDayOfWeek(slot.day());
+            e.setTimeSlot(slotById.get(slot.timeSlotId()));
+            placedOut.add(e);
+        }
+        return new BacktrackResult(true);
+    }
+
+    private boolean solve(
+            int placedCount,
+            int n,
+            int m,
+            List<Session> sessions,
+            List<Slot> allSlots,
+            TimetableGeneratorWeights w,
+            Map<Integer, ClassGroup> classById,
+            Map<Integer, Subject> subjectById,
+            Map<Integer, Staff> staffById,
+            BitSet[] domain,
+            boolean[] assigned,
+            int[] assignedSlot,
+            int[][] sharesByIdx,
+            Deque<long[]> pruneStack,
+            Map<Integer, Set<String>> classOcc,
+            Map<Integer, Set<String>> teacherOcc,
+            Map<String, TimetableEntry> existingByCell,
+            Map<String, Integer> preferredPeriodByBundle,
+            Map<Integer, Map<DayOfWeek, BitSet>> classDayFilledOrders,
+            Map<Integer, Map<DayOfWeek, Map<Integer, Integer>>> classDaySubjectCount,
+            Map<Session, String> lastReject,
+            int[] nodesLeft
+    ) {
+        if (placedCount == n) return true;
+        if (nodesLeft[0]-- <= 0) {
+            for (int i = 0; i < n; i++) if (!assigned[i]) {
+                lastReject.put(sessions.get(i), "Search budget exhausted");
+                break;
+            }
+            return false;
+        }
+
+        // MRV: pick unassigned session with smallest live domain. Tie-break by largest "degree"
+        // (more shared peers = harder to place later).
+        int chosen = -1;
+        int minSize = Integer.MAX_VALUE;
+        int chosenDeg = -1;
+        for (int i = 0; i < n; i++) {
+            if (assigned[i]) continue;
+            int sz = domain[i].cardinality();
+            if (sz == 0) {
+                Session s = sessions.get(i);
+                lastReject.put(s, "Forward-check eliminated all slots; need different earlier choices.");
+                return false;
+            }
+            int deg = sharesByIdx[i].length;
+            if (sz < minSize || (sz == minSize && deg > chosenDeg)) {
+                minSize = sz;
+                chosenDeg = deg;
+                chosen = i;
+            }
+        }
+        if (chosen < 0) return true;
+
+        Session s = sessions.get(chosen);
+        Subject subj = subjectById.get(s.subjectId());
+
+        // Order candidate slots by score (LCV-ish: higher score = better). Cap candidates explored
+        // per node to a sane upper bound to keep search tractable on very tight problems.
+        BitSet d = domain[chosen];
+        int[] candidates = new int[d.cardinality()];
+        int cc = 0;
+        for (int k = d.nextSetBit(0); k >= 0; k = d.nextSetBit(k + 1)) {
+            candidates[cc++] = k;
+        }
+        // Score and sort descending.
+        int[][] scored = new int[cc][2];
+        for (int k = 0; k < cc; k++) {
+            int slotIdx = candidates[k];
+            scored[k][0] = scoreSlot(s, allSlots.get(slotIdx), w, subj,
+                    preferredPeriodByBundle, classDayFilledOrders, classDaySubjectCount);
+            scored[k][1] = slotIdx;
+        }
+        Arrays.sort(scored, (a, b) -> Integer.compare(b[0], a[0]));
+
+        // Cap branching factor at the smallest of: domain size, 12 (heuristic) — keeps search bounded.
+        int branchCap = Math.min(scored.length, Math.max(6, Math.min(12, (int) Math.ceil(scored.length / 2.0))));
+        for (int idx = 0; idx < branchCap; idx++) {
+            int slotIdx = scored[idx][1];
+            Slot slot = allSlots.get(slotIdx);
+
+            // Place tentatively.
+            assigned[chosen] = true;
+            assignedSlot[chosen] = slotIdx;
+            String cell = slot.key();
+            classOcc.computeIfAbsent(s.classGroupId(), k -> new HashSet<>()).add(cell);
+            teacherOcc.computeIfAbsent(s.teacherId(), k -> new HashSet<>()).add(cell);
+            preferredPeriodByBundle.putIfAbsent(bundleKey(s), slot.slotOrder());
+            classDayFilledOrders
+                    .computeIfAbsent(s.classGroupId(), k -> new HashMap<>())
+                    .computeIfAbsent(slot.day(), k -> new BitSet())
+                    .set(slot.slotOrder() - 1);
+            classDaySubjectCount
+                    .computeIfAbsent(s.classGroupId(), k -> new HashMap<>())
+                    .computeIfAbsent(slot.day(), k -> new HashMap<>())
+                    .merge(s.subjectId(), 1, Integer::sum);
+
+            // Forward-check: remove slotIdx from domains of peers; remember to restore on backtrack.
+            int prunedMark = pruneStack.size();
+            boolean wipeout = false;
+            for (int peer : sharesByIdx[chosen]) {
+                if (assigned[peer]) continue;
+                if (domain[peer].get(slotIdx)) {
+                    domain[peer].clear(slotIdx);
+                    pruneStack.push(new long[]{peer, slotIdx});
+                    if (domain[peer].isEmpty()) {
+                        wipeout = true;
+                        // continue marking so we can restore consistently
+                    }
+                }
+            }
+
+            if (!wipeout) {
+                if (solve(placedCount + 1, n, m, sessions, allSlots, w,
+                        classById, subjectById, staffById,
+                        domain, assigned, assignedSlot, sharesByIdx, pruneStack,
+                        classOcc, teacherOcc, existingByCell,
+                        preferredPeriodByBundle, classDayFilledOrders, classDaySubjectCount,
+                        lastReject, nodesLeft)) {
+                    return true;
+                }
+            }
+
+            // Undo forward checks.
+            while (pruneStack.size() > prunedMark) {
+                long[] pp = pruneStack.pop();
+                domain[(int) pp[0]].set((int) pp[1]);
+            }
+            // Undo placement.
+            classOcc.get(s.classGroupId()).remove(cell);
+            teacherOcc.get(s.teacherId()).remove(cell);
+            BitSet bs = classDayFilledOrders.getOrDefault(s.classGroupId(), Map.of()).getOrDefault(slot.day(), null);
+            if (bs != null) bs.clear(slot.slotOrder() - 1);
+            Map<Integer, Integer> sc = classDaySubjectCount.getOrDefault(s.classGroupId(), Map.of()).getOrDefault(slot.day(), Map.of());
+            Integer kCount = sc.get(s.subjectId());
+            if (kCount != null) {
+                if (kCount <= 1) sc.remove(s.subjectId());
+                else sc.put(s.subjectId(), kCount - 1);
+            }
+            assigned[chosen] = false;
+            assignedSlot[chosen] = -1;
+
+            if (nodesLeft[0] <= 0) {
+                lastReject.put(s, "Search budget exhausted during backtrack");
+                return false;
+            }
+        }
+        return false;
     }
 
     private int scoreSlot(

@@ -1296,21 +1296,9 @@ public class TimetableEngineService {
         TimetableVersion v = timetableVersionRepo.findByIdAndSchool_Id(versionId, schoolId).orElseThrow();
         if (v.getStatus() == TimetableStatus.PUBLISHED) return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
 
-        // Hard check: every allocation frequency must be satisfied.
-        List<SubjectAllocation> allocs = subjectAllocationRepo.findBySchool_Id(schoolId);
-        Map<String, Long> countByClassSub = new HashMap<>();
-        for (TimetableEntry e : timetableEntryRepo.findBySchool_IdAndTimetableVersion_Id(schoolId, v.getId())) {
-            String k = e.getClassGroup().getId() + "|" + e.getSubject().getId();
-            countByClassSub.merge(k, 1L, Long::sum);
-        }
-        for (SubjectAllocation a : allocs) {
-            if (a.getWeeklyFrequency() == null || a.getWeeklyFrequency() <= 0) continue;
-            String k = a.getClassGroup().getId() + "|" + a.getSubject().getId();
-            long have = countByClassSub.getOrDefault(k, 0L);
-            if (have < a.getWeeklyFrequency()) {
-                throw new IllegalStateException("Cannot publish: missing frequency for " + a.getClassGroup().getCode() + " / " + a.getSubject().getCode() + " (" + have + "/" + a.getWeeklyFrequency() + ").");
-            }
-        }
+        // Frequency completeness is a soft warning surfaced during generation/preview;
+        // publish itself does not block on under-allocated subjects so admins can ship
+        // a partial timetable when the engine could not satisfy every constraint.
 
         // Archive existing published by downgrading to REVIEW
         TimetableVersion published = timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.PUBLISHED).orElse(null);
