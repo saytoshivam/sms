@@ -11,6 +11,7 @@ import java.util.List;
 
 public interface RoomRepo extends JpaRepository<Room, Integer> {
     Page<Room> findBySchool_IdAndIsDeletedFalse(Integer schoolId, Pageable pageable);
+    List<Room> findBySchool_IdAndIsDeletedFalse(Integer schoolId);
 
     Optional<Room> findByIdAndSchool_Id(Integer id, Integer schoolId);
 

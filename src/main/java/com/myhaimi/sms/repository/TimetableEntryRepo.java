@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface TimetableEntryRepo extends JpaRepository<TimetableEntry, Integer> {
+    List<TimetableEntry> findBySchool_IdAndTimetableVersion_Id(Integer schoolId, Integer versionId);
     List<TimetableEntry> findBySchool_IdAndTimetableVersion_IdAndClassGroup_Id(Integer schoolId, Integer versionId, Integer classGroupId);
 
     Optional<TimetableEntry> findBySchool_IdAndTimetableVersion_IdAndClassGroup_IdAndDayOfWeekAndTimeSlot_Id(

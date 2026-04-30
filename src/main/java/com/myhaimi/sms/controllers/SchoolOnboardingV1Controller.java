@@ -59,6 +59,14 @@ public class SchoolOnboardingV1Controller {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/basic-info")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<?> saveBasicInfoPost(@Valid @RequestBody OnboardingBasicInfoDTO body) {
+        // Alias for clients that submit POST from onboarding wizard.
+        schoolOnboardingService.saveBasicInfo(body);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/classes/generate")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public ResponseEntity<OnboardingClassesSetupResultDTO> generateClasses(@Valid @RequestBody OnboardingClassesSetupDTO body) {

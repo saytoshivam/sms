@@ -926,24 +926,37 @@ public class SchoolOnboardingService {
 
             boolean createLogin = dto.createLoginAccount() == null || dto.createLoginAccount();
             if (createLogin) {
-                String username = deriveUsername(email);
-                String tempPassword = generateTempPassword();
-                User user = new User();
-                user.setEmail(email);
-                user.setUsername(ensureUniqueUsername(username));
-                user.setPassword(passwordEncoder.encode(tempPassword));
-                user.setSchool(school);
-                user.setLinkedStaff(staff);
-                user.setRoles(roles);
-                userRepo.save(user);
-                usersCreated += 1;
+                // Multi-tenant behavior:
+                // Email is globally unique in users table, so if a login exists for another school,
+                // we "move" the login to this school (person changed school) instead of skipping.
+                User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
+                if (existingByEmail != null) {
+                    existingByEmail.setSchool(school);
+                    existingByEmail.setLinkedStaff(staff);
+                    existingByEmail.setLinkedStudent(null);
+                    existingByEmail.setRoles(roles);
+                    userRepo.save(existingByEmail);
+                    usersCreated += 1;
+                } else {
+                    String username = deriveUsername(email);
+                    String tempPassword = generateTempPassword();
+                    User user = new User();
+                    user.setEmail(email);
+                    user.setUsername(ensureUniqueUsername(username));
+                    user.setPassword(passwordEncoder.encode(tempPassword));
+                    user.setSchool(school);
+                    user.setLinkedStaff(staff);
+                    user.setRoles(roles);
+                    userRepo.save(user);
+                    usersCreated += 1;
 
-                creds.add(new OnboardingStaffUserCredentialDTO(
-                        user.getEmail(),
-                        user.getUsername(),
-                        tempPassword,
-                        user.getRoles().stream().map(Role::getName).sorted().toList()
-                ));
+                    creds.add(new OnboardingStaffUserCredentialDTO(
+                            user.getEmail(),
+                            user.getUsername(),
+                            tempPassword,
+                            user.getRoles().stream().map(Role::getName).sorted().toList()
+                    ));
+                }
             }
         }
 
@@ -1111,11 +1124,23 @@ public class SchoolOnboardingService {
 
         String username = deriveUsername(email);
         String tempPassword = generateTempPassword();
+        School school = schoolRepo.findById(schoolId).orElseThrow();
+
+        User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
+        if (existingByEmail != null) {
+            existingByEmail.setSchool(school);
+            existingByEmail.setLinkedStaff(staff);
+            existingByEmail.setLinkedStudent(null);
+            existingByEmail.setRoles(roles);
+            userRepo.save(existingByEmail);
+            return null;
+        }
+
         User user = new User();
         user.setEmail(email);
         user.setUsername(ensureUniqueUsername(username));
         user.setPassword(passwordEncoder.encode(tempPassword));
-        user.setSchool(schoolRepo.findById(schoolId).orElseThrow());
+        user.setSchool(school);
         user.setLinkedStaff(staff);
         user.setRoles(roles);
         userRepo.save(user);

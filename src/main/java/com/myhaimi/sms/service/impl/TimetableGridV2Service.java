@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -80,6 +81,90 @@ public class TimetableGridV2Service {
         }
         schoolTimeSlotRepo.deleteBySchool_Id(schoolId);
     }
+
+    /**
+     * Generate consecutive lecture slots from onboarding Basic Setup (supports openWindows).
+     * This replaces any existing slots (and clears timetable entries).
+     */
+    @Transactional
+    public List<TimeSlotViewDTO> generateSlotsFromOnboarding() {
+        Integer schoolId = requireSchoolId();
+
+        // Clear existing slots/entries first to avoid lingering "old day schedule".
+        clearTimeSlots();
+
+        School school = schoolRepo.findById(schoolId).orElseThrow();
+        String raw = school.getOnboardingBasicInfoJson();
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalStateException("No onboarding timings found. Complete School onboarding → Basic setup first.");
+        }
+
+        try {
+            JsonNode node = objectMapper.readTree(raw);
+            int duration = node.path("lectureDurationMinutes").asInt(0);
+            if (duration < 10) {
+                throw new IllegalStateException("Invalid onboarding lecture duration. Please re-save Basic setup.");
+            }
+
+            List<Window> windows = new ArrayList<>();
+            JsonNode openWindows = node.path("openWindows");
+            if (openWindows != null && openWindows.isArray() && openWindows.size() > 0) {
+                for (JsonNode w : openWindows) {
+                    String st = w.path("startTime").asText(null);
+                    String et = w.path("endTime").asText(null);
+                    if (st == null || et == null) continue;
+                    LocalTime start = LocalTime.parse(st.trim());
+                    LocalTime end = LocalTime.parse(et.trim());
+                    if (!start.isBefore(end)) continue;
+                    windows.add(new Window(start, end));
+                }
+            }
+            if (windows.isEmpty()) {
+                String st = node.path("schoolStartTime").asText(null);
+                String et = node.path("schoolEndTime").asText(null);
+                if (st == null || et == null) {
+                    throw new IllegalStateException("Missing onboarding start/end time. Please re-save Basic setup.");
+                }
+                LocalTime start = LocalTime.parse(st.trim());
+                LocalTime end = LocalTime.parse(et.trim());
+                if (!start.isBefore(end)) {
+                    throw new IllegalStateException("Invalid onboarding timings (start must be before end).");
+                }
+                windows.add(new Window(start, end));
+            }
+
+            int order = 1;
+            List<SchoolTimeSlot> created = new ArrayList<>();
+            for (Window w : windows) {
+                LocalTime cursor = w.start;
+                while (!cursor.plusMinutes(duration).isAfter(w.end)) {
+                    SchoolTimeSlot s = new SchoolTimeSlot();
+                    s.setSchool(school);
+                    s.setStartTime(cursor);
+                    s.setEndTime(cursor.plusMinutes(duration));
+                    s.setSlotOrder(order);
+                    s.setBreakSlot(false);
+                    s.setActive(true);
+                    created.add(schoolTimeSlotRepo.save(s));
+                    cursor = cursor.plusMinutes(duration);
+                    order += 1;
+                }
+            }
+            if (created.isEmpty()) {
+                throw new IllegalStateException("No slots could be generated within the open timings. Check your duration and timings.");
+            }
+
+            return created.stream()
+                    .map(s -> new TimeSlotViewDTO(s.getId(), s.getStartTime(), s.getEndTime(), s.getSlotOrder(), s.isBreakSlot()))
+                    .toList();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to generate time slots from onboarding.", e);
+        }
+    }
+
+    private record Window(LocalTime start, LocalTime end) {}
 
     @Transactional
     public TimeSlotViewDTO updateTimeSlot(Integer timeSlotId, TimeSlotCreateDTO dto) {

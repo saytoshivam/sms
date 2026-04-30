@@ -59,6 +59,12 @@ public class TimetableGridV2Controller {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/time-slots/generate-from-onboarding")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public List<TimeSlotViewDTO> generateSlotsFromOnboarding() {
+        return timetableGridV2Service.generateSlotsFromOnboarding();
+    }
+
     @PostMapping("/versions/draft")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
     public TimetableVersionViewDTO ensureDraft() {

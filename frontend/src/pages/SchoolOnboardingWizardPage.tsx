@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
@@ -13,6 +13,7 @@ import { ClassGroupSearchCombobox } from '../components/ClassGroupSearchCombobox
 import { RowActionsMenu } from '../components/RowActionsMenu';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AcademicStructureSetupStep } from '../components/AcademicStructureSetupStep';
+import Step7TimetableWorkspace from '../components/Step7TimetableWorkspace';
 import type { ClassSubjectConfigRow, SectionSubjectOverrideRow } from '../lib/academicStructureUtils';
 import { buildEffectiveAllocRows } from '../lib/academicStructureUtils';
 import type { AssignmentSlotMeta } from '../lib/academicStructureSmartAssign';
@@ -295,12 +296,55 @@ function isValidSubjectCode(code: string) {
 }
 
 function parseRoomsCsv(text: string): RoomDraft[] {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rawLines = text
+    .replace(/^\uFEFF/, '') // strip BOM (common in Excel exports)
+    .split(/\r?\n/);
+  const lines = rawLines.map((l) => l.trim()).filter(Boolean);
   if (lines.length === 0) return [];
-  const headerLine = lines[0].toLowerCase();
+
+  const headerLineRaw = lines[0] ?? '';
+  const headerLine = headerLineRaw.toLowerCase();
   const hasHeader = headerLine.includes('building') && headerLine.includes('room');
   const start = hasHeader ? 1 : 0;
-  const headerCols = hasHeader ? lines[0].split(',').map((c) => c.trim().toLowerCase()) : [];
+
+  const detectDelimiter = (s: string) => {
+    const comma = (s.match(/,/g) ?? []).length;
+    const semi = (s.match(/;/g) ?? []).length;
+    const tab = (s.match(/\t/g) ?? []).length;
+    if (semi > comma && semi >= tab) return ';';
+    if (tab > comma && tab > semi) return '\t';
+    return ',';
+  };
+  const delim = detectDelimiter(headerLineRaw);
+
+  const splitCsvRow = (row: string) => {
+    const out: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < row.length; i++) {
+      const ch = row[i]!;
+      if (ch === '"') {
+        const next = row[i + 1];
+        if (inQuotes && next === '"') {
+          cur += '"';
+          i++;
+          continue;
+        }
+        inQuotes = !inQuotes;
+        continue;
+      }
+      if (!inQuotes && ch === delim) {
+        out.push(cur.trim());
+        cur = '';
+        continue;
+      }
+      cur += ch;
+    }
+    out.push(cur.trim());
+    return out;
+  };
+
+  const headerCols = hasHeader ? splitCsvRow(lines[0]).map((c) => c.trim().toLowerCase()) : [];
   const colIndex = (names: string[]) => {
     for (const n of names) {
       const i = headerCols.indexOf(n);
@@ -311,7 +355,7 @@ function parseRoomsCsv(text: string): RoomDraft[] {
 
   const out: RoomDraft[] = [];
   for (let i = start; i < lines.length; i++) {
-    const cols = lines[i].split(',').map((c) => c.trim());
+    const cols = splitCsvRow(lines[i]);
     let building: string;
     let floor: string;
     let floorNumber: number | null = null;
@@ -322,11 +366,11 @@ function parseRoomsCsv(text: string): RoomDraft[] {
     let labTypeStr: string | undefined;
 
     if (hasHeader) {
-      const inBuilding = colIndex(['building']);
+      const inBuilding = colIndex(['building', 'building_name', 'buildingname', 'block', 'block_name', 'blockname']);
       const inFloor = colIndex(['floor']); // legacy single floor column (e.g. "1 / Ground")
       const inFloorNo = colIndex(['floor_number', 'floornumber', 'floorno', 'floor_num', 'floor#']);
       const inFloorName = colIndex(['floor_name', 'floorname', 'floorlabel', 'floor_label']);
-      const inRoom = colIndex(['room', 'room_number', 'roomnumber']);
+      const inRoom = colIndex(['room', 'room_number', 'roomnumber', 'room_no', 'roomno']);
       const inType = colIndex(['type']);
       const inCap = colIndex(['capacity']);
       const inLabType = colIndex(['labtype', 'lab_type']);
@@ -1275,13 +1319,21 @@ export function SchoolOnboardingWizardPage() {
   });
 
   const autoGenTimetable = useMutation({
-    mutationFn: async () => (await api.post('/api/v1/onboarding/timetable/auto-generate')).data,
+    mutationFn: async () => {
+      return (
+        await api.post('/api/timetable/generate', {
+          schoolId: null,
+          academicYearId: null,
+          replaceExisting: true,
+        })
+      ).data;
+    },
     onMutate: () => {
       setTimetableAutoGenInfo(null);
     },
     onSuccess: async (data) => {
-      const n = (data as { perClass?: { classCode: string; result: { warnings: string[] } }[] }).perClass?.length ?? 0;
-      setTimetableAutoGenInfo({ n });
+      const placed = (data as { stats?: { placedCount?: number } }).stats?.placedCount ?? null;
+      setTimetableAutoGenInfo({ n: placed == null ? 0 : Number(placed) });
       await qc.invalidateQueries({ queryKey: ['timetable-v2'] });
     },
   });
@@ -5766,63 +5818,18 @@ export function SchoolOnboardingWizardPage() {
       ) : null}
 
       {activeStepIndex === idxOf.TIMETABLE ? (
-      <div className="card stack" style={{ gap: 14 }}>
-        <div className="workspace-panel__head">
-          <h2 className="workspace-panel__title">Step 7 — Timetable</h2>
-          <span className="workspace-hero__tag">Required</span>
-        </div>
-        <p className="muted" style={{ margin: 0, fontSize: 14, lineHeight: 1.55 }}>
-          Auto-generate a first draft from your academic structure, then refine in the grid. Time slots should exist from
-          basic setup; add more in the editor if needed.
-        </p>
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <button
-            type="button"
-            className="btn"
-            disabled={autoGenTimetable.isPending}
-            onClick={() => autoGenTimetable.mutate()}
-          >
-            {autoGenTimetable.isPending ? 'Generating…' : 'Auto-generate draft timetable'}
-          </button>
-          <Link to="/app/timetable/grid" className="btn secondary">
-            Open timetable editor
-          </Link>
-          <button
-            type="button"
-            className="btn"
-            disabled={completeTimetableStep.isPending}
-            onClick={() => completeTimetableStep.mutate()}
-          >
-            {completeTimetableStep.isPending ? 'Saving…' : 'Mark timetable done & continue'}
-          </button>
-        </div>
-        {timetableAutoGenInfo && !autoGenTimetable.isError ? (
-          <div className="sms-alert sms-alert--success">
-            <div>
-              <div className="sms-alert__title">Timetable draft ready</div>
-              <div className="sms-alert__msg">
-                Auto-filled {timetableAutoGenInfo.n} class{timetableAutoGenInfo.n === 1 ? '' : 'es'}. Open the grid to review.
-              </div>
-            </div>
-          </div>
-        ) : null}
-        {autoGenTimetable.isError ? (
-          <div className="sms-alert sms-alert--error">
-            <div>
-              <div className="sms-alert__title">Auto-generate failed</div>
-              <div className="sms-alert__msg">{formatApiError(autoGenTimetable.error)}</div>
-            </div>
-          </div>
-        ) : null}
-        {completeTimetableStep.isError ? (
-          <div className="sms-alert sms-alert--error">
-            <div>
-              <div className="sms-alert__title">Save failed</div>
-              <div className="sms-alert__msg">{formatApiError(completeTimetableStep.error)}</div>
-            </div>
-          </div>
-        ) : null}
-      </div>
+        <Step7TimetableWorkspace
+          onAutoGenerateDraft={() => autoGenTimetable.mutateAsync()}
+          autoGeneratePending={autoGenTimetable.isPending}
+          autoGenerateErrorText={autoGenTimetable.isError ? formatApiError(autoGenTimetable.error) : null}
+          timetableAutoGenCount={timetableAutoGenInfo?.n ?? null}
+          workingDays={basicInfo.data?.workingDays ?? workingDays}
+          onOpenEditor={() => {
+            window.location.href = '/app/timetable/grid';
+          }}
+          onCompleteStep={() => completeTimetableStep.mutate()}
+          completePending={completeTimetableStep.isPending}
+        />
       ) : null}
 
       <div
