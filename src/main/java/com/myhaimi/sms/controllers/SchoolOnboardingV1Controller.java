@@ -184,8 +184,9 @@ public class SchoolOnboardingV1Controller {
         return schoolOnboardingService.listAcademicStructure();
     }
 
+    /** Same actors as GET — leadership edits mappings from Operations Hub / Academic module. */
     @PutMapping("/academic-structure")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
     public ResponseEntity<?> saveAcademicStructure(@Valid @RequestBody OnboardingAcademicStructureSaveDTO body) {
         schoolOnboardingService.saveAcademicStructure(body);
         return ResponseEntity.noContent().build();

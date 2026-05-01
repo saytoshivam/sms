@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { toast } from '../lib/toast';
 import {
@@ -52,6 +52,9 @@ type ClassGroupRow = {
 };
 
 type SubjectRow = { id: number; code: string; name: string; weeklyFrequency: number | null };
+
+/** Stable reference — avoids `?? []` creating a new array every render while snapshot is loading. */
+const EMPTY_SUBJECTS: SubjectRow[] = [];
 
 type StaffRow = {
   id: number;
@@ -134,6 +137,7 @@ export type UseAcademicStructureModuleResult = {
 };
 
 export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
+  const qc = useQueryClient();
   const invalidate = useApiTags();
   const recordChange = useImpactStore((s) => s.recordChange);
 
@@ -144,6 +148,20 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
   const [assignmentMeta, setAssignmentMeta] = useState<Record<string, AssignmentSlotMeta>>({});
   const [hydrated, setHydrated] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  /** Latest draft fields for PUT — avoids stale closures inside useMutation after flushSync/setState. */
+  const academicDraftRef = useRef({
+    classSubjectConfigs,
+    sectionSubjectOverrides,
+    defaultRoomByClassId,
+    assignmentMeta,
+  });
+  academicDraftRef.current = {
+    classSubjectConfigs,
+    sectionSubjectOverrides,
+    defaultRoomByClassId,
+    assignmentMeta,
+  };
 
   // ---- queries ----
   const basicInfoQuery = useQuery({
@@ -171,11 +189,14 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
       (await api.get<SpringPage<RoomOption> | RoomOption[]>('/api/rooms?size=500')).data,
   });
 
-  // ---- hydrate drafts from server (first time only) ----
+  // Hydrate local drafts when opening the module or after an explicit post-save resync.
+  // Important: skip while `isFetching` so we never overlay fresh edits with stale cache before refetch completes.
   useEffect(() => {
     const d = academicStructureQuery.data;
     if (!d) return;
     if (hydrated) return;
+    if (academicStructureQuery.isFetching) return;
+
     setClassSubjectConfigs(d.classSubjectConfigs ?? []);
     setSectionSubjectOverrides(d.sectionSubjectOverrides ?? []);
 
@@ -190,6 +211,8 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
         }
       }
       setAssignmentMeta(rec);
+    } else {
+      setAssignmentMeta({});
     }
 
     if ((d.classSubjectConfigs?.length ?? 0) > 0) {
@@ -212,7 +235,7 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
     }
     setDefaultRoomByClassId(nextDefaults);
     setHydrated(true);
-  }, [academicStructureQuery.data, hydrated]);
+  }, [academicStructureQuery.data, academicStructureQuery.isFetching, hydrated]);
 
   // ---- derived: room options + usage + conflicts ----
   const rooms = useMemo(() => pageContent<RoomOption>(roomsQuery.data), [roomsQuery.data]);
@@ -403,12 +426,18 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
     mutationFn: async () => {
       const cgs = serverSnapshot?.classGroups ?? [];
       if (cgs.length === 0) throw new Error('No class groups found. Generate classes first.');
+      const {
+        classSubjectConfigs: configsPayload,
+        sectionSubjectOverrides: overridesPayload,
+        defaultRoomByClassId: roomsDraft,
+        assignmentMeta: metaDraft,
+      } = academicDraftRef.current;
       const defaultRooms = cgs.map((r) => {
-        const raw = defaultRoomByClassId[r.classGroupId];
+        const raw = roomsDraft[r.classGroupId];
         const rid = raw && String(raw).trim() !== '' ? Number(raw) : NaN;
         return { classGroupId: r.classGroupId, roomId: Number.isFinite(rid) ? rid : null };
       });
-      const assignmentSlotMetaList = Object.entries(assignmentMeta).map(([k, v]) => {
+      const assignmentSlotMetaList = Object.entries(metaDraft).map(([k, v]) => {
         const [a, b] = k.split(':');
         return {
           classGroupId: Number(a),
@@ -418,8 +447,8 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
         };
       });
       await api.put('/api/v1/onboarding/academic-structure', {
-        classSubjectConfigs,
-        sectionSubjectOverrides,
+        classSubjectConfigs: configsPayload,
+        sectionSubjectOverrides: overridesPayload,
         defaultRooms,
         assignmentSlotMeta: assignmentSlotMetaList,
       });
@@ -435,8 +464,8 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
         message: 'Saved academic structure changes',
       });
       await invalidate(['allocations', 'classes']);
-      // Force the drafts to re-hydrate from the next server payload so the
-      // dirty flag drops cleanly even if the server normalised our payload.
+      // Ensure GET payload matches PUT before re-hydrating; otherwise stale cache wipes Class N templates.
+      await qc.refetchQueries({ queryKey: ['onboarding-academic-structure'] });
       setHydrated(false);
     },
     onError: () => setSaveSuccess(false),
@@ -445,7 +474,7 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
   // ---- exposed ----
   return {
     classGroups: serverSnapshot?.classGroups ?? [],
-    subjects: serverSnapshot?.subjects ?? [],
+    subjects: serverSnapshot?.subjects ?? EMPTY_SUBJECTS,
     staff: (serverSnapshot?.staff ?? []).map((s) => ({ ...s, roleNames: s.roleNames ?? [] })),
     rooms,
     basicInfo: basicInfoQuery.data ?? serverSnapshot?.basicInfo ?? null,

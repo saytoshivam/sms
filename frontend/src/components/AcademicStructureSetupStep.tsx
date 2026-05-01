@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { SelectKeeper } from './SelectKeeper';
 import { SmartSelect } from './SmartSelect';
 import { toast } from '../lib/toast';
@@ -117,7 +118,7 @@ type Props = {
   isError: boolean;
   error: unknown;
   roomsError: unknown | null;
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
   savePending: boolean;
   saveError: unknown;
   /** Cleared on each save; after success parent sets true. */
@@ -208,6 +209,18 @@ export function AcademicStructureSetupStep({
   const catalogCount = subjects.length;
   const validSubjectIdSet = useMemo(() => new Set<number>(subjects.map((s) => Number(s.id))), [subjects]);
 
+  /** Stable across referential churn of `subjects` while React Query loads — drives purge effect only when IDs truly change. */
+  const subjectCatalogSignature = useMemo(
+    () =>
+      subjects.length === 0
+        ? ''
+        : [...subjects.map((s) => Number(s.id))]
+            .filter((id) => Number.isFinite(id))
+            .sort((a, b) => a - b)
+            .join(','),
+    [subjects],
+  );
+
   const loadByStaff = useMemo(() => {
     const m = new Map<number, number>();
     for (const a of allocRows) {
@@ -217,32 +230,54 @@ export function AcademicStructureSetupStep({
     return m;
   }, [allocRows]);
 
-  // If templates exist, ensure allocRows shown are derived from template+override.
+  // When any grade uses class templates, derive those sections' allocs from template+overrides.
+  // Merge with legacy allocation rows for grades that do not have template rows yet (avoid wiping siblings).
   useEffect(() => {
     if (!classSubjectConfigs?.length) return;
-    const effective = buildEffectiveAllocRows(classGroups, classSubjectConfigs, sectionSubjectOverrides);
-    setAllocRows(effective);
+    setAllocRows((prev) => {
+      const effective = buildEffectiveAllocRows(classGroups, classSubjectConfigs, sectionSubjectOverrides);
+      const gradesWithAnyTemplate = new Set(classSubjectConfigs.map((c) => Number(c.gradeLevel)));
+
+      const merged = [...effective];
+      const keys = new Set(effective.map((r) => `${r.classGroupId}:${r.subjectId}`));
+
+      for (const cg of classGroups) {
+        const g = cg.gradeLevel == null ? NaN : Number(cg.gradeLevel);
+        if (!Number.isFinite(g)) continue;
+        if (gradesWithAnyTemplate.has(g)) continue;
+        for (const a of prev) {
+          if (Number(a.classGroupId) !== Number(cg.classGroupId)) continue;
+          if (a.weeklyFrequency <= 0) continue;
+          const k = `${a.classGroupId}:${a.subjectId}`;
+          if (keys.has(k)) continue;
+          merged.push(a);
+          keys.add(k);
+        }
+      }
+      return merged;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classGroups, classSubjectConfigs, sectionSubjectOverrides]);
 
-  // If a subject is deleted from the catalog, it must not remain mapped anywhere.
-  // Purge stale template rows, overrides, and meta for missing subjectIds.
+  // If a subject is deleted from the catalog, drop stale mappings — only when catalog *membership* changes.
+  // Do not key off `validSubjectIdSet` (new Set every render while `subjects` is `data ?? []`) — that wiped all templates.
   useEffect(() => {
-    if (!subjects.length) return;
-    setClassSubjectConfigs((prev) => prev.filter((c) => validSubjectIdSet.has(Number(c.subjectId))));
-    setSectionSubjectOverrides((prev) => prev.filter((o) => validSubjectIdSet.has(Number(o.subjectId))));
+    if (!subjectCatalogSignature) return;
+    const allowed = new Set(subjects.map((s) => Number(s.id)).filter((id) => Number.isFinite(id)));
+    setClassSubjectConfigs((prev) => prev.filter((c) => allowed.has(Number(c.subjectId))));
+    setSectionSubjectOverrides((prev) => prev.filter((o) => allowed.has(Number(o.subjectId))));
     setAssignmentMeta((prev) => {
       const next: Record<string, AssignmentSlotMeta> = {};
       for (const [k, v] of Object.entries(prev)) {
         const parts = k.split(':');
         const sid = Number(parts[1]);
-        if (!Number.isFinite(sid) || !validSubjectIdSet.has(sid)) continue;
+        if (!Number.isFinite(sid) || !allowed.has(sid)) continue;
         next[k] = v;
       }
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [validSubjectIdSet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `subjects` is from the render where `subjectCatalogSignature` changed
+  }, [subjectCatalogSignature]);
 
   // Reset override search whenever drawer target changes.
   useEffect(() => {
@@ -373,17 +408,18 @@ export function AcademicStructureSetupStep({
     });
   };
 
-  const templateSubjectIdsForGrade = useMemo(() => {
+  /** Stable key for saved class-default subject ids — avoids resetting draft when unrelated config arrays get new references. */
+  const savedTemplateIdsKeyForPick = useMemo(() => {
+    if (!initialGradePick) return '';
     const g = Number(initialGradePick);
-    if (!Number.isFinite(g)) return [];
-    return classSubjectConfigs.filter((c) => Number(c.gradeLevel) === g).map((c) => Number(c.subjectId));
-  }, [classSubjectConfigs, initialGradePick]);
-
-  const classDefaultsSelected = useMemo(() => {
-    const set = new Set<number>();
-    for (const id of templateSubjectIdsForGrade) set.add(Number(id));
-    return set;
-  }, [templateSubjectIdsForGrade]);
+    if (!Number.isFinite(g)) return '';
+    const ids = classSubjectConfigs
+      .filter((c) => Number(c.gradeLevel) === g && validSubjectIdSet.has(Number(c.subjectId)))
+      .map((c) => Number(c.subjectId))
+      .sort((a, b) => a - b)
+      .join(',');
+    return `${g}:${ids}`;
+  }, [initialGradePick, classSubjectConfigs, validSubjectIdSet]);
 
   const [draftClassDefaults, setDraftClassDefaults] = useState<Set<number>>(new Set());
   const [copyFromGradePick, setCopyFromGradePick] = useState<string>('');
@@ -403,24 +439,62 @@ export function AcademicStructureSetupStep({
     return m;
   }, [classSubjectConfigs, validSubjectIdSet]);
 
+  /** Subject IDs for class defaults: saved grade template if any, otherwise union from legacy allocations for that grade. */
+  const subjectIdsForGradeTemplateOrLegacy = useCallback(
+    (grade: number): Set<number> => {
+      const g = Number(grade);
+      const fromTpl = templateSubjectIdSetForGrade.get(g);
+      if (fromTpl?.size) return new Set(fromTpl);
+
+      const out = new Set<number>();
+      for (const cg of classGroups) {
+        if (Number(cg.gradeLevel) !== g) continue;
+        for (const a of allocRows) {
+          if (Number(a.classGroupId) !== Number(cg.classGroupId)) continue;
+          if (a.weeklyFrequency <= 0) continue;
+          const sid = Number(a.subjectId);
+          if (!validSubjectIdSet.has(sid)) continue;
+          out.add(sid);
+        }
+      }
+      return out;
+    },
+    [templateSubjectIdSetForGrade, classGroups, allocRows, validSubjectIdSet],
+  );
+
   /**
-   * Mapping step should be driven by mapping state (template + overrides),
-   * not by allocation rows (which are configured later and may be empty).
+   * Enabled subjects per section: grade template + overrides, or legacy allocation rows until that grade has templates.
    */
-  const mappingEnabledSet = useCallback((classGroupId: number, gradeLevel: number | null | undefined) => {
-    const g = gradeLevel == null ? NaN : Number(gradeLevel);
-    const base = Number.isFinite(g) ? templateSubjectIdSetForGrade.get(g) : null;
-    const set = new Set<number>(base ? [...base] : []);
-    if (!set.size) return set;
-    for (const o of sectionSubjectOverrides) {
-      if (Number(o.classGroupId) !== Number(classGroupId)) continue;
-      const sid = Number(o.subjectId);
-      if (!Number.isFinite(sid)) continue;
-      // periodsPerWeek===0 is the "disabled" flag in mapping step.
-      if (o.periodsPerWeek === 0) set.delete(sid);
-    }
-    return set;
-  }, [templateSubjectIdSetForGrade, sectionSubjectOverrides]);
+  const mappingEnabledSet = useCallback(
+    (classGroupId: number, gradeLevel: number | null | undefined) => {
+      const g = gradeLevel == null ? NaN : Number(gradeLevel);
+      const templateSet = Number.isFinite(g) ? templateSubjectIdSetForGrade.get(g) : undefined;
+
+      const set = new Set<number>();
+      if (templateSet?.size) {
+        for (const sid of templateSet) set.add(sid);
+      } else {
+        for (const a of allocRows) {
+          if (Number(a.classGroupId) !== Number(classGroupId)) continue;
+          if (a.weeklyFrequency <= 0) continue;
+          const sid = Number(a.subjectId);
+          if (!validSubjectIdSet.has(sid)) continue;
+          set.add(sid);
+        }
+      }
+
+      for (const o of sectionSubjectOverrides) {
+        if (Number(o.classGroupId) !== Number(classGroupId)) continue;
+        const sid = Number(o.subjectId);
+        if (!Number.isFinite(sid)) continue;
+        const pw = o.periodsPerWeek;
+        if (pw === 0) set.delete(sid);
+        else if (pw != null && pw > 0) set.add(sid);
+      }
+      return set;
+    },
+    [templateSubjectIdSetForGrade, sectionSubjectOverrides, allocRows, validSubjectIdSet],
+  );
 
   const sectionHasAnyEnabledSubject = useMemo(() => {
     const m = new Map<number, boolean>();
@@ -463,16 +537,28 @@ export function AcademicStructureSetupStep({
     return null;
   }, [gradesInSchool, classGroups, sectionHasAnyEnabledSubject, initialGradePick]);
 
-  // Keep a local draft for "Save & apply" flow.
+  // Reset copy-from source only when switching the grade being edited (not when saved templates update).
+  useEffect(() => {
+    setCopyFromGradePick('');
+  }, [initialGradePick]);
+
+  // Keep draft aligned with saved templates when grade changes or server/template snapshot changes — not on unrelated renders.
   useEffect(() => {
     if (!initialGradePick) {
       setDraftClassDefaults(new Set());
-      setCopyFromGradePick('');
       return;
     }
-    setDraftClassDefaults(new Set(classDefaultsSelected));
-    setCopyFromGradePick('');
-  }, [initialGradePick, classDefaultsSelected]);
+    const g = Number(initialGradePick);
+    if (!Number.isFinite(g)) {
+      setDraftClassDefaults(new Set());
+      return;
+    }
+    const ids = classSubjectConfigs
+      .filter((c) => Number(c.gradeLevel) === g && validSubjectIdSet.has(Number(c.subjectId)))
+      .map((c) => Number(c.subjectId));
+    setDraftClassDefaults(new Set(ids));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: classSubjectConfigs read only when savedTemplateIdsKeyForPick changes
+  }, [initialGradePick, savedTemplateIdsKeyForPick]);
 
   const filteredSubjectsForMapping = useMemo(() => {
     const q = mappingSearch.trim().toLowerCase();
@@ -902,9 +988,7 @@ export function AcademicStructureSetupStep({
                 };
 
                 const selectedSubjectCount =
-                  catalogCount === 0
-                    ? 0
-                    : classSubjectConfigs.filter((c) => Number(c.gradeLevel) === Number(g) && validSubjectIdSet.has(Number(c.subjectId))).length;
+                  catalogCount === 0 ? 0 : subjectIdsForGradeTemplateOrLegacy(Number(g)).size;
                 const pendingSections = counts.missing;
 
                 return (
@@ -955,8 +1039,9 @@ export function AcademicStructureSetupStep({
                       These subjects apply to all sections of this class unless overridden below.
                     </div>
                   </div>
-                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                    <div className="stack" style={{ gap: 4, flex: '1 1 280px', minWidth: 200 }}>
+                      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                       <span className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
                         Copy from class
                       </span>
@@ -977,13 +1062,21 @@ export function AcademicStructureSetupStep({
                         onClick={() => {
                           const src = Number(copyFromGradePick);
                           if (!Number.isFinite(src)) return;
-                          const set = templateSubjectIdSetForGrade.get(src) ?? new Set<number>();
+                          const set = subjectIdsForGradeTemplateOrLegacy(src);
                           setDraftClassDefaults(new Set(set));
-                          toast.success('Copied', `Loaded Class ${src} defaults into draft.`);
+                          if (!set.size) {
+                            toast.success('Nothing to copy', `Class ${src} has no subjects in defaults or existing allocations yet.`);
+                          } else {
+                            toast.success('Copied', `Loaded Class ${src} subjects into draft.`);
+                          }
                         }}
                       >
                         Copy
                       </button>
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, fontWeight: 700 }}>
+                        If the draft below is empty, Save & apply uses the class chosen above (same as Copy).
+                      </div>
                     </div>
                     <button
                       type="button"
@@ -1013,11 +1106,50 @@ export function AcademicStructureSetupStep({
                       onClick={() => {
                         const g = Number(initialGradePick);
                         if (!Number.isFinite(g)) return;
-                        saveClassDefaults(g, draftClassDefaults);
-                        const secs = classGroups.filter((c) => Number(c.gradeLevel) === Number(g)).length;
-                        toast.success('Saved', `Applied to ${secs} section${secs === 1 ? '' : 's'}.`);
+                        void (async () => {
+                          try {
+                            /** Prefer explicit draft; if empty but "Copy from class" is set, apply that grade (same as pressing Copy). */
+                            let selectedIds: Set<number>;
+                            let appliedFromGrade: number | null = null;
+                            if (draftClassDefaults.size > 0) {
+                              selectedIds = new Set(draftClassDefaults);
+                            } else if (copyFromGradePick) {
+                              const src = Number(copyFromGradePick);
+                              if (Number.isFinite(src) && src !== g) {
+                                selectedIds = new Set(subjectIdsForGradeTemplateOrLegacy(src));
+                                appliedFromGrade = src;
+                              } else {
+                                selectedIds = new Set();
+                              }
+                            } else {
+                              selectedIds = new Set();
+                            }
+
+                            if (selectedIds.size === 0 && copyFromGradePick) {
+                              toast.error(
+                                'Nothing to apply',
+                                `Class ${copyFromGradePick} has no subjects in defaults or allocations to copy.`,
+                              );
+                              return;
+                            }
+
+                            flushSync(() => {
+                              setDraftClassDefaults(new Set(selectedIds));
+                              saveClassDefaults(g, selectedIds);
+                            });
+                            await Promise.resolve(onSave());
+                            const secs = classGroups.filter((c) => Number(c.gradeLevel) === Number(g)).length;
+                            const detail =
+                              appliedFromGrade != null
+                                ? `Copied ${selectedIds.size} subject${selectedIds.size === 1 ? '' : 's'} from Class ${appliedFromGrade} → ${secs} section${secs === 1 ? '' : 's'}.`
+                                : `Class defaults saved for ${secs} section${secs === 1 ? '' : 's'}.`;
+                            toast.success('Saved', detail);
+                          } catch (e) {
+                            toast.error('Save failed', formatError(e));
+                          }
+                        })();
                       }}
-                      disabled={!initialGradePick}
+                      disabled={!initialGradePick || savePending}
                     >
                       {(() => {
                         const g = Number(initialGradePick);

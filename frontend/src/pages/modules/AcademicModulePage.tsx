@@ -86,7 +86,7 @@ export function AcademicModulePage() {
         isError={m.isError}
         error={m.error}
         roomsError={m.roomsError}
-        onSave={() => void m.save()}
+        onSave={() => m.save()}
         savePending={m.savePending}
         saveError={m.saveError}
         saveSuccess={m.saveSuccess}

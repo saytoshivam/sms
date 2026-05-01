@@ -39,6 +39,9 @@ import { pageContent, type SpringPage } from '../lib/springPageContent';
 /** Local-only draft for academic step (server still requires a complete save to continue onboarding). */
 const ACADEMIC_LOCAL_DRAFT_KEY = 'sms-onboarding-academic-structure-v1';
 
+/** Stable while academic query is loading — prevents child effects keyed off `subjects` from thrashing. */
+const EMPTY_ACADEMIC_SUBJECTS: Array<{ id: number; code: string; name: string; weeklyFrequency: number | null }> = [];
+
 type Progress = { onboardingStatus: string; completedSteps: string[] };
 type BasicInfo = {
   academicYear: string;
@@ -2464,7 +2467,7 @@ export function SchoolOnboardingWizardPage() {
       {activeStepIndex === idxOf.ACADEMIC_STRUCTURE ? (
         <AcademicStructureSetupStep
           classGroups={academicStructureQuery.data?.classGroups ?? []}
-          subjects={academicStructureQuery.data?.subjects ?? []}
+          subjects={academicStructureQuery.data?.subjects ?? EMPTY_ACADEMIC_SUBJECTS}
           staff={(academicStructureQuery.data?.staff ?? []).map((s) => ({ ...s, roleNames: s.roleNames ?? [] }))}
           rooms={roomsForClassDefaults.data}
           allocRows={academicAllocRows}
@@ -2485,7 +2488,7 @@ export function SchoolOnboardingWizardPage() {
           isError={academicStructureQuery.isError}
           error={academicStructureQuery.error}
           roomsError={roomsForClassDefaults.isError ? roomsForClassDefaults.error : null}
-          onSave={() => saveAcademicStructure.mutate()}
+          onSave={() => saveAcademicStructure.mutateAsync()}
           savePending={saveAcademicStructure.isPending}
           saveError={saveAcademicStructure.isError ? saveAcademicStructure.error : null}
           formatError={formatApiError}
