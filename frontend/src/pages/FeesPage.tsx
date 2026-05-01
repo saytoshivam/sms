@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { pageContent, pageTotalElements, type SpringPage } from '../lib/apiData';
 import { SchoolBusinessKpis } from '../components/SchoolBusinessKpis';
+import { SmartSelect } from '../components/SmartSelect';
 
 const ONLINE_FEES = 'fees.online_payments';
 
@@ -105,14 +106,16 @@ export function FeesPage() {
           <div className="row">
             <div style={{ flex: 2, minWidth: 240 }} className="stack">
               <label>Student</label>
-              <select value={studentId} onChange={(e) => setStudentId(e.target.value)}>
-                <option value="">Select…</option>
-                {studentOptions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.firstName} {s.lastName ?? ''} ({s.admissionNo})
-                  </option>
-                ))}
-              </select>
+              <SmartSelect
+                value={studentId}
+                onChange={setStudentId}
+                placeholder="Select…"
+                options={studentOptions.map((s) => ({
+                  value: String(s.id),
+                  label: `${s.firstName} ${s.lastName ?? ''}`.trim(),
+                  meta: s.admissionNo,
+                }))}
+              />
             </div>
             <div style={{ flex: 1, minWidth: 160 }} className="stack">
               <label>Amount due</label>

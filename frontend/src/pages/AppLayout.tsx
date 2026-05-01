@@ -335,28 +335,55 @@ export function AppLayout() {
               </div>
               <nav className="student-drawer-nav">
                 <Link className="student-drawer-link" to="/app" onClick={closeMenu}>
-                  Dashboard
+                  Operations hub
                 </Link>
+                <Link className="student-drawer-link" to="/app/dashboard" onClick={closeMenu}>
+                  Classic workspace
+                </Link>
+                <Link className="student-drawer-link" to="/app/onboarding" onClick={closeMenu}>
+                  Setup wizard (CSV imports)
+                </Link>
+                <DrawerNavSection title={FeatureArea.ACADEMIC}>
+                  <Link className="student-drawer-link" to="/app/time" onClick={closeMenu}>
+                    Time slots
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/classes-sections" onClick={closeMenu}>
+                    Classes & sections
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/academic" onClick={closeMenu}>
+                    Academic structure
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/subjects" onClick={closeMenu}>
+                    Subjects
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/rooms" onClick={closeMenu}>
+                    Rooms
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/teachers" onClick={closeMenu}>
+                    Teachers
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/timetable" onClick={closeMenu}>
+                    Timetable workspace
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/lectures" onClick={closeMenu}>
+                    Lectures
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/teacher/timetable" onClick={closeMenu}>
+                    Teacher timetable
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/timetable/grid" onClick={closeMenu}>
+                    Timetable editor (advanced)
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/timetable/rules" onClick={closeMenu}>
+                    Recurring timetable slots
+                  </Link>
+                </DrawerNavSection>
                 <DrawerNavSection title={FeatureArea.USER_ACCESS}>
                   <Link className="student-drawer-link" to="/app/user-access" onClick={closeMenu}>
                     Role & access management
                   </Link>
                   <Link className="student-drawer-link" to="/app/students" onClick={closeMenu}>
                     Students
-                  </Link>
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.ACADEMIC}>
-                  <Link className="student-drawer-link" to="/app/class-groups" onClick={closeMenu}>
-                    Class groups
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/lectures" onClick={closeMenu}>
-                    Lectures
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/teacher/timetable" onClick={closeMenu}>
-                    Timetable
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/timetable/rules" onClick={closeMenu}>
-                    Recurring timetable slots
                   </Link>
                 </DrawerNavSection>
                 <DrawerNavSection title={FeatureArea.ATTENDANCE}>
@@ -396,7 +423,7 @@ export function AppLayout() {
                   <DrawerNavSoon />
                 </DrawerNavSection>
                 <DrawerNavSection title={FeatureArea.REPORTS_ANALYTICS}>
-                  <Link className="student-drawer-link" to="/app" onClick={closeMenu}>
+                  <Link className="student-drawer-link" to="/app/dashboard" onClick={closeMenu}>
                     School overview (dashboard)
                   </Link>
                   <DrawerNavSoon text="Exports, cohort KPIs, and scheduled reports — coming soon. Dashboard shows enrollment and fee KPIs; Class progress covers teaching trends." />

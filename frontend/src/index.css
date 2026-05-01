@@ -4302,9 +4302,35 @@ textarea:disabled {
 
 /* Searchable catalog combobox (subjects, class groups, …) — same shell as SelectKeeper */
 .catalog-combobox__field {
-  position: relative;
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  width: 100%;
+}
+
+.catalog-combobox__field > .catalog-combobox__input {
+  grid-area: 1 / 1;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.catalog-combobox__field > .select-keeper__chev {
+  grid-area: 1 / 1;
+  justify-self: end;
+  align-self: center;
+  margin-inline-end: 10px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Fallback: sibling chevron without __field wrapper (would otherwise wrap under width:100% control) */
+.select-keeper.catalog-combobox > .catalog-combobox__input + .select-keeper__chev {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .catalog-combobox__input {
@@ -4338,12 +4364,6 @@ textarea:disabled {
 .catalog-combobox__input:disabled {
   opacity: 0.72;
   cursor: not-allowed;
-}
-
-.catalog-combobox__field .select-keeper__chev {
-  position: absolute;
-  right: 10px;
-  pointer-events: none;
 }
 
 .catalog-combobox .select-keeper__option {

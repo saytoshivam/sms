@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { toast } from '../lib/toast';
+import { SmartSelect } from '../components/SmartSelect';
 
 type ClassGroup = { id: number; displayName: string };
 type Staff = { id: number; fullName: string; email?: string | null };
@@ -101,25 +102,23 @@ export function TimetableRulesPage() {
           <div className="row">
             <div style={{ flex: 1, minWidth: 200 }} className="stack">
               <label>Class group</label>
-              <select value={classGroupId} onChange={(e) => setClassGroupId(e.target.value)} required>
-                <option value="">Select…</option>
-                {(classGroups.data?.content ?? []).map((cg) => (
-                  <option key={cg.id} value={cg.id}>
-                    {cg.displayName}
-                  </option>
-                ))}
-              </select>
+              <SmartSelect
+                value={classGroupId}
+                onChange={setClassGroupId}
+                placeholder="Select…"
+                options={(classGroups.data?.content ?? []).map((cg) => ({ value: String(cg.id), label: cg.displayName }))}
+              />
             </div>
             <div style={{ flex: 1, minWidth: 200 }} className="stack">
               <label>Subject teacher (staff)</label>
-              <select value={staffId} onChange={(e) => setStaffId(e.target.value)}>
-                <option value="">(optional)</option>
-                {(staff.data?.content ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.fullName}
-                  </option>
-                ))}
-              </select>
+              <SmartSelect
+                value={staffId}
+                onChange={setStaffId}
+                allowClear
+                clearLabel="(optional)"
+                placeholder="(optional)"
+                options={(staff.data?.content ?? []).map((s) => ({ value: String(s.id), label: s.fullName }))}
+              />
             </div>
           </div>
           <div className="row">
@@ -135,13 +134,11 @@ export function TimetableRulesPage() {
           <div className="row">
             <div style={{ flex: 1, minWidth: 160 }} className="stack">
               <label>Day of week</label>
-              <select value={dayOfWeek} onChange={(e) => setDayOfWeek(e.target.value)}>
-                {DAYS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
+              <SmartSelect
+                value={dayOfWeek}
+                onChange={setDayOfWeek}
+                options={DAYS.map((d) => ({ value: d, label: d }))}
+              />
             </div>
             <div style={{ flex: 1, minWidth: 120 }} className="stack">
               <label>Start</label>

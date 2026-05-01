@@ -34,6 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Optional;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,15 +71,38 @@ public class ClassGroupService {
         return classGroupRepo.findBySchool_IdAndIsDeletedFalse(requireSchoolId(), pageable);
     }
 
+    @Transactional
     public ClassGroup create(ClassGroupDTO dto) {
         Integer schoolId = requireSchoolId();
         School school = schoolRepo.findById(schoolId).orElseThrow();
 
+        Optional<ClassGroup> existingOpt = classGroupRepo.findByCodeAndSchool_Id(dto.getCode(), schoolId);
+        if (existingOpt.isPresent()) {
+            ClassGroup existing = existingOpt.get();
+            if (existing.isDeleted()) {
+                applyClassGroupCreate(existing, school, dto);
+                existing.setDeleted(false);
+                return classGroupRepo.save(existing);
+            }
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "A class with code '" + dto.getCode() + "' already exists.");
+        }
+
         ClassGroup cg = new ClassGroup();
+        applyClassGroupCreate(cg, school, dto);
+        return classGroupRepo.save(cg);
+    }
+
+    private void applyClassGroupCreate(ClassGroup cg, School school, ClassGroupDTO dto) {
         cg.setSchool(school);
         cg.setCode(dto.getCode());
         cg.setDisplayName(dto.getDisplayName());
-        return classGroupRepo.save(cg);
+        cg.setGradeLevel(dto.getGradeLevel());
+        String sec = dto.getSection() == null ? null : dto.getSection().trim();
+        cg.setSection(sec == null || sec.isEmpty() ? null : sec);
+        if (dto.getCapacity() != null && dto.getCapacity() > 0) {
+            cg.setCapacity(dto.getCapacity());
+        }
     }
 
     /**

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { SmartSelect } from '../components/SmartSelect';
 import type { AnnouncementCategory } from './StudentAnnouncementsPage';
 
 export function ComposeSchoolAnnouncementPage() {
@@ -44,12 +45,16 @@ export function ComposeSchoolAnnouncementPage() {
         <label>Body</label>
         <textarea rows={8} value={body} onChange={(e) => setBody(e.target.value)} />
         <label>Category</label>
-        <select value={category} onChange={(e) => setCategory(e.target.value as AnnouncementCategory)}>
-          <option value="ACADEMIC">Academic</option>
-          <option value="PLACEMENT">Placement</option>
-          <option value="EXAMINATION">Examination</option>
-          <option value="GENERAL">General</option>
-        </select>
+        <SmartSelect
+          value={category}
+          onChange={(v) => setCategory(v as AnnouncementCategory)}
+          options={[
+            { value: 'ACADEMIC', label: 'Academic' },
+            { value: 'PLACEMENT', label: 'Placement' },
+            { value: 'EXAMINATION', label: 'Examination' },
+            { value: 'GENERAL', label: 'General' },
+          ]}
+        />
         <button
           type="button"
           className="btn"

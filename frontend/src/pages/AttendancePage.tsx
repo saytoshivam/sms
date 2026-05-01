@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { formatJsonDate, pageContent, pageTotalElements, type SpringPage } from '../lib/apiData';
 import { DateKeeper } from '../components/DateKeeper';
+import { SmartSelect } from '../components/SmartSelect';
 import type { MeProfile } from '../modules/dashboards/SuperAdminDashboard';
 import { toast } from '../lib/toast';
 
@@ -192,14 +193,12 @@ export function AttendancePage() {
             <div className="lecture-schedule-form__row">
               <div className="stack lecture-schedule-field lecture-schedule-field--grow" style={{ minWidth: 200 }}>
                 <label>Class group</label>
-                <select value={classGroupId} onChange={(e) => setClassGroupId(e.target.value)}>
-                  <option value="">Select…</option>
-                  {groupList.map((cg) => (
-                    <option key={cg.id} value={cg.id}>
-                      {cg.displayName}
-                    </option>
-                  ))}
-                </select>
+                <SmartSelect
+                  value={classGroupId}
+                  onChange={setClassGroupId}
+                  placeholder="Select…"
+                  options={groupList.map((cg) => ({ value: String(cg.id), label: cg.displayName }))}
+                />
                 {classGroups.error ? (
                   <div className="attendance-field-error">{formatApiError(classGroups.error)}</div>
                 ) : null}
@@ -211,20 +210,17 @@ export function AttendancePage() {
               {lectureWise ? (
                 <div className="stack lecture-schedule-field lecture-schedule-field--grow" style={{ minWidth: 220 }}>
                   <label htmlFor="attendance-lecture">Lecture (period)</label>
-                  <select
+                  <SmartSelect
                     id="attendance-lecture"
                     value={lectureId}
-                    onChange={(e) => setLectureId(e.target.value)}
+                    onChange={setLectureId}
+                    placeholder="Select a lecture…"
                     disabled={!classGroupId || lecturesForDay.isLoading}
-                  >
-                    <option value="">Select a lecture…</option>
-                    {lectureList.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.startTime?.slice(0, 5)}–{row.endTime?.slice(0, 5)} · {row.subject}
-                        {row.teacherName ? ` · ${row.teacherName}` : ''}
-                      </option>
-                    ))}
-                  </select>
+                    options={lectureList.map((row) => ({
+                      value: String(row.id),
+                      label: `${row.startTime?.slice(0, 5)}–${row.endTime?.slice(0, 5)} · ${row.subject}${row.teacherName ? ` · ${row.teacherName}` : ''}`,
+                    }))}
+                  />
                   {lecturesForDay.error ? (
                     <div className="attendance-field-error">{formatApiError(lecturesForDay.error)}</div>
                   ) : null}

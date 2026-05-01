@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { SmartSelect } from './SmartSelect';
 
 export type StudentMarkRow = {
   subjectCode: string;
@@ -74,23 +75,18 @@ export function StudentMarksBoard({
           <label htmlFor="student-marks-term" className="muted" style={{ margin: 0, fontSize: 12 }}>
             Term
           </label>
-          <select
+          <SmartSelect
             id="student-marks-term"
-            className="term-select"
             value={termKey}
-            onChange={(e) => setTermKey(e.target.value)}
+            onChange={setTermKey}
             disabled={isLoading || (marks ?? []).length === 0}
-          >
-            <option value={TERM_ALL}>All terms</option>
-            {termOptions.named.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-            {termOptions.untagged ? (
-              <option value={TERM_UNTAGGED}>No term / general</option>
-            ) : null}
-          </select>
+            options={[
+              { value: TERM_ALL, label: 'All terms' },
+              ...termOptions.named.map((t) => ({ value: t, label: t })),
+              ...(termOptions.untagged ? [{ value: TERM_UNTAGGED, label: 'No term / general' }] : []),
+            ]}
+            style={{ minWidth: 180 }}
+          />
           {detailHref ? (
             <Link className="btn secondary" style={{ fontSize: 13, padding: '6px 10px' }} to={detailHref}>
               {detailLabel}

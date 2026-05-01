@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { SelectKeeper } from './SelectKeeper';
+import { SmartSelect } from './SmartSelect';
 import { toast } from '../lib/toast';
 import {
   buildEffectiveAllocRows,
@@ -11,6 +12,7 @@ import {
 } from '../lib/academicStructureUtils';
 import type { AssignmentSlotMeta } from '../lib/academicStructureSmartAssign';
 import { SmartTeacherAssignmentBlock, TeacherLoadDashboard } from './SmartTeacherAssignmentBlock';
+import { WeeklyCapacitySummary } from './WeeklyCapacitySummary';
 
 export type { AcademicAllocRow };
 
@@ -56,6 +58,7 @@ type BasicInfo = {
   schoolEndTime: string;
   lectureDurationMinutes: number;
   workingDays: string[];
+  openWindows?: { startTime: string; endTime: string }[];
 };
 
 const TEACHER = 'TEACHER';
@@ -913,7 +916,7 @@ export function AcademicStructureSetupStep({
                     title="Select class"
                     style={{
                       borderRadius: 12,
-                      border: isSelected ? '2px solid var(--color-primary)' : '1px solid rgba(15,23,42,0.08)',
+                      border: isSelected ? '3px solid var(--color-primary)' : '1px solid rgba(15,23,42,0.08)',
                       background: isSelected ? 'rgba(255,247,237,0.65)' : 'rgba(255,255,255,0.75)',
                       overflow: 'visible',
                       padding: '10px 12px',
@@ -929,7 +932,6 @@ export function AcademicStructureSetupStep({
                       </span>
                     </div>
                     <div className="stack" style={{ gap: 2, marginTop: 2 }}>
-                      <div style={{ fontSize: 12, fontWeight: 900, color: badge.color }}>{badge.text}</div>
                       <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
                         {selectedSubjectCount} subject{selectedSubjectCount === 1 ? '' : 's'} selected
                       </div>
@@ -958,11 +960,14 @@ export function AcademicStructureSetupStep({
                       <span className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
                         Copy from class
                       </span>
-                      <div style={{ minWidth: 170 }}>
-                        <SelectKeeper
+                      <div style={{ minWidth: 200, flex: '1 1 200px' }}>
+                        <SmartSelect
                           value={copyFromGradePick}
-                          onChange={(v) => setCopyFromGradePick(v)}
-                          options={[{ value: '', label: 'Select…' }, ...copyFromOptions]}
+                          onChange={setCopyFromGradePick}
+                          placeholder="Select class…"
+                          options={copyFromOptions}
+                          allowClear
+                          clearLabel="Clear"
                         />
                       </div>
                       <button
@@ -1011,7 +1016,6 @@ export function AcademicStructureSetupStep({
                         saveClassDefaults(g, draftClassDefaults);
                         const secs = classGroups.filter((c) => Number(c.gradeLevel) === Number(g)).length;
                         toast.success('Saved', `Applied to ${secs} section${secs === 1 ? '' : 's'}.`);
-                        if (nextPendingGrade != null) setInitialGradePick(String(nextPendingGrade));
                       }}
                       disabled={!initialGradePick}
                     >
@@ -1048,48 +1052,12 @@ export function AcademicStructureSetupStep({
                         lineHeight: 1.55,
                       }}
                     >
-                      {slotsPerWeek != null ? (
-                        (() => {
-                          const free = slotsPerWeek - draftScheduledPeriods;
-                          return (
-                            <>
-                              <div className="muted" style={{ fontWeight: 800 }}>
-                                Weekly capacity (each section):{' '}
-                                <span style={{ color: '#0f172a', fontWeight: 950 }}>~{slotsPerWeek}</span> teachable slots
-                              </div>
-                              <div className="muted" style={{ fontWeight: 800, marginTop: 4 }}>
-                                Selected subjects total:{' '}
-                                <span style={{ color: '#0f172a', fontWeight: 950 }}>{draftScheduledPeriods}</span>{' '}
-                                periods/week{' '}
-                                <span className="muted" style={{ fontWeight: 700 }}>(from each subject’s frequency)</span>
-                              </div>
-                              <div
-                                style={{
-                                  marginTop: 8,
-                                  fontWeight: 950,
-                                  color: free < 0 ? '#b45309' : free === 0 ? '#a16207' : '#166534',
-                                }}
-                              >
-                                {free < 0 ? (
-                                  <>
-                                    Over capacity by <strong>{Math.abs(free)}</strong> — remove subjects or lower weekly
-                                    frequency on the Subjects step.
-                                  </>
-                                ) : (
-                                  <>
-                                    Free slots: <strong>{free}</strong> of {slotsPerWeek} remaining this week
-                                  </>
-                                )}
-                              </div>
-                            </>
-                          );
-                        })()
-                      ) : (
-                        <div className="muted" style={{ fontWeight: 800 }}>
-                          Set working days, period length, and school hours in Basic info (or open windows) to show weekly
-                          capacity and free slots while you map subjects.
-                        </div>
-                      )}
+                      <WeeklyCapacitySummary
+                        slotsPerWeek={slotsPerWeek}
+                        periodsScheduled={draftScheduledPeriods}
+                        variant="class_defaults"
+                        missingHint="Set working days, period length, and school hours in Basic info (or open windows) to show weekly capacity and free slots while you map subjects."
+                      />
                     </div>
                     {selectedSubjectsForDraft.length === 0 ? (
                       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
@@ -1362,46 +1330,12 @@ export function AcademicStructureSetupStep({
                       lineHeight: 1.55,
                     }}
                   >
-                    {slotsPerWeek != null ? (
-                      (() => {
-                        const free = slotsPerWeek - sectionPeriods;
-                        return (
-                          <>
-                            <div className="muted" style={{ fontWeight: 800 }}>
-                              Weekly capacity (this section):{' '}
-                              <span style={{ color: '#0f172a', fontWeight: 950 }}>~{slotsPerWeek}</span> teachable slots
-                            </div>
-                            <div className="muted" style={{ fontWeight: 800, marginTop: 4 }}>
-                              Enabled subjects total:{' '}
-                              <span style={{ color: '#0f172a', fontWeight: 950 }}>{sectionPeriods}</span> periods/week
-                            </div>
-                            <div
-                              style={{
-                                marginTop: 8,
-                                fontWeight: 950,
-                                color: free < 0 ? '#b45309' : free === 0 ? '#a16207' : '#166534',
-                              }}
-                            >
-                              {free < 0 ? (
-                                <>
-                                  Over capacity by <strong>{Math.abs(free)}</strong> — turn off subjects or lower frequencies
-                                  (Subjects step / class defaults).
-                                </>
-                              ) : (
-                                <>
-                                  Free slots: <strong>{free}</strong> of {slotsPerWeek} remaining this week
-                                </>
-                              )}
-                            </div>
-                          </>
-                        );
-                      })()
-                    ) : (
-                      <div className="muted" style={{ fontWeight: 800 }}>
-                        Set working days, period length, and school hours in Basic info to show weekly capacity and free slots
-                        for this section.
-                      </div>
-                    )}
+                    <WeeklyCapacitySummary
+                      slotsPerWeek={slotsPerWeek}
+                      periodsScheduled={sectionPeriods}
+                      variant="section_override"
+                      missingHint="Set working days, period length, and school hours in Basic info to show weekly capacity and free slots for this section."
+                    />
                   </div>
 
                   <div style={{ marginTop: 12 }}>
@@ -2217,7 +2151,7 @@ export function AcademicStructureSetupStep({
 
       {isLoading ? <div className="muted">Loading classes…</div> : null}
       {!isLoading && !classGroups.length ? (
-        <div className="muted">No class groups yet. Complete “Classes & sections” first.</div>
+        <div className="muted">No sections yet. Add them from the wizard’s Classes & sections step, or open Classes & sections in Operations Hub.</div>
       ) : null}
 
       {classGroups.length > 0 ? (

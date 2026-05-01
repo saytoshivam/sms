@@ -14,7 +14,6 @@ import { PlatformIntegrationsPage } from './pages/platform/PlatformIntegrationsP
 import { PlatformRuntimeFlagsPage } from './pages/platform/PlatformRuntimeFlagsPage';
 import { PlatformSchoolEditPage } from './pages/platform/PlatformSchoolEditPage';
 import { PlatformSchoolsDirectoryPage } from './pages/platform/PlatformSchoolsDirectoryPage';
-import { ClassGroupsPage } from './pages/ClassGroupsPage';
 import { StudentsPage } from './pages/StudentsPage';
 import { AttendancePage } from './pages/AttendancePage';
 import { FeesPage } from './pages/FeesPage';
@@ -40,6 +39,14 @@ import { StudentExamsPage } from './pages/StudentExamsPage';
 import { SchoolManagementPage } from './pages/SchoolManagementPage';
 import { UserAccessManagementPage } from './pages/UserAccessManagementPage';
 import { SchoolOnboardingWizardPage } from './pages/SchoolOnboardingWizardPage';
+import { OperationsHubPage } from './pages/OperationsHubPage';
+import { AcademicModulePage } from './pages/modules/AcademicModulePage';
+import { SubjectsModulePage } from './pages/modules/SubjectsModulePage';
+import { TeachersModulePage } from './pages/modules/TeachersModulePage';
+import { RoomsModulePage } from './pages/modules/RoomsModulePage';
+import { TimeModulePage } from './pages/modules/TimeModulePage';
+import { TimetableModulePage } from './pages/modules/TimetableModulePage';
+import { ClassesSectionsModulePage } from './pages/modules/ClassesSectionsModulePage';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useAuth();
@@ -63,7 +70,15 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route index element={<OperationsHubPage />} />
+        <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="classes-sections" element={<ClassesSectionsModulePage />} />
+        <Route path="academic" element={<AcademicModulePage />} />
+        <Route path="subjects" element={<SubjectsModulePage />} />
+        <Route path="teachers" element={<TeachersModulePage />} />
+        <Route path="rooms" element={<RoomsModulePage />} />
+        <Route path="time" element={<TimeModulePage />} />
+        <Route path="timetable" element={<TimetableModulePage />} />
         <Route path="admin/register-school" element={<RegisterSchoolPage />} />
         <Route path="admin/plans-features" element={<PlatformPlansFeaturesPage />} />
         <Route path="admin/feature-catalog" element={<PlatformFeatureCatalogPage />} />
@@ -79,7 +94,8 @@ export default function App() {
         {/* Kept for existing deep links; dashboard no longer exposes the wizard directly. */}
         <Route path="onboarding" element={<SchoolOnboardingWizardPage />} />
         <Route path="user-access" element={<UserAccessManagementPage />} />
-        <Route path="class-groups" element={<ClassGroupsPage />} />
+        {/* Legacy shortcuts; roster is its own module. */}
+        <Route path="class-groups" element={<Navigate to="/app/classes-sections" replace />} />
         <Route path="students" element={<StudentsPage />} />
         <Route path="students/me/performance" element={<StudentMyPerformancePage />} />
         <Route path="student/academics" element={<StudentAcademicsPage />} />

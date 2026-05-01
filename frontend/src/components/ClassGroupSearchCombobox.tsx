@@ -225,7 +225,7 @@ export function ClassGroupSearchCombobox({
               ) : filtered.length === 0 ? (
                 <li className="catalog-combobox__hint" role="status">
                   {list.length === 0
-                    ? 'No class groups yet. Create sections under Class groups.'
+                    ? 'No sections yet. Add them from Operations Hub → Classes & sections.'
                     : 'No matching classes. Try another search.'}
                 </li>
               ) : (

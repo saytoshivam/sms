@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import { SmartSelect } from '../components/SmartSelect';
 
 type Line = {
   entryDate: string;
@@ -54,20 +55,16 @@ export function StudentFeeStatementPage() {
         <label className="fee-st-fy-label" htmlFor="fy-select">
           Financial Year
         </label>
-        <select
+        <SmartSelect
           id="fy-select"
-          className="fee-st-fy-select"
           value={fy}
-          onChange={(e) => setFy(e.target.value)}
+          onChange={setFy}
           disabled={data.isLoading}
-        >
-          <option value="">All years</option>
-          {yearOptions.map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </select>
+          allowClear
+          clearLabel="All years"
+          placeholder="All years"
+          options={yearOptions.map((y) => ({ value: y, label: y }))}
+        />
 
         {data.isLoading ? (
           <div className="muted" style={{ marginTop: 16 }}>

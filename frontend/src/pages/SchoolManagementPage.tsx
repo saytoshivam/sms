@@ -126,7 +126,7 @@ export function SchoolManagementPage() {
               <div className="workspace-metric-card__value">{overview.data.staffCount}</div>
             </div>
             <div className="workspace-metric-card" style={{ flex: '1 1 200px' }}>
-              <span className="workspace-metric-card__label">Class groups</span>
+              <span className="workspace-metric-card__label">Class sections</span>
               <div className="workspace-metric-card__value">{overview.data.classGroupCount}</div>
             </div>
           </div>

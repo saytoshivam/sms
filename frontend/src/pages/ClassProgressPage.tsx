@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { formatJsonDate } from '../lib/apiData';
+import { SmartSelect } from '../components/SmartSelect';
 
 export type StudentProgressRow = {
   studentId: number;
@@ -56,14 +57,14 @@ export function ClassProgressPage() {
         <div className="row" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
           <div style={{ flex: '1 1 200px', minWidth: 160 }} className="stack">
             <label>Class name</label>
-            <select value={classNameFilter} onChange={(e) => setClassNameFilter(e.target.value)}>
-              <option value="">All classes</option>
-              {classOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+            <SmartSelect
+              value={classNameFilter}
+              onChange={setClassNameFilter}
+              allowClear
+              clearLabel="All classes"
+              placeholder="All classes"
+              options={classOptions.map((name) => ({ value: name, label: name }))}
+            />
           </div>
           <div style={{ flex: '2 1 240px', minWidth: 200 }} className="stack">
             <label>Search student</label>

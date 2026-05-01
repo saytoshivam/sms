@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import { SmartSelect } from '../components/SmartSelect';
 
 export type AnnouncementCategory = 'ACADEMIC' | 'PLACEMENT' | 'EXAMINATION' | 'GENERAL';
 
@@ -71,18 +72,20 @@ export function StudentAnnouncementsPage() {
       </header>
 
       <div className="stack" style={{ gap: 14 }}>
-        <select
-          className="ann-category-select"
+        <SmartSelect
           value={categorySelect}
-          onChange={(e) => setCategorySelect(e.target.value)}
-          aria-label="Category filter"
-        >
-          <option value="">Category</option>
-          <option value="ACADEMIC">Academic</option>
-          <option value="PLACEMENT">Placement</option>
-          <option value="EXAMINATION">Examination</option>
-          <option value="GENERAL">General</option>
-        </select>
+          onChange={setCategorySelect}
+          ariaLabel="Category filter"
+          allowClear
+          clearLabel="All categories"
+          placeholder="Category"
+          options={[
+            { value: 'ACADEMIC', label: 'Academic' },
+            { value: 'PLACEMENT', label: 'Placement' },
+            { value: 'EXAMINATION', label: 'Examination' },
+            { value: 'GENERAL', label: 'General' },
+          ]}
+        />
 
         <div className="ann-tabs">
           {TABS.map((t) => (

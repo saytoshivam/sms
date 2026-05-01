@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
 import { PlatformSchoolSearchCombobox } from '../../components/PlatformSchoolSearchCombobox';
+import { SmartSelect } from '../../components/SmartSelect';
 
 type Plan = { id: number; planCode: string; name: string; description: string | null; active: boolean };
 type PlanFeatureRow = { featureCode: string; name: string; enabled: boolean };
@@ -93,13 +94,11 @@ export function PlatformPlansFeaturesPage() {
           </div>
           <div className="stack" style={{ minWidth: 140 }}>
             <label>Assign plan</label>
-            <select value={assignPlanCode} onChange={(e) => setAssignPlanCode(e.target.value)}>
-              {planOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <SmartSelect
+              value={assignPlanCode}
+              onChange={setAssignPlanCode}
+              options={planOptions.map((c) => ({ value: c, label: c }))}
+            />
           </div>
           <button className="btn" type="button" disabled={assignPlan.isPending} onClick={() => assignPlan.mutate()}>
             {assignPlan.isPending ? 'Saving…' : 'Apply plan'}
@@ -108,11 +107,15 @@ export function PlatformPlansFeaturesPage() {
         <div className="row" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
           <div className="stack" style={{ minWidth: 140 }}>
             <label>Subscription status</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="CANCELLED">CANCELLED</option>
-              <option value="EXPIRED">EXPIRED</option>
-            </select>
+            <SmartSelect
+              value={status}
+              onChange={setStatus}
+              options={[
+                { value: 'ACTIVE', label: 'ACTIVE' },
+                { value: 'CANCELLED', label: 'CANCELLED' },
+                { value: 'EXPIRED', label: 'EXPIRED' },
+              ]}
+            />
           </div>
           <button className="btn secondary" type="button" disabled={patchStatus.isPending} onClick={() => patchStatus.mutate()}>
             {patchStatus.isPending ? 'Updating…' : 'Update status'}
@@ -128,13 +131,12 @@ export function PlatformPlansFeaturesPage() {
           <strong>Features per plan</strong>
           <label className="row" style={{ gap: 8, alignItems: 'center' }}>
             Plan
-            <select value={planCode} onChange={(e) => setPlanCode(e.target.value)}>
-              {planOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <SmartSelect
+              value={planCode}
+              onChange={setPlanCode}
+              options={planOptions.map((c) => ({ value: c, label: c }))}
+              style={{ minWidth: 140 }}
+            />
           </label>
         </div>
         {features.isLoading ? (

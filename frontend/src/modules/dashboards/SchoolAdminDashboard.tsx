@@ -1,6 +1,5 @@
 import type { MeProfile } from './SuperAdminDashboard';
 import { FeatureArea } from '../../lib/featureAreas';
-import { onboardingStepHref } from '../../lib/onboardingWizardMeta';
 import { SchoolBusinessKpis } from '../../components/SchoolBusinessKpis';
 import { WorkspaceHero, WorkspaceSection, WorkspaceTileLink } from '../../components/workspace/WorkspaceKit';
 
@@ -16,8 +15,8 @@ export function SchoolAdminDashboard({ profile }: { profile: MeProfile }) {
         tag="Admin"
         subtitle={
           <>
-            Run day-to-day operations — people, classes, attendance, fees, and announcements. Jump in with the tiles
-            below.
+            Operational modules, readiness signals, and the setup checklist live on the <strong style={{ fontWeight: 900 }}>Operations hub</strong>.
+            Below are KPIs and shortcuts for attendance, finance, messaging, and other day‑to‑day work.
           </>
         }
       />
@@ -28,73 +27,15 @@ export function SchoolAdminDashboard({ profile }: { profile: MeProfile }) {
 
       <WorkspaceSection
         title={FeatureArea.SCHOOL_OWNER}
-        hint="Revenue, enrollment, subscription tier, branding, and who has access. Follow the setup steps in order."
+        hint="School profile and leadership tools. Structured timetable setup stays on Operations hub."
       >
-        {isSchoolAdmin ? (
-          <div className="stack" style={{ gap: 20 }}>
-            <div className="stack" style={{ gap: 8 }}>
-              <p className="workspace-section__hint" style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: '0.02em' }}>
-                Step 1 — Basic setup
-              </p>
-              <div className="student-tile-grid">
-                <WorkspaceTileLink to="/app/school/management" icon="🧭" label="School management" />
-                <WorkspaceTileLink to={onboardingStepHref('BASIC_INFO')} icon="⚙️" label="Basic setup" />
-              </div>
-            </div>
-
-            <div className="stack" style={{ gap: 8 }}>
-              <p className="workspace-section__hint" style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: '0.02em' }}>
-                Step 2 — Classes & sections
-              </p>
-              <div className="student-tile-grid">
-                <WorkspaceTileLink to={onboardingStepHref('CLASSES')} icon="🧩" label="Classes & sections" />
-              </div>
-            </div>
-
-            <div className="stack" style={{ gap: 8 }}>
-              <p className="workspace-section__hint" style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: '0.02em' }}>
-                Step 3 — Rooms, subjects & fee structure
-              </p>
-              <div className="student-tile-grid">
-                <WorkspaceTileLink to={onboardingStepHref('ROOMS')} icon="🚪" label="Rooms" />
-                <WorkspaceTileLink to={onboardingStepHref('SUBJECTS')} icon="📐" label="Subjects" />
-                <WorkspaceTileLink to={onboardingStepHref('FEES')} icon="🧾" label="Fee structure" />
-              </div>
-            </div>
-
-            <div className="stack" style={{ gap: 8 }}>
-              <p className="workspace-section__hint" style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: '0.02em' }}>
-                Step 4 — Staff & students
-              </p>
-              <div className="student-tile-grid">
-                <WorkspaceTileLink to={onboardingStepHref('STAFF')} icon="👔" label="Staff & roles" />
-                <WorkspaceTileLink to={onboardingStepHref('STUDENTS')} icon="✏️" label="Students" />
-              </div>
-            </div>
-
-            <div className="stack" style={{ gap: 8 }}>
-              <p className="workspace-section__hint" style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: '0.02em' }}>
-                Step 5 — Academic structure
-              </p>
-              <div className="student-tile-grid">
-                <WorkspaceTileLink to={onboardingStepHref('ACADEMIC_STRUCTURE')} icon="🔗" label="Academic structure" />
-              </div>
-            </div>
-
-            <div className="stack" style={{ gap: 8 }}>
-              <p className="workspace-section__hint" style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: '0.02em' }}>
-                Step 6 — Timetable generator
-              </p>
-              <div className="student-tile-grid">
-                <WorkspaceTileLink to={onboardingStepHref('TIMETABLE')} icon="🗒️" label="Timetable generator" />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="student-tile-grid">
-            <WorkspaceTileLink to="/app/school/management" icon="🧭" label="School management" />
-          </div>
-        )}
+        <div className="student-tile-grid">
+          <WorkspaceTileLink to="/app" icon="🧭" label="Operations hub" />
+          <WorkspaceTileLink to="/app/school/management" icon="🏫" label="School management" />
+          {isSchoolAdmin ? (
+            <WorkspaceTileLink to="/app/onboarding" icon="📤" label="Setup wizard & imports" />
+          ) : null}
+        </div>
       </WorkspaceSection>
 
       <WorkspaceSection title={FeatureArea.USER_ACCESS} hint="Roster and student records for your tenant.">

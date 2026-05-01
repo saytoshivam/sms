@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
+import { SmartSelect } from '../components/SmartSelect';
 import type { AnnouncementCategory } from './StudentAnnouncementsPage';
 
 type Cg = { id: number; code: string; displayName: string };
@@ -60,12 +61,16 @@ export function ComposeTeacherAnnouncementPage() {
         <label>Body</label>
         <textarea rows={8} value={body} onChange={(e) => setBody(e.target.value)} />
         <label>Category</label>
-        <select value={category} onChange={(e) => setCategory(e.target.value as AnnouncementCategory)}>
-          <option value="ACADEMIC">Academic</option>
-          <option value="PLACEMENT">Placement</option>
-          <option value="EXAMINATION">Examination</option>
-          <option value="GENERAL">General</option>
-        </select>
+        <SmartSelect
+          value={category}
+          onChange={(v) => setCategory(v as AnnouncementCategory)}
+          options={[
+            { value: 'ACADEMIC', label: 'Academic' },
+            { value: 'PLACEMENT', label: 'Placement' },
+            { value: 'EXAMINATION', label: 'Examination' },
+            { value: 'GENERAL', label: 'General' },
+          ]}
+        />
         <strong style={{ fontSize: 14 }}>Classes</strong>
         {classes.isLoading ? (
           <div className="muted">Loading your classes…</div>
