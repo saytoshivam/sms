@@ -36,6 +36,11 @@ type ClassGroupRow = {
 
 type SubjectRow = { id: number; code: string; name: string; weeklyFrequency: number | null };
 
+/** Matches class-default save logic: missing/zero frequency defaults to 4 periods/week. */
+function subjectDefaultWeeklyPeriods(sub: Pick<SubjectRow, 'weeklyFrequency'>): number {
+  return sub.weeklyFrequency && sub.weeklyFrequency > 0 ? sub.weeklyFrequency : 4;
+}
+
 type StaffRow = {
   id: number;
   fullName: string;
@@ -481,6 +486,17 @@ export function AcademicStructureSetupStep({
       .sort((a, b) => (a as SubjectRow).name.localeCompare((b as SubjectRow).name)) as SubjectRow[];
   }, [subjects, draftClassDefaults]);
 
+  const draftScheduledPeriods = useMemo(() => {
+    const byId = new Map<number, SubjectRow>(subjects.map((s) => [Number(s.id), s]));
+    let sum = 0;
+    for (const id of draftClassDefaults) {
+      const sub = byId.get(Number(id));
+      if (!sub) continue;
+      sum += subjectDefaultWeeklyPeriods(sub);
+    }
+    return sum;
+  }, [subjects, draftClassDefaults]);
+
   const sectionEnabledSet = (classGroupId: number) => {
     const set = new Set<number>();
     for (const a of allocRows) {
@@ -503,7 +519,7 @@ export function AcademicStructureSetupStep({
 
   const setSectionSubjectAdditionEnabled = (classGroupId: number, subjectId: number, enabled: boolean) => {
     const sub = subjects.find((s) => Number(s.id) === Number(subjectId));
-    const freq = sub?.weeklyFrequency && sub.weeklyFrequency > 0 ? sub.weeklyFrequency : 4;
+    const freq = sub ? subjectDefaultWeeklyPeriods(sub) : 4;
     if (enabled) {
       // For section-only additions, we must materialize frequency in the override row (no template to inherit from).
       upsertOverride(classGroupId, subjectId, { periodsPerWeek: freq });
@@ -526,7 +542,7 @@ export function AcademicStructureSetupStep({
         } else {
           const sub = subjects.find((s) => Number(s.id) === sid);
           if (!sub) continue;
-          const freq = sub.weeklyFrequency && sub.weeklyFrequency > 0 ? sub.weeklyFrequency : 4;
+          const freq = subjectDefaultWeeklyPeriods(sub);
           const tch = teacherOptionsForSubject(staff, sub.id)[0] ?? staff.find((s) => isStaffTeacher(s));
           out.push({
             gradeLevel: grade,
@@ -889,49 +905,30 @@ export function AcademicStructureSetupStep({
                 const pendingSections = counts.missing;
 
                 return (
-                  <div
+                  <button
                     key={g}
+                    type="button"
+                    className="sms-grade-pick-card"
+                    onClick={() => setInitialGradePick(String(g))}
+                    title="Select class"
                     style={{
                       borderRadius: 12,
                       border: isSelected ? '2px solid var(--color-primary)' : '1px solid rgba(15,23,42,0.08)',
                       background: isSelected ? 'rgba(255,247,237,0.65)' : 'rgba(255,255,255,0.75)',
-                      // Avoid clipping on dense lists.
                       overflow: 'visible',
-                      paddingBottom: 10,
+                      padding: '10px 12px',
+                      gap: 8,
                     }}
                   >
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      onClick={() => setInitialGradePick(String(g))}
-                      style={{
-                        textAlign: 'left',
-                        justifyContent: 'space-between',
-                        display: 'flex',
-                        gap: 10,
-                        padding: '10px 12px',
-                        border: 'none',
-                        borderRadius: 12,
-                        background: 'transparent',
-                        // Default focus ring gets clipped inside scroll containers; use an inset focus shadow instead.
-                        outline: 'none',
-                      }}
-                      onFocus={(e) => {
-                        (e.currentTarget.style as any).boxShadow = 'inset 0 0 0 2px rgba(249,115,22,0.9)';
-                      }}
-                      onBlur={(e) => {
-                        (e.currentTarget.style as any).boxShadow = '';
-                      }}
-                      title="Select class"
-                    >
+                    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 950 }}>{`Class ${g} (${secRows.length} section${secRows.length === 1 ? '' : 's'})`}</div>
                       </div>
-                      <span style={{ padding: '3px 8px', borderRadius: 999, fontSize: 12, fontWeight: 900, background: badge.bg, color: badge.color }}>
+                      <span style={{ padding: '3px 8px', borderRadius: 999, fontSize: 12, fontWeight: 900, background: badge.bg, color: badge.color, flexShrink: 0 }}>
                         {badge.text}
                       </span>
-                    </button>
-                    <div className="stack" style={{ gap: 2, padding: '0 12px', marginTop: 2 }}>
+                    </div>
+                    <div className="stack" style={{ gap: 2, marginTop: 2 }}>
                       <div style={{ fontSize: 12, fontWeight: 900, color: badge.color }}>{badge.text}</div>
                       <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
                         {selectedSubjectCount} subject{selectedSubjectCount === 1 ? '' : 's'} selected
@@ -940,7 +937,7 @@ export function AcademicStructureSetupStep({
                         {pendingSections} section{pendingSections === 1 ? '' : 's'} pending
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -1042,6 +1039,58 @@ export function AcademicStructureSetupStep({
                         {selectedSubjectsForDraft.length} selected
                       </div>
                     </div>
+                    <div
+                      style={{
+                        marginTop: 10,
+                        paddingTop: 10,
+                        borderTop: '1px solid rgba(15,23,42,0.06)',
+                        fontSize: 12,
+                        lineHeight: 1.55,
+                      }}
+                    >
+                      {slotsPerWeek != null ? (
+                        (() => {
+                          const free = slotsPerWeek - draftScheduledPeriods;
+                          return (
+                            <>
+                              <div className="muted" style={{ fontWeight: 800 }}>
+                                Weekly capacity (each section):{' '}
+                                <span style={{ color: '#0f172a', fontWeight: 950 }}>~{slotsPerWeek}</span> teachable slots
+                              </div>
+                              <div className="muted" style={{ fontWeight: 800, marginTop: 4 }}>
+                                Selected subjects total:{' '}
+                                <span style={{ color: '#0f172a', fontWeight: 950 }}>{draftScheduledPeriods}</span>{' '}
+                                periods/week{' '}
+                                <span className="muted" style={{ fontWeight: 700 }}>(from each subject’s frequency)</span>
+                              </div>
+                              <div
+                                style={{
+                                  marginTop: 8,
+                                  fontWeight: 950,
+                                  color: free < 0 ? '#b45309' : free === 0 ? '#a16207' : '#166534',
+                                }}
+                              >
+                                {free < 0 ? (
+                                  <>
+                                    Over capacity by <strong>{Math.abs(free)}</strong> — remove subjects or lower weekly
+                                    frequency on the Subjects step.
+                                  </>
+                                ) : (
+                                  <>
+                                    Free slots: <strong>{free}</strong> of {slotsPerWeek} remaining this week
+                                  </>
+                                )}
+                              </div>
+                            </>
+                          );
+                        })()
+                      ) : (
+                        <div className="muted" style={{ fontWeight: 800 }}>
+                          Set working days, period length, and school hours in Basic info (or open windows) to show weekly
+                          capacity and free slots while you map subjects.
+                        </div>
+                      )}
+                    </div>
                     {selectedSubjectsForDraft.length === 0 ? (
                       <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
                         None selected yet.
@@ -1107,6 +1156,7 @@ export function AcademicStructureSetupStep({
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8 }}>
                     {filteredSubjectsForMapping.map((sub) => {
                       const on = draftClassDefaults.has(sub.id);
+                      const periods = subjectDefaultWeeklyPeriods(sub);
                       return (
                         <button
                           key={sub.id}
@@ -1128,11 +1178,18 @@ export function AcademicStructureSetupStep({
                             background: on ? 'rgba(255,247,237,0.7)' : 'rgba(255,255,255,0.8)',
                             textAlign: 'left',
                           }}
-                          title={on ? 'Will be enabled when you save' : 'Will remain disabled until saved'}
+                          title={
+                            on
+                              ? `Counts as ${periods} period${periods === 1 ? '' : 's'}/week toward section capacity. Click to remove.`
+                              : `Adds ${periods} period${periods === 1 ? '' : 's'}/week per section when saved.`
+                          }
                         >
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontWeight: 900 }}>{sub.name}</div>
                             <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>{sub.code}</div>
+                            <div className="muted" style={{ fontSize: 11, fontWeight: 800, marginTop: 4 }}>
+                              {periods} period{periods === 1 ? '' : 's'}/wk
+                            </div>
                           </div>
                           <div style={{ fontWeight: 950, fontSize: 16, color: on ? '#16a34a' : '#94a3b8' }}>
                             {on ? '☑' : '☐'}
@@ -1239,6 +1296,23 @@ export function AcademicStructureSetupStep({
               classSubjectConfigs.filter((c) => Number(c.gradeLevel) === Number(grade)).map((c) => Number(c.subjectId)),
             );
             const enabled = sectionEnabledSet(cg.classGroupId);
+            const weeklyForSubjectInSection = (subjectId: number): number => {
+              const sub = subjects.find((x) => Number(x.id) === Number(subjectId));
+              const fallback = sub ? subjectDefaultWeeklyPeriods(sub) : 4;
+              const cfg = classSubjectConfigs.find(
+                (c) => Number(c.gradeLevel) === Number(grade) && Number(c.subjectId) === Number(subjectId),
+              );
+              const ov = sectionSubjectOverrides.find(
+                (o) => Number(o.classGroupId) === Number(cg.classGroupId) && Number(o.subjectId) === Number(subjectId),
+              );
+              if (cfg) {
+                const w = ov?.periodsPerWeek ?? cfg.defaultPeriodsPerWeek;
+                return w && w > 0 ? w : fallback;
+              }
+              const w2 = ov?.periodsPerWeek;
+              return w2 && w2 > 0 ? w2 : fallback;
+            };
+            const sectionPeriods = [...enabled].reduce((a, sid) => a + weeklyForSubjectInSection(sid), 0);
             const addedOverrideSubjects = [...enabled].filter((sid) => !inherited.has(sid));
             const removedOverrideSubjects = [...inherited].filter((sid) => !enabled.has(sid));
             const all = new Set<number>([...inherited, ...enabled]);
@@ -1275,6 +1349,59 @@ export function AcademicStructureSetupStep({
                     <button type="button" className="btn secondary" onClick={() => setOverrideDrawer({ open: false, classGroupId: null })}>
                       Close
                     </button>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: 10,
+                      borderRadius: 12,
+                      background: 'rgba(248,250,252,0.95)',
+                      border: '1px solid rgba(15,23,42,0.08)',
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {slotsPerWeek != null ? (
+                      (() => {
+                        const free = slotsPerWeek - sectionPeriods;
+                        return (
+                          <>
+                            <div className="muted" style={{ fontWeight: 800 }}>
+                              Weekly capacity (this section):{' '}
+                              <span style={{ color: '#0f172a', fontWeight: 950 }}>~{slotsPerWeek}</span> teachable slots
+                            </div>
+                            <div className="muted" style={{ fontWeight: 800, marginTop: 4 }}>
+                              Enabled subjects total:{' '}
+                              <span style={{ color: '#0f172a', fontWeight: 950 }}>{sectionPeriods}</span> periods/week
+                            </div>
+                            <div
+                              style={{
+                                marginTop: 8,
+                                fontWeight: 950,
+                                color: free < 0 ? '#b45309' : free === 0 ? '#a16207' : '#166534',
+                              }}
+                            >
+                              {free < 0 ? (
+                                <>
+                                  Over capacity by <strong>{Math.abs(free)}</strong> — turn off subjects or lower frequencies
+                                  (Subjects step / class defaults).
+                                </>
+                              ) : (
+                                <>
+                                  Free slots: <strong>{free}</strong> of {slotsPerWeek} remaining this week
+                                </>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()
+                    ) : (
+                      <div className="muted" style={{ fontWeight: 800 }}>
+                        Set working days, period length, and school hours in Basic info to show weekly capacity and free slots
+                        for this section.
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ marginTop: 12 }}>
@@ -1328,6 +1455,8 @@ export function AcademicStructureSetupStep({
                     <div className="stack" style={{ gap: 8 }}>
                       {overrideFiltered.map((s) => {
                         const on = enabled.has(s.id);
+                        const defaultIfOn = subjectDefaultWeeklyPeriods(s);
+                        const eff = weeklyForSubjectInSection(s.id);
                         return (
                           <label key={s.id} className="row" style={{ gap: 10, alignItems: 'center' }}>
                             <input
@@ -1351,6 +1480,11 @@ export function AcademicStructureSetupStep({
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontWeight: 800 }}>{s.name}</div>
                               <div className="muted" style={{ fontSize: 12 }}>{s.code}</div>
+                              <div className="muted" style={{ fontSize: 11, fontWeight: 800, marginTop: 2 }}>
+                                {on
+                                  ? `${eff} period${eff === 1 ? '' : 's'}/wk in this section`
+                                  : `If enabled: ${defaultIfOn} period${defaultIfOn === 1 ? '' : 's'}/wk (from subject default)`}
+                              </div>
                             </div>
                           </label>
                         );

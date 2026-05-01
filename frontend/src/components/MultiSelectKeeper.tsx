@@ -10,6 +10,8 @@ export type MultiSelectKeeperProps = {
   onChange: (value: string[]) => void;
   options: MultiSelectKeeperOption[];
   placeholder?: string;
+  /** Placeholder for the filter field inside the open menu (default: “Search…”). */
+  searchPlaceholder?: string;
   id?: string;
   disabled?: boolean;
   className?: string;
@@ -20,6 +22,7 @@ export function MultiSelectKeeper({
   onChange,
   options,
   placeholder = 'Select…',
+  searchPlaceholder = 'Search…',
   id: idProp,
   disabled,
   className,
@@ -68,6 +71,10 @@ export function MultiSelectKeeper({
         width: rect.width,
         maxHeight,
         zIndex: 10000,
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'auto',
       });
     };
     update();
@@ -144,12 +151,12 @@ export function MultiSelectKeeper({
             <div
               ref={menuRef}
               className="select-keeper__menu select-keeper__menu--portal"
-              style={{ ...menuStyle, padding: 10, overflow: 'auto' }}
+              style={{ ...menuStyle, padding: 10 }}
               role="dialog"
               aria-labelledby={id}
             >
-              <div className="stack" style={{ gap: 8 }}>
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search roles…" />
+              <div className="stack" style={{ gap: 8, flexShrink: 0 }}>
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={searchPlaceholder} />
                 <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                   <button
                     type="button"
@@ -162,6 +169,18 @@ export function MultiSelectKeeper({
                     Clear
                   </button>
                 </div>
+              </div>
+              <div
+                style={{
+                  flex: '0 1 auto',
+                  minHeight: 168,
+                  maxHeight: 280,
+                  overflowY: 'auto',
+                  marginTop: 4,
+                  paddingRight: 4,
+                  WebkitOverflowScrolling: 'touch',
+                }}
+              >
                 <div className="stack" style={{ gap: 6 }}>
                   {filtered.map((o) => {
                     const checked = selectedSet.has(o.value);
@@ -198,11 +217,11 @@ export function MultiSelectKeeper({
                     );
                   })}
                 </div>
-                <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
-                  <button type="button" className="btn" onClick={() => setOpen(false)}>
-                    Done
-                  </button>
-                </div>
+              </div>
+              <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8, flexShrink: 0 }}>
+                <button type="button" className="btn" onClick={() => setOpen(false)}>
+                  Done
+                </button>
               </div>
             </div>,
             document.body,

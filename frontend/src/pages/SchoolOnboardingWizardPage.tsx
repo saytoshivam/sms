@@ -4190,6 +4190,7 @@ export function SchoolOnboardingWizardPage() {
               }}
               options={roleCatalog}
               placeholder="Select roles…"
+              searchPlaceholder="Search roles…"
             />
             <div className="sms-form-field__error" aria-live="polite">
               {staffTouched.roles && staffManual.errors.roles ? staffManual.errors.roles : '\u00a0'}
@@ -4209,6 +4210,7 @@ export function SchoolOnboardingWizardPage() {
                   label: `${s.name} (${s.code})`,
                 }))}
                 placeholder="Select at least 1 subject"
+                searchPlaceholder="Search subjects…"
               />
               <div className="sms-form-field__messages" aria-live="polite">
                 {!staffTouched.subjects
@@ -4245,6 +4247,7 @@ export function SchoolOnboardingWizardPage() {
                   }))
                   .filter((o) => o.value)}
                 placeholder="For smart assignment preference…"
+                searchPlaceholder="Search classes…"
               />
             </div>
           </div>
@@ -4548,6 +4551,7 @@ export function SchoolOnboardingWizardPage() {
                     onChange={setStaffTableRoles}
                     options={roleCatalog}
                     placeholder="All roles"
+                    searchPlaceholder="Search roles…"
                   />
                 </div>
 
@@ -5036,6 +5040,7 @@ export function SchoolOnboardingWizardPage() {
                 onChange={(roles) => setStaffEdit((p) => ({ ...p, draft: p.draft ? { ...p.draft, roles } : p.draft }))}
                 options={roleCatalog}
                 placeholder="Select roles…"
+                searchPlaceholder="Search roles…"
               />
             </div>
 
@@ -5054,6 +5059,7 @@ export function SchoolOnboardingWizardPage() {
                   }
                   options={pageContent(subjectsCatalog.data).map((sub) => ({ value: String(sub.id), label: `${sub.code} — ${sub.name}` }))}
                   placeholder="Select subjects…"
+                  searchPlaceholder="Search subjects…"
                 />
               </div>
             ) : null}
@@ -5105,6 +5111,7 @@ export function SchoolOnboardingWizardPage() {
                       label: `${c.gradeLevel != null ? `Class ${c.gradeLevel} · ` : ''}${c.name ?? c.code ?? c.id}`,
                     }))}
                     placeholder="Smart assignment…"
+                    searchPlaceholder="Search classes…"
                   />
                 </div>
               </div>

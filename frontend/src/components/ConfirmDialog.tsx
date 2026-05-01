@@ -76,7 +76,13 @@ export function ConfirmDialog({
           </ul>
         ) : null}
 
-        {children ? <div className="stack" style={{ gap: 10 }}>{children}</div> : null}
+        {children ? (
+          <div className="sms-modal-body">
+            <div className="stack" style={{ gap: 10 }}>
+              {children}
+            </div>
+          </div>
+        ) : null}
 
         <div className="sms-modal-actions">
           <button type="button" className="btn secondary" onClick={onClose}>
