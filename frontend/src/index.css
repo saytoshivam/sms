@@ -553,6 +553,35 @@ textarea:disabled {
   color: #64748b;
 }
 
+.data-table .demand-sort-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  border-radius: 6px;
+}
+
+.data-table .demand-sort-th:hover {
+  color: var(--color-text, #0f172a);
+}
+
+.data-table .demand-sort-th:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary, #2563eb) 55%, transparent);
+  outline-offset: 2px;
+}
+
 /* Teacher timetable: explainer + per-day table */
 .teacher-tt-explainer {
   margin: 0;

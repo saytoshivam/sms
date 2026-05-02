@@ -21,9 +21,11 @@ import com.myhaimi.sms.DTO.OnboardingFeesSetupDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicStructureSaveDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicStructureViewDTO;
 import com.myhaimi.sms.DTO.OnboardingTimetableAutoGenerateViewDTO;
+import com.myhaimi.sms.DTO.TeacherDemandSummaryDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentCreateDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentsSetupResultDTO;
 import com.myhaimi.sms.service.impl.SchoolOnboardingService;
+import com.myhaimi.sms.service.impl.TeacherDemandAnalysisService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +40,7 @@ import java.util.List;
 public class SchoolOnboardingV1Controller {
 
     private final SchoolOnboardingService schoolOnboardingService;
+    private final TeacherDemandAnalysisService teacherDemandAnalysisService;
 
     @GetMapping("/progress")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
@@ -190,6 +193,12 @@ public class SchoolOnboardingV1Controller {
     public ResponseEntity<?> saveAcademicStructure(@Valid @RequestBody OnboardingAcademicStructureSaveDTO body) {
         schoolOnboardingService.saveAcademicStructure(body);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/teacher-demand-summary")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
+    public TeacherDemandSummaryDTO teacherDemandSummary() {
+        return teacherDemandAnalysisService.summarize();
     }
 
     @PostMapping("/timetable/auto-generate")

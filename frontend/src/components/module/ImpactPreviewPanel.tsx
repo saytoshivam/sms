@@ -5,6 +5,7 @@ import { api } from '../../lib/api';
 import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
 import { useApiTags } from '../../lib/apiTags';
+import { extractTeacherDemandWarnings } from '../../lib/teacherDemandAnalysis';
 import {
   useImpactStore,
   type ImpactChange,
@@ -84,6 +85,13 @@ export function ImpactPreviewPanel({ open, onClose }: Props) {
     onSuccess: async (data) => {
       const placed = data?.placed ?? 0;
       const required = data?.required ?? 0;
+      const warn = extractTeacherDemandWarnings(data);
+      if (warn.length) {
+        toast.info(
+          'Teacher capacity warning',
+          `${warn.slice(0, 2).join(' · ')}${warn.length > 2 ? ` (+${warn.length - 2} more)` : ''}`,
+        );
+      }
       toast.success('Timetable regenerated', `${placed}/${required} sessions placed.`);
       // Drop the impact entries that motivated this regenerate. Server-side
       // freshness / conflicts are now the source of truth.

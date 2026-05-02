@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { SelectKeeper } from './SelectKeeper';
 import { toast } from '../lib/toast';
 import { buildEffectiveAllocRows, type ClassSubjectConfigRow, type SectionSubjectOverrideRow } from '../lib/academicStructureUtils';
@@ -11,6 +12,18 @@ import {
   applyUniformGradeSubjectTeacher,
   applySectionTeacher,
 } from '../lib/academicStructureSmartAssign';
+import {
+  computeTeacherDemandSummary,
+  type TeacherDemandStatus,
+} from '../lib/teacherDemandAnalysis';
+
+type DemandSortKey = 'subject' | 'required' | 'qualified' | 'capacity' | 'teachersNeeded' | 'status';
+
+const DEMAND_STATUS_RANK: Record<TeacherDemandStatus, number> = {
+  CRITICAL: 0,
+  WARN: 1,
+  OK: 2,
+};
 
 type StaffRow = {
   id: number;
@@ -75,6 +88,16 @@ export function SmartTeacherAssignmentBlock({
   const [onlyOverloaded, setOnlyOverloaded] = useState(false);
   const [onlyConflicts, setOnlyConflicts] = useState(false);
   const [sectionSearch, setSectionSearch] = useState('');
+  const [demandSort, setDemandSort] = useState<{ key: DemandSortKey; dir: 'asc' | 'desc' }>({
+    key: 'subject',
+    dir: 'asc',
+  });
+
+  const toggleDemandSort = useCallback((column: DemandSortKey) => {
+    setDemandSort((prev) =>
+      prev.key === column ? { key: column, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key: column, dir: 'asc' },
+    );
+  }, []);
 
   const gradeFilter = filters?.grade ?? '';
   const subjFilter = filters?.subject ?? '';
@@ -244,6 +267,72 @@ export function SmartTeacherAssignmentBlock({
     const overloadedTeachers = Array.from(teacherIdsInView).filter((id) => teacherLoadById.get(id)?.status === 'over').length;
     return { total, assigned, pending, conflicts, overloadedTeachers };
   }, [flatRows, assignmentMeta, teacherLoadById]);
+
+  const teacherDemand = useMemo(
+    () =>
+      computeTeacherDemandSummary({
+        subjects: subjects.map((s) => ({ id: s.id, name: s.name, code: s.code })),
+        allocations: effective,
+        staff: staffNorm.map((s) => ({
+          id: s.id,
+          teachableSubjectIds: s.teachableSubjectIds ?? [],
+          roleNames: s.roleNames ?? [],
+          maxWeeklyLectureLoad: s.maxWeeklyLectureLoad ?? null,
+        })),
+        slotsPerWeek: slotsPerWeek ?? null,
+      }),
+    [subjects, effective, staffNorm, slotsPerWeek],
+  );
+
+  const sortedDemandRows = useMemo(() => {
+    const rows = teacherDemand.rows.slice();
+    const { key, dir } = demandSort;
+    const mul = dir === 'asc' ? 1 : -1;
+
+    const cmpNum = (a: number, b: number) => {
+      if (a === b) return 0;
+      return a < b ? -mul : mul;
+    };
+    const cmpStr = (a: string, b: string) => mul * a.localeCompare(b, undefined, { sensitivity: 'base' });
+
+    rows.sort((a, b) => {
+      let c = 0;
+      switch (key) {
+        case 'subject': {
+          const sa = (a.subjectName || `Subject ${a.subjectId}`).trim();
+          const sb = (b.subjectName || `Subject ${b.subjectId}`).trim();
+          c = cmpStr(sa, sb);
+          if (c === 0) c = cmpStr(String(a.subjectCode ?? ''), String(b.subjectCode ?? ''));
+          break;
+        }
+        case 'required':
+          c = cmpNum(a.requiredPeriods, b.requiredPeriods);
+          break;
+        case 'qualified':
+          c = cmpNum(a.qualifiedTeacherCount, b.qualifiedTeacherCount);
+          break;
+        case 'capacity':
+          c = cmpNum(a.availableCapacity, b.availableCapacity);
+          break;
+        case 'teachersNeeded': {
+          const av = a.teachersNeeded ?? Number.POSITIVE_INFINITY;
+          const bv = b.teachersNeeded ?? Number.POSITIVE_INFINITY;
+          c = cmpNum(av, bv);
+          break;
+        }
+        case 'status': {
+          c = cmpNum(DEMAND_STATUS_RANK[a.status], DEMAND_STATUS_RANK[b.status]);
+          if (c === 0) c = cmpStr(a.statusDetail, b.statusDetail);
+          break;
+        }
+        default:
+          break;
+      }
+      if (c === 0) c = cmpNum(a.subjectId, b.subjectId);
+      return c;
+    });
+    return rows;
+  }, [teacherDemand.rows, demandSort]);
 
   const preferredRoomTypeBySubjectId = useMemo(() => {
     const m = new Map<number, string | null>();
@@ -734,7 +823,9 @@ export function SmartTeacherAssignmentBlock({
 
   const fixAllPossibleIssues = () => {
     // Best-effort: fill teachers -> rebalance -> fill rooms.
-    run('auto', null);
+    if (!teacherDemand.hasSevereShortage) {
+      run('auto', null);
+    }
     run('rebalance', null);
     autoAssignRooms();
     toast.success('Fix all', 'Applied best-effort fixes. Remaining rows (if any) need manual decisions.');
@@ -840,8 +931,223 @@ export function SmartTeacherAssignmentBlock({
         </div>
       </div>
 
+      <div
+        className="card"
+        style={{
+          padding: 12,
+          borderRadius: 12,
+          border: '1px solid rgba(15,23,42,0.1)',
+          background: 'rgba(255,255,255,0.82)',
+        }}
+      >
+        <div style={{ fontWeight: 950, fontSize: 14 }}>Teacher demand summary</div>
+        <p className="muted" style={{ margin: '6px 0 12px', fontSize: 12, lineHeight: 1.45 }}>
+          Totals weekly periods mapped across sections vs aggregate capacity from teachers who have the TEACHER role and are explicitly tagged for each subject.
+          {slotsPerWeek != null ? ` Fallback weekly cap when a teacher has no personal cap: ${slotsPerWeek} periods.` : ''}{' '}
+          Tap a column header to sort ascending or descending.
+        </p>
+        {teacherDemand.hasSevereShortage ? (
+          <div className="sms-alert sms-alert--warning" style={{ marginBottom: 12 }}>
+            <div>
+              <div className="sms-alert__title">Severe shortage</div>
+              <div className="sms-alert__msg">
+                Smart auto-assign is blocked until capacity meets demand or reaches the near-limit band (≥90%) for every demanded subject.
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <div
+          style={{
+            height: 320,
+            overflow: 'auto',
+            border: '1px solid rgba(15,23,42,0.08)',
+            borderRadius: 10,
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          <table
+            className="data-table"
+            style={{
+              fontSize: 13,
+              width: '100%',
+              margin: 0,
+              borderCollapse: 'separate',
+              borderSpacing: 0,
+            }}
+          >
+            <thead
+              style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 2,
+                background: 'rgba(248,250,252,0.98)',
+                boxShadow: '0 1px 0 rgba(15,23,42,0.08)',
+              }}
+            >
+              <tr>
+                <th
+                  scope="col"
+                  style={{ verticalAlign: 'middle' }}
+                  aria-sort={
+                    demandSort.key === 'subject'
+                      ? demandSort.dir === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
+                >
+                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('subject')}>
+                    Subject
+                    {demandSort.key === 'subject' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </button>
+                </th>
+                <th
+                  scope="col"
+                  style={{ verticalAlign: 'middle' }}
+                  aria-sort={
+                    demandSort.key === 'required'
+                      ? demandSort.dir === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
+                >
+                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('required')}>
+                    Required periods
+                    {demandSort.key === 'required' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </button>
+                </th>
+                <th
+                  scope="col"
+                  style={{ verticalAlign: 'middle' }}
+                  aria-sort={
+                    demandSort.key === 'qualified'
+                      ? demandSort.dir === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
+                >
+                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('qualified')}>
+                    Qualified teachers
+                    {demandSort.key === 'qualified' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </button>
+                </th>
+                <th
+                  scope="col"
+                  style={{ verticalAlign: 'middle' }}
+                  aria-sort={
+                    demandSort.key === 'capacity'
+                      ? demandSort.dir === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
+                >
+                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('capacity')}>
+                    Available capacity
+                    {demandSort.key === 'capacity' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </button>
+                </th>
+                <th
+                  scope="col"
+                  style={{ verticalAlign: 'middle' }}
+                  aria-sort={
+                    demandSort.key === 'teachersNeeded'
+                      ? demandSort.dir === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
+                >
+                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('teachersNeeded')}>
+                    Teachers needed
+                    {demandSort.key === 'teachersNeeded' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </button>
+                </th>
+                <th
+                  scope="col"
+                  style={{ verticalAlign: 'middle' }}
+                  aria-sort={
+                    demandSort.key === 'status'
+                      ? demandSort.dir === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
+                >
+                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('status')}>
+                    Status
+                    {demandSort.key === 'status' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </button>
+                </th>
+                <th scope="col" style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+            {sortedDemandRows.map((row) => {
+              const tone =
+                row.status === 'OK' ? '#166534' : row.status === 'WARN' ? '#b45309' : '#b91c1c';
+              const needsFix = row.requiredPeriods > 0 && row.status !== 'OK';
+              return (
+                <tr key={row.subjectId}>
+                  <td style={{ fontWeight: 800 }}>
+                    {row.subjectName || `Subject ${row.subjectId}`}
+                    {row.subjectCode ? (
+                      <span className="muted" style={{ fontWeight: 700, marginLeft: 6 }}>
+                        ({row.subjectCode})
+                      </span>
+                    ) : null}
+                  </td>
+                  <td>{row.requiredPeriods}</td>
+                  <td>{row.qualifiedTeacherCount}</td>
+                  <td>{row.availableCapacity}</td>
+                  <td>{row.teachersNeeded ?? '—'}</td>
+                  <td style={{ fontWeight: 850, color: tone }}>{row.statusDetail}</td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {needsFix ? (
+                      <span className="row" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        <Link className="btn secondary" style={{ padding: '4px 8px', fontSize: 11 }} to="/app/teachers">
+                          Add teacher
+                        </Link>
+                        <Link className="btn secondary" style={{ padding: '4px 8px', fontSize: 11 }} to="/app/teachers">
+                          Capacity
+                        </Link>
+                        <Link className="btn secondary" style={{ padding: '4px 8px', fontSize: 11 }} to="/app/academic">
+                          Frequency
+                        </Link>
+                        <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 11 }} onClick={() => run('rebalance', row.subjectId)}>
+                          Rebalance
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        —
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
+      </div>
+
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', position: 'sticky', top: 0, zIndex: 5, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)' }}>
-        <button type="button" className="btn" onClick={() => run('auto', null)} disabled={!classSubjectConfigs.length}>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => run('auto', null)}
+          disabled={!classSubjectConfigs.length || teacherDemand.hasSevereShortage}
+          title={
+            teacherDemand.hasSevereShortage
+              ? 'Resolve severe shortages in the Teacher demand summary above.'
+              : undefined
+          }
+        >
           Auto assign teachers
         </button>
         <button

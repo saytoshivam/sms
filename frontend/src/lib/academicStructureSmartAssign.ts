@@ -4,6 +4,7 @@ import {
   type ClassSubjectConfigRow,
   type SectionSubjectOverrideRow,
 } from './academicStructureUtils';
+import { shouldBlockSmartAutoAssign } from './teacherDemandAnalysis';
 
 export const DEFAULT_MAX_WEEKLY_LECTURE_LOAD = 32;
 
@@ -228,6 +229,31 @@ export function runSmartTeacherAssignment(
   const subById = new Map<number, { name: string; code: string }>(
     (subjects ?? []).map((s) => [Number(s.id), { name: String(s.name ?? ''), code: String(s.code ?? '') }]),
   );
+
+  const draftEff = buildEffectiveAllocRows(classGroups, cfg, ov);
+  if (
+    mode === 'auto' &&
+    shouldBlockSmartAutoAssign({
+      subjects: (subjects ?? []).map((s) => ({
+        id: Number(s.id),
+        name: String(s.name ?? ''),
+        code: String(s.code ?? ''),
+      })),
+      allocations: draftEff,
+      staff,
+      slotsPerWeek: schoolSlotsPerWeek ?? null,
+    })
+  ) {
+    warnings.push(
+      'Smart auto-assign blocked: severe teacher capacity shortage versus mapped weekly frequencies. Add qualified teachers, raise weekly caps in Staff, reduce section frequencies in Academic Structure, or rebalance assignments — then retry.',
+    );
+    return {
+      classSubjectConfigs: cfg,
+      sectionSubjectOverrides: ov,
+      assignmentMeta: meta,
+      warnings,
+    };
+  }
 
   const eff = (): AcademicAllocRow[] =>
     buildEffectiveAllocRows(classGroups, cfg, ov);

@@ -33,6 +33,8 @@ import com.myhaimi.sms.DTO.OnboardingAcademicAllocationItemDTO;
 import com.myhaimi.sms.DTO.OnboardingClassSubjectConfigDTO;
 import com.myhaimi.sms.DTO.OnboardingSectionSubjectOverrideDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicSlotMetaDTO;
+import com.myhaimi.sms.DTO.TeacherDemandSubjectRowDTO;
+import com.myhaimi.sms.DTO.TeacherDemandSummaryDTO;
 import com.myhaimi.sms.DTO.OnboardingTimetableAutoGenerateViewDTO;
 import com.myhaimi.sms.DTO.OnboardingTimetableClassAutoFillItemDTO;
 import com.myhaimi.sms.DTO.timetable.v2.AutoFillRequestDTO;
@@ -129,6 +131,7 @@ public class SchoolOnboardingService {
     private final StaffTeachableSubjectRepository staffTeachableSubjectRepository;
     private final TimetableEntryRepo timetableEntryRepo;
     private final TimetableGridV2Service timetableGridV2Service;
+    private final TeacherDemandAnalysisService teacherDemandAnalysisService;
 
     private List<Integer> parseIntListJson(String json) {
         if (json == null || json.isBlank()) {
@@ -1518,6 +1521,29 @@ public class SchoolOnboardingService {
         schoolRepo.save(school);
     }
 
+    private List<String> buildTeacherDemandWarnings() {
+        try {
+            TeacherDemandSummaryDTO d = teacherDemandAnalysisService.summarize();
+            if (d == null || !d.hasSevereShortage()) {
+                return List.of();
+            }
+            List<String> w = new ArrayList<>();
+            w.add(
+                    "Teacher capacity may be insufficient for one or more subjects. Review demand vs capacity before relying on auto-fill.");
+            int n = 0;
+            for (TeacherDemandSubjectRowDTO r : d.subjects()) {
+                if (r == null) continue;
+                if (!"CRITICAL".equals(r.status()) || r.requiredPeriods() <= 0) continue;
+                w.add(r.subjectName() + " (" + r.subjectCode() + "): " + r.statusDetail());
+                n++;
+                if (n >= 12) break;
+            }
+            return w;
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
     @Transactional
     public OnboardingTimetableAutoGenerateViewDTO autoGenerateTimetableDraft() {
         Integer schoolId = requireSchoolId();
@@ -1535,7 +1561,8 @@ public class SchoolOnboardingService {
             }
             out.add(new OnboardingTimetableClassAutoFillItemDTO(cg.getId(), cg.getCode(), r));
         }
-        return new OnboardingTimetableAutoGenerateViewDTO(ver.id(), ver.status(), ver.version(), out);
+        List<String> demandWarnings = buildTeacherDemandWarnings();
+        return new OnboardingTimetableAutoGenerateViewDTO(ver.id(), ver.status(), ver.version(), out, demandWarnings);
     }
 
     @Transactional

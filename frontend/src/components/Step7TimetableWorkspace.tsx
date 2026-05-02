@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { toast } from '../lib/toast';
+import { extractTeacherDemandWarnings } from '../lib/teacherDemandAnalysis';
 import { ClassGroupSearchCombobox, useClassGroupsCatalog } from './ClassGroupSearchCombobox';
 import { OptionSearchCombobox } from './OptionSearchCombobox';
 
@@ -549,6 +550,13 @@ export default function Step7TimetableWorkspace({
       setLastGenerate(res);
       await qc.invalidateQueries({ queryKey: ['tt-entries'] });
       await qc.invalidateQueries({ queryKey: ['tt-locks'] });
+      const warn = extractTeacherDemandWarnings(res);
+      if (warn.length) {
+        toast.info(
+          'Teacher capacity warning',
+          `${warn.slice(0, 2).join(' · ')}${warn.length > 2 ? ` (+${warn.length - 2} more)` : ''}`,
+        );
+      }
       toast.success('Generated', 'Draft timetable generated.');
     } catch (e) {
       toast.error('Generate failed', formatApiError(e));

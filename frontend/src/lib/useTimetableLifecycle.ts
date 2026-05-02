@@ -3,6 +3,7 @@ import { api } from './api';
 import { formatApiError } from './errors';
 import { toast } from './toast';
 import { useApiTags } from './apiTags';
+import { extractTeacherDemandWarnings } from './teacherDemandAnalysis';
 import { useImpactStore } from './impactStore';
 import {
   useTimetableStatus,
@@ -83,6 +84,13 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
     onSuccess: async (data) => {
       const placed = data?.placed ?? 0;
       const required = data?.required ?? 0;
+      const warn = extractTeacherDemandWarnings(data);
+      if (warn.length) {
+        toast.info(
+          'Teacher capacity warning',
+          `${warn.slice(0, 2).join(' · ')}${warn.length > 2 ? ` (+${warn.length - 2} more)` : ''}`,
+        );
+      }
       toast.success('Timetable regenerated', `${placed}/${required} sessions placed.`);
       clearAllImpact();
       await invalidate(['timetable.draft', 'timetable.conflicts', 'timetable.freshness']);
@@ -125,6 +133,13 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
     onSuccess: async (data) => {
       const placed = data?.placed ?? 0;
       const required = data?.required ?? 0;
+      const warn = extractTeacherDemandWarnings(data);
+      if (warn.length) {
+        toast.info(
+          'Teacher capacity warning',
+          `${warn.slice(0, 2).join(' · ')}${warn.length > 2 ? ` (+${warn.length - 2} more)` : ''}`,
+        );
+      }
       toast.success('Draft discarded', `Rebuilt: ${placed}/${required} sessions placed.`);
       clearAllImpact();
       await invalidate(['timetable.draft', 'timetable.conflicts', 'timetable.freshness']);
