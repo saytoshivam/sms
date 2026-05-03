@@ -6,9 +6,7 @@ import { ModulePage } from '../../components/module/ModulePage';
 import { ConflictsPanel } from '../../components/timetable/ConflictsPanel';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { api } from '../../lib/api';
-import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
-import { useApiTags } from '../../lib/apiTags';
 import { useTimetableLifecycle } from '../../lib/useTimetableLifecycle';
 
 type BasicInfo = {
@@ -30,7 +28,6 @@ type TimetableTab = (typeof TABS)[number];
  */
 export function TimetableModulePage() {
   const navigate = useNavigate();
-  const invalidate = useApiTags();
   const [searchParams] = useSearchParams();
 
   const tabParam = searchParams.get('tab') as TimetableTab | null;

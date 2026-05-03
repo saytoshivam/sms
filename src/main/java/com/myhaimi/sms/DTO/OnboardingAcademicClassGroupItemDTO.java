@@ -6,4 +6,5 @@ public record OnboardingAcademicClassGroupItemDTO(
         String displayName,
         Integer gradeLevel,
         String section,
-        Integer defaultRoomId) {}
+        Integer defaultRoomId,
+        Integer classTeacherStaffId) {}

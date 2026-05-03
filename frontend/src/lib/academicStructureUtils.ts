@@ -192,10 +192,25 @@ export type SectionSubjectOverrideRow = {
   roomId: number | null;
 };
 
+/** Resolved section homeroom (ClassGroup.defaultRoom) as a numeric id, when known from draft UI. */
+export function homeroomMapFromDraft(
+  classGroups: { classGroupId: number }[],
+  defaultRoomByClassId: Record<number, string>,
+): Map<number, number | null> {
+  const m = new Map<number, number | null>();
+  for (const cg of classGroups ?? []) {
+    const raw = defaultRoomByClassId[cg.classGroupId];
+    const n = raw != null && String(raw).trim() !== '' ? Number(raw) : NaN;
+    m.set(cg.classGroupId, Number.isFinite(n) ? n : null);
+  }
+  return m;
+}
+
 export function buildEffectiveAllocRows(
   classGroups: { classGroupId: number; gradeLevel: number | null }[],
   classSubjectConfigs: ClassSubjectConfigRow[],
   sectionSubjectOverrides: SectionSubjectOverrideRow[],
+  homeroomByClassGroupId?: ReadonlyMap<number, number | null> | null,
 ): AcademicAllocRow[] {
   const cfgByKey = new Map<string, ClassSubjectConfigRow>();
   for (const c of classSubjectConfigs ?? []) {
@@ -232,12 +247,13 @@ export function buildEffectiveAllocRows(
       const ov = ovByKey.get(`${cg.classGroupId}:${subjectId}`);
       const weeklyFrequency = ov?.periodsPerWeek ?? cfg.defaultPeriodsPerWeek;
       if (!weeklyFrequency || weeklyFrequency <= 0) continue;
+      const homeroom = homeroomByClassGroupId?.get(cg.classGroupId) ?? null;
       out.push({
         classGroupId: cg.classGroupId,
         subjectId,
         weeklyFrequency,
         staffId: ov?.teacherId ?? cfg.defaultTeacherId ?? null,
-        roomId: ov?.roomId ?? cfg.defaultRoomId ?? null,
+        roomId: ov?.roomId ?? cfg.defaultRoomId ?? homeroom ?? null,
       });
     }
 
@@ -250,12 +266,13 @@ export function buildEffectiveAllocRows(
       if (cfgByKey.has(`${grade}:${subjectId}`)) continue;
       const weeklyFrequency = o.periodsPerWeek;
       if (!weeklyFrequency || weeklyFrequency <= 0) continue;
+      const homeroom = homeroomByClassGroupId?.get(cg.classGroupId) ?? null;
       out.push({
         classGroupId: cg.classGroupId,
         subjectId,
         weeklyFrequency,
         staffId: o.teacherId ?? null,
-        roomId: o.roomId ?? null,
+        roomId: o.roomId ?? homeroom ?? null,
       });
     }
   }

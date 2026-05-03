@@ -14,5 +14,7 @@ public record OnboardingAcademicStructureSaveDTO(
         List<OnboardingSectionSubjectOverrideDTO> sectionSubjectOverrides,
         /** When present, overwrites per-class default (homeroom) rooms; omitted entries clear default room. */
         List<OnboardingClassDefaultRoomItemDTO> defaultRooms,
+        /** When present, assigns class teachers on class groups for this school. */
+        List<OnboardingClassTeacherItemDTO> classTeachers,
         /** Replaces the whole list when present; null or empty clears stored meta. */
         List<OnboardingAcademicSlotMetaDTO> assignmentSlotMeta) {}

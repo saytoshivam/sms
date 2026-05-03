@@ -15,13 +15,23 @@ export type AssignmentSlotMeta = {
   locked: boolean;
   /** Present when source='conflict'. */
   conflictReason?: 'NO_ELIGIBLE_TEACHER' | 'CAPACITY_OVERFLOW' | 'UNKNOWN';
+  /** Room assignment provenance for Smart Assignment UX / bulk homeroom automation. */
+  roomSource?: 'auto' | 'manual';
+  /** When true, bulk homeroom automation does not reset this slot's room metadata (manual commitment). */
+  roomLocked?: boolean;
 };
 
 export function slotKey(classGroupId: number, subjectId: number) {
   return `${classGroupId}:${subjectId}`;
 }
 
-type ClassGroup = { classGroupId: number; gradeLevel: number | null };
+type ClassGroup = {
+  classGroupId: number;
+  gradeLevel: number | null;
+  /** Stable sibling order within a grade (section letter/code). Optional; omission falls back to classGroupId. */
+  section?: string | null;
+  code?: string | null;
+};
 type StaffLite = {
   id: number;
   fullName: string;
@@ -80,40 +90,86 @@ function buildLoadAndFragmentation(effective: AcademicAllocRow[], classGroups: C
   return { load, grades, byGSub, cgToGrade };
 }
 
+function sectionOrderingKey(cg: ClassGroup | undefined): string {
+  if (!cg) return '';
+  const sec = String(cg.section ?? '').trim();
+  return sec || String(cg.code ?? cg.classGroupId);
+}
+
+/** Same grade + subject as another section (RULE 5 / cohesion). */
+function teacherAlreadyGradeSubject(
+  tid: number,
+  grade: number,
+  subjectId: number,
+  effectiveRows: AcademicAllocRow[],
+  cgToGrade: Map<number, number>,
+): boolean {
+  for (const a of effectiveRows) {
+    if (a.staffId == null || Number(a.staffId) !== Number(tid) || a.subjectId !== subjectId) continue;
+    const g = cgToGrade.get(a.classGroupId);
+    if (g != null && Number(g) === Number(grade)) return true;
+  }
+  return false;
+}
+
+/** Min |grade difference| along this subject among current assignments (-1 if none). */
+function teacherMinGradeDistanceSameSubject(
+  tid: number,
+  targetGrade: number,
+  subjectId: number,
+  effectiveRows: AcademicAllocRow[],
+  cgToGrade: Map<number, number>,
+): number | null {
+  let best: number | null = null;
+  for (const a of effectiveRows) {
+    if (a.staffId == null || Number(a.staffId) !== Number(tid) || a.subjectId !== subjectId) continue;
+    const g = cgToGrade.get(a.classGroupId);
+    if (g == null) continue;
+    const dist = Math.abs(Number(g) - Number(targetGrade));
+    if (best == null || dist < best) best = dist;
+  }
+  return best;
+}
+
+/** Smart-assign teacher scorer (relative weights match product spec for ordering—RULES 2–6). */
 function teacherScore(args: {
-  teacher: StaffLite;
   teacherId: number;
   baseLoad: number;
   maxLoad: number;
   required: number;
-  grade: number;
-  subjectId: number;
-  classGroupIdsInGrade: number[];
   prefersAny: boolean;
-  alreadyTeachesThisGradeSubject: boolean;
   gradeCount: number;
+  /** RULE 5: prefers one teacher across sections in same grade+subject once any row exists */
+  continuitySameGradeSubject: boolean;
+  /** RULE 6: nearest-grade preference when no continuity (null = unknown / no rows) */
+  minGradeDistSameSubject: number | null;
 }) {
-  const {
-    baseLoad,
-    maxLoad,
-    required,
-    prefersAny,
-    alreadyTeachesThisGradeSubject,
-    gradeCount,
-  } = args;
+  const { baseLoad, maxLoad, required, prefersAny, gradeCount, continuitySameGradeSubject, minGradeDistSameSubject } = args;
 
   const loadRatio = maxLoad > 0 ? baseLoad / maxLoad : 1;
   const afterRatio = maxLoad > 0 ? (baseLoad + required) / maxLoad : 2;
   const overBy = Math.max(0, baseLoad + required - maxLoad);
 
-  const sameClassBonus = alreadyTeachesThisGradeSubject ? 8 : 0;
-  const lowLoadBonus = (1 - clamp(loadRatio, 0, 1.5)) * 6;
-  const preferBonus = prefersAny ? 1.5 : 0;
-  const fragmentationPenalty = Math.max(0, gradeCount - 1) * 0.9;
-  const overloadPenalty = overBy > 0 ? 10 + overBy * 0.6 : 0;
-  const nearFullPenalty = afterRatio > 0.9 ? (afterRatio - 0.9) * 8 : 0;
+  let score = 0;
 
-  return sameClassBonus + lowLoadBonus + preferBonus - fragmentationPenalty - overloadPenalty - nearFullPenalty;
+  /** RULE 3 overload disfavor (+ explicit cap handling via sort + fits flag in callers). */
+  if (overBy > 0) score -= 200;
+
+  if (continuitySameGradeSubject) score += 100;
+
+  if (!continuitySameGradeSubject && minGradeDistSameSubject != null && minGradeDistSameSubject >= 1) {
+    const d = minGradeDistSameSubject;
+    score += d === 1 ? 40 : d === 2 ? 22 : Math.max(0, 22 - (d - 2) * 9);
+  }
+
+  score += (1 - clamp(loadRatio, 0, 1)) * 60;
+  score += prefersAny ? 8 : 0;
+  score -= Math.max(0, gradeCount - 1) * 15;
+
+  const nearFullPenalty = afterRatio > 0.92 ? (afterRatio - 0.92) * 45 : 0;
+  score -= nearFullPenalty;
+
+  return score;
 }
 
 function cloneCfgs(p: ClassSubjectConfigRow[]): ClassSubjectConfigRow[] {
@@ -126,6 +182,15 @@ function cloneMeta(m: Record<string, AssignmentSlotMeta>): Record<string, Assign
   const o: Record<string, AssignmentSlotMeta> = {};
   for (const k of Object.keys(m)) o[k] = { ...m[k]! };
   return o;
+}
+
+/** Merge teacher-assignment meta updates without dropping room provenance fields. */
+export function mergeAssignmentSlotMeta(prev: AssignmentSlotMeta | undefined, next: AssignmentSlotMeta): AssignmentSlotMeta {
+  return {
+    ...next,
+    roomSource: next.roomSource ?? prev?.roomSource,
+    roomLocked: next.roomLocked ?? prev?.roomLocked,
+  };
 }
 
 function setTemplateTeacher(
@@ -161,6 +226,36 @@ export function applyUniformGradeSubjectTeacher(
     return { ...o, teacherId: null as number | null };
   });
   return { cfg: c2, ovs: o2 };
+}
+
+/**
+ * Update only one section row's teacher in overrides (no sibling uniform/template merge).
+ * Used when clearing autos in a bucket so locked/manual rows are not wiped by uniform updates.
+ */
+export function patchSectionSubjectOverrideTeacher(
+  cfg: ClassSubjectConfigRow[],
+  ovs: SectionSubjectOverrideRow[],
+  classGroupId: number,
+  subjectId: number,
+  teacherId: number | null,
+) {
+  const prev = ovs.find((o) => o.classGroupId === classGroupId && o.subjectId === subjectId);
+  const without = ovs.filter(
+    (o) => !(o.classGroupId === classGroupId && o.subjectId === subjectId),
+  );
+  return {
+    cfg,
+    ovs: [
+      ...without,
+      {
+        classGroupId,
+        subjectId,
+        periodsPerWeek: prev?.periodsPerWeek ?? null,
+        teacherId,
+        roomId: prev?.roomId ?? null,
+      },
+    ],
+  };
 }
 
 export function applySectionTeacher(
@@ -216,6 +311,7 @@ export function runSmartTeacherAssignment(
   mode: 'auto' | 'rebalance' | 'reset',
   subjectIdFilter: number | null = null,
   schoolSlotsPerWeek: number | null = null,
+  homeroomByClassGroupId: ReadonlyMap<number, number | null> | null | undefined = undefined,
 ): {
   classSubjectConfigs: ClassSubjectConfigRow[];
   sectionSubjectOverrides: SectionSubjectOverrideRow[];
@@ -230,7 +326,7 @@ export function runSmartTeacherAssignment(
     (subjects ?? []).map((s) => [Number(s.id), { name: String(s.name ?? ''), code: String(s.code ?? '') }]),
   );
 
-  const draftEff = buildEffectiveAllocRows(classGroups, cfg, ov);
+  const draftEff = buildEffectiveAllocRows(classGroups, cfg, ov, homeroomByClassGroupId ?? undefined);
   if (
     mode === 'auto' &&
     shouldBlockSmartAutoAssign({
@@ -255,23 +351,72 @@ export function runSmartTeacherAssignment(
     };
   }
 
-  const eff = (): AcademicAllocRow[] =>
-    buildEffectiveAllocRows(classGroups, cfg, ov);
+  const cgToGrade = new Map<number, number>();
+  for (const cg of classGroups) {
+    if (cg.gradeLevel == null) continue;
+    cgToGrade.set(cg.classGroupId, Number(cg.gradeLevel));
+  }
+
+  const eff = (): AcademicAllocRow[] => buildEffectiveAllocRows(classGroups, cfg, ov, homeroomByClassGroupId ?? undefined);
 
   if (mode === 'reset') {
+    /** Teacher-protected slots (keep assignment when clearing autos in same grade×subject bucket). */
+    const teacherProtected = (a: AcademicAllocRow) => {
+      const mk = meta[slotKey(a.classGroupId, a.subjectId)];
+      // If locked but empty, allow clear to manage; lock protects an existing pick.
+      if (mk?.locked && a.staffId != null) return true;
+      if (mk?.source === 'manual' && a.staffId != null) return true;
+      return false;
+    };
+
+    const buckets = new Map<string, AcademicAllocRow[]>();
     for (const a of eff()) {
-      const k = slotKey(a.classGroupId, a.subjectId);
-      const m = meta[k];
-      // If locked but empty, allow reset/auto to populate; lock should protect an existing pick.
-      if (m?.locked && a.staffId != null) continue;
-      // If user manually set a teacher, keep it. If it's manual-but-empty, allow reset/auto to manage it.
-      if (m?.source === 'manual' && a.staffId != null) continue;
-      const g = classGroups.find((c) => c.classGroupId === a.classGroupId)?.gradeLevel;
+      if (subjectIdFilter != null && a.subjectId !== subjectIdFilter) continue;
+      const g = cgToGrade.get(a.classGroupId);
       if (g == null) continue;
-      const r = applyUniformGradeSubjectTeacher(cfg, ov, classGroups, Number(g), a.subjectId, null);
-      cfg = r.cfg;
-      ov = r.ovs;
-      delete meta[k];
+      const sk = `${g}:${a.subjectId}`;
+      if (!buckets.has(sk)) buckets.set(sk, []);
+      buckets.get(sk)!.push(a);
+    }
+
+    for (const [, bucket] of buckets) {
+      const clearList = bucket.filter((a) => !teacherProtected(a));
+      if (clearList.length === 0) continue;
+
+      const grade = cgToGrade.get(bucket[0]!.classGroupId)!;
+      const subjectId = bucket[0]!.subjectId;
+
+      // Pin every protected assignment with an explicit section override BEFORE nulling grade template,
+      // so uniform-style clearing cannot drop locked/manual teachers on sibling sections.
+      for (const p of bucket) {
+        if (!teacherProtected(p) || p.staffId == null) continue;
+        const rPin = patchSectionSubjectOverrideTeacher(cfg, ov, p.classGroupId, p.subjectId, p.staffId);
+        cfg = rPin.cfg;
+        ov = rPin.ovs;
+      }
+
+      cfg = setTemplateTeacher(cfg, grade, subjectId, null);
+
+      for (const c of clearList) {
+        const rClr = patchSectionSubjectOverrideTeacher(cfg, ov, c.classGroupId, c.subjectId, null);
+        cfg = rClr.cfg;
+        ov = rClr.ovs;
+
+        const k = slotKey(c.classGroupId, c.subjectId);
+        const mk = meta[k];
+        const lk = mk?.locked ?? false;
+        const rs = mk?.roomSource;
+        const rl = mk?.roomLocked;
+        delete meta[k];
+        if (lk || rs || rl) {
+          meta[k] = mergeAssignmentSlotMeta(undefined, {
+            source: 'manual',
+            locked: lk,
+            roomSource: rs,
+            roomLocked: rl,
+          });
+        }
+      }
     }
     return { classSubjectConfigs: cfg, sectionSubjectOverrides: ov, assignmentMeta: meta, warnings };
   }
@@ -302,8 +447,15 @@ export function runSmartTeacherAssignment(
     byGs.get(sk)!.push(d);
   }
 
+  const orderedGs = [...byGs.entries()].sort(([ka], [kb]) => {
+    const [ga, sa] = ka.split(':').map(Number);
+    const [gb, sb] = kb.split(':').map(Number);
+    if (ga !== gb) return ga - gb;
+    return sa - sb;
+  });
+
   // Pass 1: best-effort assign grade+subject groups with cohesion + load scoring.
-  for (const [, demands] of byGs) {
+  for (const [, demands] of orderedGs) {
     if (demands.length === 0) continue;
     const subjectId = demands[0]!.subjectId;
     const grade = demands[0]!.grade;
@@ -314,17 +466,18 @@ export function runSmartTeacherAssignment(
       warnings.push(
         `No teacher tagged to teach ${label} in Class ${grade}. Add a teacher mapped to this subject (Staff → subjects).${label === 'Unknown subject' ? ' (This subject is missing from the catalog — it may have been deleted.)' : ''}`,
       );
-      for (const d of demands) meta[d.k] = { source: 'conflict', locked: false, conflictReason: 'NO_ELIGIBLE_TEACHER' };
+      for (const d of demands) meta[d.k] = mergeAssignmentSlotMeta(meta[d.k], { source: 'conflict', locked: false, conflictReason: 'NO_ELIGIBLE_TEACHER' });
       continue;
     }
     cands.sort((a, b) => a.id - b.id);
     const totalP = demands.reduce((a, d) => a + d.periods, 0);
     if (totalP < 1) continue;
 
-    const base = buildLoadAndFragmentation(eff(), classGroups);
+    const snapEff = eff();
+    const base = buildLoadAndFragmentation(snapEff, classGroups);
     // remove current demands from base load (we are re-assigning them)
     for (const d of demands) {
-      const x = eff().find((e) => e.classGroupId === d.classGroupId && e.subjectId === d.subjectId);
+      const x = snapEff.find((e) => e.classGroupId === d.classGroupId && e.subjectId === d.subjectId);
       if (x?.staffId != null) {
         base.load.set(Number(x.staffId), (base.load.get(Number(x.staffId)) ?? 0) - d.periods);
       }
@@ -340,19 +493,17 @@ export function runSmartTeacherAssignment(
         const max = effectiveMaxLoad(t, schoolSlotsPerWeek);
         const gradeCount = (base.grades.get(t.id)?.size ?? 0) || 0;
         const prefersAny = (t.preferredClassGroupIds ?? []).some((id) => classGroupIdsInGrade.includes(id));
-        const alreadyTeaches = base.byGSub.get(`${t.id}:${grade}:${subjectId}`) != null;
+        const continuity = teacherAlreadyGradeSubject(t.id, grade, subjectId, snapEff, cgToGrade);
+        const dist = teacherMinGradeDistanceSameSubject(t.id, grade, subjectId, snapEff, cgToGrade);
         const score = teacherScore({
-          teacher: t,
           teacherId: t.id,
           baseLoad,
           maxLoad: max,
           required: totalP,
-          grade,
-          subjectId,
-          classGroupIdsInGrade,
           prefersAny,
-          alreadyTeachesThisGradeSubject: alreadyTeaches,
           gradeCount,
+          continuitySameGradeSubject: continuity,
+          minGradeDistSameSubject: dist,
         });
         return { t, score, baseLoad, max };
       })
@@ -369,7 +520,7 @@ export function runSmartTeacherAssignment(
         const r1 = applySectionTeacher(cfg, ov, classGroups, d.classGroupId, d.subjectId, single.t.id);
         cfg = r1.cfg;
         ov = r1.ovs;
-        meta[d.k] = { source: label, locked: false };
+        meta[d.k] = mergeAssignmentSlotMeta(meta[d.k], { source: label, locked: false });
       }
       continue;
     }
@@ -377,28 +528,35 @@ export function runSmartTeacherAssignment(
     // Otherwise, assign section-by-section using per-demand scoring, minimizing fragmentation.
     const localLoad = new Map<number, number>(base.load);
     const label: AssignmentSource = mode === 'rebalance' ? 'rebalanced' : 'auto';
-    // deterministic order: sections with bigger periods first
-    const sortedDemands = demands.slice().sort((a, b) => b.periods - a.periods || a.classGroupId - b.classGroupId);
+    const sortedDemands = demands.slice().sort((a, b) => {
+      const cga = classGroups.find((cg) => cg.classGroupId === a.classGroupId);
+      const cgb = classGroups.find((cg) => cg.classGroupId === b.classGroupId);
+      const ak = sectionOrderingKey(cga);
+      const bk = sectionOrderingKey(cgb);
+      const sc = ak.localeCompare(bk, undefined, { numeric: true, sensitivity: 'base' });
+      if (sc !== 0) return sc;
+      if (b.periods !== a.periods) return b.periods - a.periods;
+      return a.classGroupId - b.classGroupId;
+    });
     for (const d of sortedDemands) {
+      const liveEff = eff();
       const scored2 = cands
         .map((t) => {
           const baseLoad = localLoad.get(t.id) ?? 0;
           const max = effectiveMaxLoad(t, schoolSlotsPerWeek);
           const gradeCount = (base.grades.get(t.id)?.size ?? 0) || 0;
           const prefersAny = (t.preferredClassGroupIds ?? []).includes(d.classGroupId);
-          const alreadyTeaches = base.byGSub.get(`${t.id}:${grade}:${subjectId}`) != null;
+          const continuity = teacherAlreadyGradeSubject(t.id, grade, subjectId, liveEff, cgToGrade);
+          const dist = teacherMinGradeDistanceSameSubject(t.id, grade, subjectId, liveEff, cgToGrade);
           const score = teacherScore({
-            teacher: t,
             teacherId: t.id,
             baseLoad,
             maxLoad: max,
             required: d.periods,
-            grade,
-            subjectId,
-            classGroupIdsInGrade,
             prefersAny,
-            alreadyTeachesThisGradeSubject: alreadyTeaches,
             gradeCount,
+            continuitySameGradeSubject: continuity,
+            minGradeDistSameSubject: dist,
           });
           const fits = baseLoad + d.periods <= max;
           return { t, score, baseLoad, max, fits };
@@ -413,9 +571,9 @@ export function runSmartTeacherAssignment(
         warnings.push(`Could not fit grade ${grade} subject into capacity; assigned best effort (may overload).`);
         // Keep the assignment source as AUTO/REBALANCED (we still assign a teacher),
         // but attach a conflictReason so UI can flag it without inflating "hard conflicts".
-        meta[d.k] = { source: label, locked: false, conflictReason: 'CAPACITY_OVERFLOW' };
+        meta[d.k] = mergeAssignmentSlotMeta(meta[d.k], { source: label, locked: false, conflictReason: 'CAPACITY_OVERFLOW' });
       } else {
-        meta[d.k] = { source: label, locked: false };
+        meta[d.k] = mergeAssignmentSlotMeta(meta[d.k], { source: label, locked: false });
       }
       const r1 = applySectionTeacher(cfg, ov, classGroups, d.classGroupId, d.subjectId, pick.t.id);
       cfg = r1.cfg;
@@ -460,23 +618,21 @@ export function runSmartTeacherAssignment(
               const fits = curLoad + r.weeklyFrequency <= max;
               const gradeCount = (base.grades.get(t.id)?.size ?? 0) || 0;
               const prefersAny = (t.preferredClassGroupIds ?? []).includes(r.classGroupId);
-              const alreadyTeaches = base.byGSub.get(`${t.id}:${Number(grade)}:${r.subjectId}`) != null;
+              const continuity = teacherAlreadyGradeSubject(t.id, Number(grade), r.subjectId, effective, cgToGrade);
+              const dist = teacherMinGradeDistanceSameSubject(t.id, Number(grade), r.subjectId, effective, cgToGrade);
               const score = teacherScore({
-                teacher: t,
                 teacherId: t.id,
                 baseLoad: curLoad,
                 maxLoad: max,
                 required: r.weeklyFrequency,
-                grade: Number(grade),
-                subjectId: r.subjectId,
-                classGroupIdsInGrade: classGroups.filter((c) => Number(c.gradeLevel) === Number(grade)).map((c) => c.classGroupId),
                 prefersAny,
-                alreadyTeachesThisGradeSubject: alreadyTeaches,
                 gradeCount,
+                continuitySameGradeSubject: continuity,
+                minGradeDistSameSubject: dist,
               });
               return { t, score, fits };
             })
-            .sort((a, b) => (a.fits !== b.fits ? (a.fits ? -1 : 1) : b.score - a.score));
+            .sort((a, b) => (a.fits !== b.fits ? (a.fits ? -1 : 1) : b.score - a.score || a.t.id - b.t.id));
           const pick = scored.find((x) => x.fits) ?? null;
           if (!pick) continue;
 
@@ -484,7 +640,7 @@ export function runSmartTeacherAssignment(
           const r1 = applySectionTeacher(cfg, ov, classGroups, r.classGroupId, r.subjectId, pick.t.id);
           cfg = r1.cfg;
           ov = r1.ovs;
-          meta[k] = { source: 'rebalanced', locked: false };
+          meta[k] = mergeAssignmentSlotMeta(meta[k], { source: 'rebalanced', locked: false });
           base.load.set(tid, (base.load.get(tid) ?? 0) - r.weeklyFrequency);
           base.load.set(pick.t.id, (base.load.get(pick.t.id) ?? 0) + r.weeklyFrequency);
 
@@ -508,15 +664,15 @@ export function runSmartTeacherAssignment(
 
     const eligible = candidatesAll.filter((s) => eligibleForAuto(s, a.subjectId));
     if (eligible.length === 0) {
-      meta[k] = { source: 'conflict', locked: m?.locked ?? false, conflictReason: 'NO_ELIGIBLE_TEACHER' };
+      meta[k] = mergeAssignmentSlotMeta(meta[k], { source: 'conflict', locked: m?.locked ?? false, conflictReason: 'NO_ELIGIBLE_TEACHER' });
     } else {
       // There are eligible teachers but none got assigned (usually due to load constraints).
       // Keep source if present; attach a reason for visibility.
-      meta[k] = {
+      meta[k] = mergeAssignmentSlotMeta(meta[k], {
         source: (m?.source ?? 'auto') as AssignmentSource,
         locked: m?.locked ?? false,
         conflictReason: 'CAPACITY_OVERFLOW',
-      };
+      });
     }
   }
 

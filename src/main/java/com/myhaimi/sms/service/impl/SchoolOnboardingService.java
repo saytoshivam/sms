@@ -24,6 +24,7 @@ import com.myhaimi.sms.DTO.OnboardingStaffUpdateDTO;
 import com.myhaimi.sms.DTO.StaffDeleteInfoDTO;
 import com.myhaimi.sms.DTO.OnboardingFeesSetupDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicAllocationInputDTO;
+import com.myhaimi.sms.DTO.OnboardingClassTeacherItemDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicStructureSaveDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicStructureViewDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicSubjectItemDTO;
@@ -1329,7 +1330,13 @@ public class SchoolOnboardingService {
                 .findAllBySchool_IdAndIsDeletedFalseOrderByGradeLevelAscCodeAsc(schoolId)
                 .stream()
                 .map(cg -> new OnboardingAcademicClassGroupItemDTO(
-                        cg.getId(), cg.getCode(), cg.getDisplayName(), cg.getGradeLevel(), cg.getSection(), cg.getDefaultRoomId()))
+                        cg.getId(),
+                        cg.getCode(),
+                        cg.getDisplayName(),
+                        cg.getGradeLevel(),
+                        cg.getSection(),
+                        cg.getDefaultRoomId(),
+                        cg.getClassTeacherStaffId()))
                 .toList();
 
         List<OnboardingAcademicAllocationItemDTO> aRows = subjectAllocationRepo.findBySchool_Id(schoolId).stream()
@@ -1382,7 +1389,13 @@ public class SchoolOnboardingService {
                     if (code == null || code.isBlank()) return null;
                     Integer activeId = activeSubjectIdByCode.get(code);
                     if (activeId == null) return null;
-                    return new OnboardingAcademicSlotMetaDTO(m.classGroupId(), activeId, m.source(), m.locked());
+                    return new OnboardingAcademicSlotMetaDTO(
+                            m.classGroupId(),
+                            activeId,
+                            m.source(),
+                            m.locked(),
+                            m.roomSource(),
+                            m.roomLocked());
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
@@ -1478,6 +1491,20 @@ public class SchoolOnboardingService {
                 } else {
                     Room r = roomRepo.findByIdAndSchool_Id(it.roomId(), schoolId).orElseThrow();
                     cg.setDefaultRoom(r);
+                }
+                classGroupRepo.save(cg);
+            }
+        }
+
+        if (body.classTeachers() != null) {
+            for (OnboardingClassTeacherItemDTO it : body.classTeachers()) {
+                if (it == null) continue;
+                ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(it.classGroupId(), schoolId).orElseThrow();
+                if (it.staffId() == null) {
+                    cg.setClassTeacher(null);
+                } else {
+                    Staff st = staffRepo.findByIdAndSchool_Id(it.staffId(), schoolId).orElseThrow();
+                    cg.setClassTeacher(st);
                 }
                 classGroupRepo.save(cg);
             }

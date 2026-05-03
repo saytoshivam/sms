@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -9,8 +9,6 @@ import { SelectKeeper } from '../components/SelectKeeper';
 import { DateKeeper } from '../components/DateKeeper';
 import { MultiSelectKeeper } from '../components/MultiSelectKeeper';
 import { ClassGroupSearchCombobox } from '../components/ClassGroupSearchCombobox';
-import { RowActionsMenu } from '../components/RowActionsMenu';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SavedRoomsCatalogPanel } from '../components/catalog/SavedRoomsCatalogPanel';
 import { SavedSubjectsCatalogPanel } from '../components/catalog/SavedSubjectsCatalogPanel';
 import { SavedClassesSectionsCatalogPanel } from '../components/catalog/SavedClassesSectionsCatalogPanel';
@@ -18,8 +16,10 @@ import { OnboardedStaffCatalogPanel } from '../components/catalog/OnboardedStaff
 import { AcademicStructureSetupStep } from '../components/AcademicStructureSetupStep';
 import Step7TimetableWorkspace from '../components/Step7TimetableWorkspace';
 import type { ClassSubjectConfigRow, SectionSubjectOverrideRow } from '../lib/academicStructureUtils';
-import { buildEffectiveAllocRows } from '../lib/academicStructureUtils';
+import { buildEffectiveAllocRows, estimateSlotsPerWeek, homeroomMapFromDraft } from '../lib/academicStructureUtils';
+import { runAutoAssignClassTeachers } from '../lib/classTeacherAutoAssign';
 import type { AssignmentSlotMeta } from '../lib/academicStructureSmartAssign';
+import { assignHomeroomsGreedy, classGroupsToHomeroomSections, roomsToHomeroomInputs } from '../lib/homeroomAssignment';
 import {
   OPTIONAL_STEPS,
   REQUIRED_STEPS,
@@ -101,6 +101,7 @@ type ClassDefaultRoomRow = {
   gradeLevel: number | null;
   section: string | null;
   defaultRoomId: number | null;
+  classTeacherStaffId?: number | null;
 };
 type RoomOption = {
   id: number;
@@ -115,8 +116,6 @@ type RoomOption = {
   labType?: string | null;
   isSchedulable?: boolean;
 };
-
-type DeleteInfo = { canDelete: boolean; reasons: string[] };
 
 type GradeSectionsRow = { gradeLevel: number; sectionsText: string };
 
@@ -427,6 +426,9 @@ export function SchoolOnboardingWizardPage() {
   const [roomsResult, setRoomsResult] = useState<{ createdCount: number; skippedExistingCount: number } | null>(null);
   /** classGroupId → room id string, or '' for no default */
   const [defaultRoomByClassId, setDefaultRoomByClassId] = useState<Record<number, string>>({});
+  const [homeroomSourceByClassId, setHomeroomSourceByClassId] = useState<Record<number, 'auto' | 'manual' | ''>>({});
+  const [classTeacherByClassId, setClassTeacherByClassId] = useState<Record<number, string>>({});
+  const [classTeacherSourceByClassId, setClassTeacherSourceByClassId] = useState<Record<number, 'auto' | 'manual' | ''>>({});
   /** After server + local draft is applied, debounced localStorage sync is safe to run. */
   const [academicLocalAutosaveReady, setAcademicLocalAutosaveReady] = useState(false);
 
@@ -582,7 +584,21 @@ export function SchoolOnboardingWizardPage() {
       teacherId: number | null;
       roomId: number | null;
     }[];
-    assignmentSlotMeta?: { classGroupId: number; subjectId: number; source: string; locked: boolean }[];
+    assignmentSlotMeta?: {
+      classGroupId: number;
+      subjectId: number;
+      source: string;
+      locked: boolean;
+      roomSource?: string | null;
+      roomLocked?: boolean | null;
+    }[];
+    basicInfo?: {
+      schoolStartTime: string;
+      schoolEndTime: string;
+      lectureDurationMinutes: number;
+      workingDays: string[];
+      openWindows?: { startTime: string; endTime: string }[];
+    };
   };
 
   const academicStructureQuery = useQuery({
@@ -651,61 +667,127 @@ export function SchoolOnboardingWizardPage() {
     return false;
   }, [classDefaultRoomUsage]);
 
-  const autoAssignDefaultRooms = () => {
-    const classes = (academicStructureQuery.data?.classGroups ?? []).slice();
-    const rooms = pageContent(roomsForClassDefaults.data).slice();
-    if (classes.length === 0 || rooms.length === 0) return;
+  const patchSectionHomeroom = useCallback((classGroupId: number, value: string) => {
+    setDefaultRoomByClassId((prev) => ({ ...prev, [classGroupId]: value }));
+    setHomeroomSourceByClassId((prev) => ({
+      ...prev,
+      [classGroupId]: value.trim() !== '' ? 'manual' : '',
+    }));
+  }, []);
 
-    const isClassroom = (r: RoomOption) => String(r.type ?? '').toUpperCase() === 'CLASSROOM';
-    const numericPrefix = (s: string) => {
-      const m = String(s ?? '').trim().match(/^(\d{1,4})/);
-      return m ? Number(m[1]) : null;
-    };
+  const patchSectionClassTeacher = useCallback((classGroupId: number, staffIdValue: string) => {
+    const v = String(staffIdValue ?? '').trim();
+    setClassTeacherByClassId((prev) => ({ ...prev, [classGroupId]: v }));
+    setClassTeacherSourceByClassId((prev) => ({
+      ...prev,
+      [classGroupId]: v !== '' ? 'manual' : '',
+    }));
+  }, []);
 
-    const sortedRooms = rooms
-      .filter((r) => isClassroom(r))
-      .sort((a, b) => {
-        const ba = String(a.buildingName ?? a.building ?? '').localeCompare(String(b.buildingName ?? b.building ?? ''));
-        if (ba !== 0) return ba;
-        return a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true });
+  const autoAssignClassTeachers = useCallback(() => {
+    const cgRows = academicStructureQuery.data?.classGroups ?? [];
+    if (!cgRows.length || !classSubjectConfigs.length) {
+      toast.info('Class teachers', 'Add sections and academic mappings first.');
+      return;
+    }
+    const hm = homeroomMapFromDraft(cgRows, defaultRoomByClassId);
+    const effective = buildEffectiveAllocRows(cgRows, classSubjectConfigs, sectionSubjectOverrides, hm);
+    const slotsPw = estimateSlotsPerWeek(basicInfo.data ?? academicStructureQuery.data?.basicInfo ?? null);
+    const mini = cgRows.map((c) => ({ classGroupId: c.classGroupId, gradeLevel: c.gradeLevel }));
+    const { nextTeachers, nextSource, stats } = runAutoAssignClassTeachers({
+      classGroups: mini,
+      effectiveAllocRows: effective,
+      classTeacherByClassGroupId: classTeacherByClassId,
+      classTeacherSourceByClassGroupId: classTeacherSourceByClassId,
+      schoolSlotsPerWeek: slotsPw,
+    });
+    setClassTeacherByClassId(nextTeachers);
+    setClassTeacherSourceByClassId(nextSource);
+    toast.success(
+      'Class teacher assignment complete',
+      `Assigned: ${stats.assigned} · Unique: ${stats.uniqueAssignments} · Shared: ${stats.sharedAssignments} · Locked skipped: ${stats.skippedLocked} · No eligible teacher: ${stats.skippedNoEligibleTeacher}`,
+    );
+  }, [
+    academicStructureQuery.data?.classGroups,
+    academicStructureQuery.data?.basicInfo,
+    basicInfo.data,
+    classSubjectConfigs,
+    sectionSubjectOverrides,
+    defaultRoomByClassId,
+    classTeacherByClassId,
+    classTeacherSourceByClassId,
+  ]);
+
+  const clearAutoHomeroomAssignments = useCallback(() => {
+    setHomeroomSourceByClassId((srcPrev) => {
+      const autoIds = Object.entries(srcPrev)
+        .filter(([, v]) => v === 'auto')
+        .map(([id]) => Number(id));
+      setDefaultRoomByClassId((drPrev) => {
+        const next = { ...drPrev };
+        for (const id of autoIds) next[id] = '';
+        return next;
       });
-
-    const next = { ...defaultRoomByClassId };
-    const used = new Set(Object.values(next).filter(Boolean));
-
-    // 1) Smart suggestion: match roomNumber prefix with grade (e.g. 6xx for Grade 6).
-    for (const cg of classes) {
-      if (next[cg.classGroupId]) continue;
-      const grade = cg.gradeLevel;
-      if (typeof grade !== 'number' || !Number.isFinite(grade)) continue;
-      const picked = sortedRooms.find((r) => {
-        const n = numericPrefix(r.roomNumber);
-        if (n == null) return false;
-        if (Math.floor(n / 100) !== grade) return false;
-        const idStr = String(r.id);
-        return !used.has(idStr);
-      });
-      if (picked) {
-        next[cg.classGroupId] = String(picked.id);
-        used.add(String(picked.id));
+      const nextSrc = { ...srcPrev };
+      for (const id of autoIds) delete nextSrc[id];
+      return nextSrc;
+    });
+    setAssignmentSlotMeta((prev) => {
+      const out = { ...prev };
+      for (const [key, meta] of Object.entries(out)) {
+        if (meta?.roomSource === 'auto' && !meta.roomLocked) {
+          const { roomSource: _rs, ...rest } = meta;
+          out[key] = rest as AssignmentSlotMeta;
+        }
       }
+      return out;
+    });
+    toast.info('Homerooms', 'Cleared auto-assigned homerooms. Manual homerooms and locked row rooms were kept.');
+  }, []);
+
+  const autoAssignDefaultRooms = useCallback(() => {
+    const cgRows = academicStructureQuery.data?.classGroups ?? [];
+    const roomRows = pageContent(roomsForClassDefaults.data);
+    if (cgRows.length === 0 || roomRows.length === 0) {
+      toast.info('Homerooms', 'Add class sections and rooms first.');
+      return;
     }
 
-    // 2) Fallback: assign unused classrooms first, then round-robin so every section gets a homeroom when any classroom exists.
-    let rr = 0;
-    for (const cg of classes) {
-      if (next[cg.classGroupId]) continue;
-      if (sortedRooms.length === 0) break;
-      const unused = sortedRooms.find((r) => !used.has(String(r.id)));
-      const picked = unused ?? sortedRooms[rr % sortedRooms.length];
-      rr += 1;
-      next[cg.classGroupId] = String(picked.id);
-      used.add(String(picked.id));
+    const roomInputs = roomsToHomeroomInputs(roomRows as unknown as Array<Record<string, unknown>>);
+    const lockedCg = new Set<number>();
+    for (const [k, meta] of Object.entries(assignmentSlotMeta)) {
+      if (!meta?.roomLocked) continue;
+      const cgId = Number(String(k).split(':')[0]);
+      if (Number.isFinite(cgId)) lockedCg.add(cgId);
     }
+    const sections = classGroupsToHomeroomSections(cgRows as ClassDefaultRoomRow[], homeroomSourceByClassId, lockedCg);
 
-    setDefaultRoomByClassId(next);
-    toast.success('Auto-assigned', 'Assigned default rooms. Review conflicts/exceptions and adjust if needed.');
-  };
+    const { assignments, stats } = assignHomeroomsGreedy({
+      sections,
+      rooms: roomInputs,
+      assumeHeadcountWhenUnknown: 28,
+    });
+
+    setDefaultRoomByClassId((prev) => {
+      const next = { ...prev };
+      for (const [cgIdStr, rid] of Object.entries(assignments)) {
+        next[Number(cgIdStr)] = String(rid);
+      }
+      return next;
+    });
+    setHomeroomSourceByClassId((prev) => {
+      const n = { ...prev };
+      for (const cgIdStr of Object.keys(assignments)) {
+        n[Number(cgIdStr)] = 'auto';
+      }
+      return n;
+    });
+
+    toast.success(
+      'Homeroom assignment completed',
+      `Assigned: ${stats.assigned} · Consecutive clusters: ${stats.consecutiveClusters} · Lower-floor optimized: ${stats.lowerFloorOptimized} · Skipped locked sections: ${stats.skippedLockedSections} · Conflicts: ${stats.conflicts}`,
+    );
+  }, [academicStructureQuery.data?.classGroups, roomsForClassDefaults.data, assignmentSlotMeta, homeroomSourceByClassId]);
 
   // Hydrate draft when server data loads
   useEffect(() => {
@@ -919,12 +1001,20 @@ export function SchoolOnboardingWizardPage() {
           subjectId: Number(b),
           source: v.source,
           locked: v.locked,
+          roomSource: v.roomSource ?? null,
+          roomLocked: v.roomLocked ?? null,
         };
+      });
+      const classTeachers = cgs.map((r) => {
+        const raw = classTeacherByClassId[r.classGroupId];
+        const sid = raw && String(raw).trim() !== '' ? Number(raw) : NaN;
+        return { classGroupId: r.classGroupId, staffId: Number.isFinite(sid) ? sid : null };
       });
       await api.put('/api/v1/onboarding/academic-structure', {
         classSubjectConfigs,
         sectionSubjectOverrides,
         defaultRooms,
+        classTeachers,
         assignmentSlotMeta: assignmentSlotMetaList,
       });
     },
@@ -995,17 +1085,32 @@ export function SchoolOnboardingWizardPage() {
         if (!x) continue;
         const sk = `${x.classGroupId}:${x.subjectId}`;
         const src = x.source;
-        if (src === 'auto' || src === 'manual' || src === 'rebalanced') {
-          rec[sk] = { source: src, locked: x.locked };
+        if (src === 'auto' || src === 'manual' || src === 'rebalanced' || src === 'conflict') {
+          const rs = x.roomSource === 'auto' || x.roomSource === 'manual' ? x.roomSource : undefined;
+          rec[sk] = {
+            source: src,
+            locked: x.locked,
+            ...(rs ? { roomSource: rs } : {}),
+            ...(x.roomLocked === true ? { roomLocked: true } : {}),
+          };
         }
       }
       setAssignmentSlotMeta(rec);
     } else {
       setAssignmentSlotMeta({});
     }
+    const serverDefaultRooms: Record<number, string> = {};
+    for (const r of d.classGroups ?? []) {
+      serverDefaultRooms[r.classGroupId] = r.defaultRoomId != null ? String(r.defaultRoomId) : '';
+    }
     if ((d.classSubjectConfigs?.length ?? 0) > 0) {
       setAcademicAllocRows(
-        buildEffectiveAllocRows(d.classGroups ?? [], d.classSubjectConfigs ?? [], d.sectionSubjectOverrides ?? []),
+        buildEffectiveAllocRows(
+          d.classGroups ?? [],
+          d.classSubjectConfigs ?? [],
+          d.sectionSubjectOverrides ?? [],
+          homeroomMapFromDraft(d.classGroups ?? [], serverDefaultRooms),
+        ),
       );
     } else {
       setAcademicAllocRows(
@@ -1026,6 +1131,32 @@ export function SchoolOnboardingWizardPage() {
       }
       return next;
     });
+    setHomeroomSourceByClassId((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const next: Record<number, 'auto' | 'manual' | ''> = {};
+      for (const r of d.classGroups) {
+        next[r.classGroupId] = r.defaultRoomId != null ? 'manual' : '';
+      }
+      return next;
+    });
+    setClassTeacherByClassId((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const next: Record<number, string> = {};
+      for (const r of d.classGroups) {
+        const id = r.classTeacherStaffId;
+        next[r.classGroupId] = id != null && Number.isFinite(Number(id)) ? String(id) : '';
+      }
+      return next;
+    });
+    setClassTeacherSourceByClassId((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const next: Record<number, 'auto' | 'manual' | ''> = {};
+      for (const r of d.classGroups) {
+        const id = r.classTeacherStaffId;
+        next[r.classGroupId] = id != null && Number.isFinite(Number(id)) ? 'manual' : '';
+      }
+      return next;
+    });
     try {
       const raw = localStorage.getItem(ACADEMIC_LOCAL_DRAFT_KEY);
       if (raw) {
@@ -1035,6 +1166,9 @@ export function SchoolOnboardingWizardPage() {
           sectionSubjectOverrides?: SectionSubjectOverrideRow[];
           defaultRoomByClassId?: Record<number, string>;
           assignmentSlotMeta?: Record<string, AssignmentSlotMeta>;
+          homeroomSourceByClassId?: Record<number, 'auto' | 'manual' | ''>;
+          classTeacherByClassId?: Record<number, string>;
+          classTeacherSourceByClassId?: Record<number, 'auto' | 'manual' | ''>;
         };
         if (Array.isArray(local.academicAllocRows) && local.academicAllocRows.length > 0) {
           setAcademicAllocRows(local.academicAllocRows.map((x) => ({ ...x, staffId: x.staffId ?? null })));
@@ -1047,6 +1181,18 @@ export function SchoolOnboardingWizardPage() {
         }
         if (local.defaultRoomByClassId && typeof local.defaultRoomByClassId === 'object') {
           setDefaultRoomByClassId((prev) => ({ ...prev, ...local.defaultRoomByClassId }));
+        }
+        if (local.homeroomSourceByClassId && typeof local.homeroomSourceByClassId === 'object') {
+          setHomeroomSourceByClassId((prev) => ({ ...prev, ...local.homeroomSourceByClassId }));
+        }
+        if (local.classTeacherByClassId && typeof local.classTeacherByClassId === 'object') {
+          setClassTeacherByClassId((prev) => ({ ...prev, ...local.classTeacherByClassId }));
+        }
+        if (local.classTeacherSourceByClassId && typeof local.classTeacherSourceByClassId === 'object') {
+          setClassTeacherSourceByClassId((prev) => ({ ...prev, ...local.classTeacherSourceByClassId }));
+        }
+        if (local.assignmentSlotMeta && typeof local.assignmentSlotMeta === 'object') {
+          setAssignmentSlotMeta((prev) => ({ ...prev, ...local.assignmentSlotMeta }));
         }
       }
     } catch {
@@ -1072,6 +1218,9 @@ export function SchoolOnboardingWizardPage() {
             sectionSubjectOverrides,
             defaultRoomByClassId,
             assignmentSlotMeta,
+            homeroomSourceByClassId,
+            classTeacherByClassId,
+            classTeacherSourceByClassId,
           }),
         );
       } catch {
@@ -1079,7 +1228,7 @@ export function SchoolOnboardingWizardPage() {
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [academicLocalAutosaveReady, activeStepIndex, academicAllocRows, classSubjectConfigs, sectionSubjectOverrides, defaultRoomByClassId, assignmentSlotMeta]);
+  }, [academicLocalAutosaveReady, activeStepIndex, academicAllocRows, classSubjectConfigs, sectionSubjectOverrides, defaultRoomByClassId, assignmentSlotMeta, homeroomSourceByClassId, classTeacherByClassId, classTeacherSourceByClassId]);
 
   const roleCatalog = useMemo(
     () => [
@@ -2495,6 +2644,13 @@ export function SchoolOnboardingWizardPage() {
           assignmentMeta={assignmentSlotMeta}
           setAssignmentMeta={setAssignmentSlotMeta}
           saveSuccess={academicSaveSuccess}
+          clearAutoHomeroomAssignments={clearAutoHomeroomAssignments}
+          patchSectionHomeroom={patchSectionHomeroom}
+          homeroomSourceByClassId={homeroomSourceByClassId}
+          classTeacherByClassId={classTeacherByClassId}
+          classTeacherSourceByClassId={classTeacherSourceByClassId}
+          patchSectionClassTeacher={patchSectionClassTeacher}
+          autoAssignClassTeachers={autoAssignClassTeachers}
         />
       ) : null}
 

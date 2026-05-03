@@ -16,6 +16,9 @@ type ClassGroupLite = {
   gradeLevel?: number | null;
   section?: string | null;
   name?: string | null;
+  displayName?: string | null;
+  classTeacherStaffId?: number | null;
+  classTeacherDisplayName?: string | null;
 };
 
 type ClassGroupDeleteSummary = {
@@ -58,6 +61,25 @@ function summarizeClassDelete(s: ClassGroupDeleteSummary) {
   if (s.lecturesDeleted) parts.push(`${s.lecturesDeleted} lecture(s)`);
   if (s.announcementTargetsDeleted) parts.push(`${s.announcementTargetsDeleted} announcement target(s)`);
   return parts.length ? parts.join(' · ') : 'No dependent rows found.';
+}
+
+function SectionClassTeacherLine({
+  teacherName,
+}: {
+  teacherName: string | null | undefined;
+}) {
+  const n = teacherName != null ? String(teacherName).trim() : '';
+  if (!n)
+    return (
+      <div className="muted" style={{ fontSize: 11, marginTop: 4, fontWeight: 650 }}>
+        Class teacher · <span style={{ fontStyle: 'italic', opacity: 0.92 }}>not set</span>
+      </div>
+    );
+  return (
+    <div className="muted" style={{ fontSize: 11, marginTop: 4, fontWeight: 650 }}>
+      Class teacher · <span style={{ color: '#0f172a', fontWeight: 850 }}>{n}</span>
+    </div>
+  );
 }
 
 /** “Generated classes & sections” accordion (browse-only — same UX as onboarding step 2) */
@@ -178,7 +200,7 @@ export function SavedClassesSectionsCatalogPanel() {
       const d = deriveGradeSection(r);
       const g = d.grade;
       if (gradePick != null && g !== gradePick) continue;
-      const hay = `${g ?? ''} ${d.section ?? ''} ${r.code ?? ''} ${r.name ?? ''}`.toLowerCase();
+      const hay = `${g ?? ''} ${d.section ?? ''} ${r.code ?? ''} ${r.name ?? ''} ${r.displayName ?? ''} ${r.classTeacherDisplayName ?? ''}`.toLowerCase();
       if (q && !hay.includes(q)) continue;
       if (typeof g === 'number' && Number.isFinite(g)) {
         byGrade.set(g, [...(byGrade.get(g) ?? []), r]);
@@ -297,7 +319,7 @@ export function SavedClassesSectionsCatalogPanel() {
                       <div className="stack" style={{ gap: 8 }}>
                         {rows.map((r) => {
                           const code = r.code ?? r.name ?? `#${r.id}`;
-                          const displayName = r.name ?? r.code ?? code;
+                          const displayName = r.displayName ?? r.name ?? r.code ?? code;
                           return (
                             <div
                               key={r.id}
@@ -319,6 +341,7 @@ export function SavedClassesSectionsCatalogPanel() {
                                   <code>{code}</code>
                                   {deriveGradeSection(r).section ? ` · Section ${deriveGradeSection(r).section}` : ''}
                                 </div>
+                                <SectionClassTeacherLine teacherName={r.classTeacherDisplayName} />
                               </div>
                               <RowActionsMenu
                                 ariaLabel="Class actions"
@@ -331,7 +354,7 @@ export function SavedClassesSectionsCatalogPanel() {
                                         open: true,
                                         id: r.id,
                                         code: String(r.code ?? ''),
-                                        displayName: String(r.name ?? r.code ?? ''),
+                                        displayName: String(r.displayName ?? r.name ?? r.code ?? ''),
                                         gradeLevel: Number.isFinite(Number(r.gradeLevel)) ? Number(r.gradeLevel) : '',
                                         section: String(r.section ?? ''),
                                         capacity: '',
@@ -367,7 +390,7 @@ export function SavedClassesSectionsCatalogPanel() {
                 <div className="stack" style={{ gap: 8 }}>
                   {other.map((r) => {
                     const code = r.code ?? r.name ?? `#${r.id}`;
-                    const displayName = r.name ?? r.code ?? code;
+                    const displayName = r.displayName ?? r.name ?? r.code ?? code;
                     return (
                       <div
                         key={r.id}
@@ -388,6 +411,7 @@ export function SavedClassesSectionsCatalogPanel() {
                           <div className="muted" style={{ fontSize: 12 }}>
                             <code>{code}</code>
                           </div>
+                          <SectionClassTeacherLine teacherName={r.classTeacherDisplayName} />
                         </div>
                         <RowActionsMenu
                           ariaLabel="Class actions"
@@ -400,7 +424,7 @@ export function SavedClassesSectionsCatalogPanel() {
                                   open: true,
                                   id: r.id,
                                   code: String(r.code ?? ''),
-                                  displayName: String(r.name ?? r.code ?? ''),
+                                  displayName: String(r.displayName ?? r.name ?? r.code ?? ''),
                                   gradeLevel: '',
                                   section: String(r.section ?? ''),
                                   capacity: '',

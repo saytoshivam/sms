@@ -93,6 +93,13 @@ export function AcademicModulePage() {
         formatError={formatApiError}
         assignmentMeta={m.assignmentMeta}
         setAssignmentMeta={m.setAssignmentMeta}
+        clearAutoHomeroomAssignments={m.clearAutoHomeroomAssignments}
+        patchSectionHomeroom={m.patchSectionHomeroom}
+        homeroomSourceByClassId={m.homeroomSourceByClassId}
+        classTeacherByClassId={m.classTeacherByClassId}
+        classTeacherSourceByClassId={m.classTeacherSourceByClassId}
+        patchSectionClassTeacher={m.patchSectionClassTeacher}
+        autoAssignClassTeachers={m.autoAssignClassTeachers}
       />
     </ModulePage>
   );

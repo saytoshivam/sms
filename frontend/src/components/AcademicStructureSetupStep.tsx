@@ -7,10 +7,12 @@ import {
   buildEffectiveAllocRows,
   computeSectionHealth,
   estimateSlotsPerWeek,
+  homeroomMapFromDraft,
   type AcademicAllocRow,
   type ClassSubjectConfigRow,
   type SectionSubjectOverrideRow,
 } from '../lib/academicStructureUtils';
+import { sectionMissingClassTeacher } from '../lib/classTeacherAutoAssign';
 import type { AssignmentSlotMeta } from '../lib/academicStructureSmartAssign';
 import { SmartTeacherAssignmentBlock, TeacherLoadDashboard } from './SmartTeacherAssignmentBlock';
 import { WeeklyCapacitySummary } from './WeeklyCapacitySummary';
@@ -126,6 +128,13 @@ type Props = {
   formatError: (e: unknown) => string;
   assignmentMeta: Record<string, AssignmentSlotMeta>;
   setAssignmentMeta: React.Dispatch<React.SetStateAction<Record<string, AssignmentSlotMeta>>>;
+  clearAutoHomeroomAssignments: () => void;
+  patchSectionHomeroom: (classGroupId: number, value: string) => void;
+  homeroomSourceByClassId: Record<number, 'auto' | 'manual' | ''>;
+  classTeacherByClassId: Record<number, string>;
+  classTeacherSourceByClassId: Record<number, 'auto' | 'manual' | ''>;
+  patchSectionClassTeacher: (classGroupId: number, staffIdValue: string) => void;
+  autoAssignClassTeachers: () => void;
 };
 
 export function AcademicStructureSetupStep({
@@ -140,7 +149,7 @@ export function AcademicStructureSetupStep({
   sectionSubjectOverrides,
   setSectionSubjectOverrides,
   defaultRoomByClassId,
-  setDefaultRoomByClassId,
+  setDefaultRoomByClassId: _setDefaultRoomByClassId,
   classDefaultRoomSelectOptions,
   classDefaultRoomUsage,
   classDefaultRoomHasConflicts,
@@ -157,6 +166,13 @@ export function AcademicStructureSetupStep({
   formatError,
   assignmentMeta,
   setAssignmentMeta,
+  clearAutoHomeroomAssignments,
+  patchSectionHomeroom,
+  homeroomSourceByClassId,
+  classTeacherByClassId,
+  classTeacherSourceByClassId,
+  patchSectionClassTeacher,
+  autoAssignClassTeachers,
   stepTitle: _stepTitle = 'Step 6 — Academic structure',
   initialTab,
   allowedTabs,
@@ -205,6 +221,29 @@ export function AcademicStructureSetupStep({
         return String(a.code ?? '').localeCompare(String(b.code ?? ''));
       });
   }, [classGroups]);
+
+  const classTeacherStaffOptions = useMemo(() => {
+    const opts = staff
+      .filter((s) => (s.roleNames ?? []).includes('TEACHER'))
+      .slice()
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }))
+      .map((s) => ({ value: String(s.id), label: s.fullName || s.email || `Staff ${s.id}` }));
+    return [{ value: '', label: 'No class teacher' }, ...opts];
+  }, [staff]);
+
+  const effectiveAllocForCt = useMemo(() => {
+    const hm = homeroomMapFromDraft(classGroups, defaultRoomByClassId);
+    if ((classSubjectConfigs?.length ?? 0) > 0) {
+      return buildEffectiveAllocRows(classGroups, classSubjectConfigs, sectionSubjectOverrides, hm);
+    }
+    return allocRows;
+  }, [classGroups, classSubjectConfigs, sectionSubjectOverrides, defaultRoomByClassId, allocRows]);
+
+  const missingClassTeacherSections = useMemo(() => {
+    return sortedClassGroups.filter((cg) =>
+      sectionMissingClassTeacher(cg.classGroupId, effectiveAllocForCt, classTeacherByClassId),
+    );
+  }, [sortedClassGroups, effectiveAllocForCt, classTeacherByClassId]);
 
   const catalogCount = subjects.length;
   const validSubjectIdSet = useMemo(() => new Set<number>(subjects.map((s) => Number(s.id))), [subjects]);
@@ -753,7 +792,7 @@ export function AcademicStructureSetupStep({
         </div>
       ) : null}
 
-      {tab === 'smart' || tab === 'load' || tab === 'overview' ? (
+      {tab === 'load' || tab === 'overview' ? (
         <div
           className="row"
           style={{
@@ -793,7 +832,7 @@ export function AcademicStructureSetupStep({
                 ]}
               />
             </div>
-            {tab === 'smart' || tab === 'load' ? (
+            {tab === 'load' ? (
               <div style={{ minWidth: 220 }}>
                 <SelectKeeper
                   value={smartTeacherFilter}
@@ -807,88 +846,6 @@ export function AcademicStructureSetupStep({
                 />
               </div>
             ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {tab === 'smart' && slotsPerWeek != null ? (
-        <div className="sms-alert sms-alert--info">
-          <div>
-            <div className="sms-alert__title">Weekly capacity (hint)</div>
-            <div className="sms-alert__msg">
-              Your school day allows about <strong>{slotsPerWeek}</strong> teachable slots per week. Keep each section’s total
-              subject periods at or under this when possible.
-            </div>
-            {overCapacitySections.length ? (
-              <div className="sms-alert__msg" style={{ marginTop: 8 }}>
-                <details>
-                  <summary style={{ cursor: 'pointer', fontWeight: 900 }}>
-                    {overCapacitySections.length} section{overCapacitySections.length === 1 ? '' : 's'} over capacity
-                  </summary>
-                  <div className="stack" style={{ gap: 6, marginTop: 8 }}>
-                    {overCapacitySections.slice(0, 12).map((s) => (
-                      <div key={s.classGroupId} className="row" style={{ gap: 10, justifyContent: 'space-between' }}>
-                        <span style={{ fontWeight: 800 }}>{s.label}</span>
-                        <span className="muted" style={{ fontWeight: 900 }}>
-                          {s.totalPeriods} / {s.capacity} (+
-                          {s.overBy})
-                        </span>
-                      </div>
-                    ))}
-                    {overCapacitySections.length > 12 ? (
-                      <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
-                        +{overCapacitySections.length - 12} more…
-                      </div>
-                    ) : null}
-                  </div>
-                </details>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {tab === 'smart' && classGroups.length > 0 && !isLoading ? (
-        <div
-          className="academic-progress-strip row"
-          style={{
-            gap: 16,
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            padding: '12px 14px',
-            borderRadius: 12,
-            border: '1px solid rgba(15,23,42,0.08)',
-            background: 'linear-gradient(180deg, rgba(255,255,255,0.95), rgba(249,250,251,0.8))',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)' }}>
-              School progress
-            </div>
-            <div style={{ fontSize: 18, fontWeight: 950, marginTop: 2 }}>{schoolProgress.pct}% sections ready</div>
-            <div className="muted" style={{ fontSize: 12 }}>
-              {schoolProgress.withIssues} section{schoolProgress.withIssues === 1 ? '' : 's'} need attention
-            </div>
-          </div>
-          <div style={{ flex: '1 1 200px', minWidth: 120 }}>
-            <div
-              style={{
-                height: 10,
-                borderRadius: 999,
-                background: 'rgba(15,23,42,0.08)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  width: `${schoolProgress.pct}%`,
-                  height: '100%',
-                  borderRadius: 999,
-                  background: schoolProgress.pct >= 100 ? '#16a34a' : 'var(--color-primary)',
-                  transition: 'width 0.3s ease',
-                }}
-              />
-            </div>
           </div>
         </div>
       ) : null}
@@ -1592,9 +1549,12 @@ export function AcademicStructureSetupStep({
         <div className="stack" style={{ gap: 12 }}>
           <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
             <div style={{ fontWeight: 900, fontSize: 15 }}>Smart teacher assignment</div>
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Auto-assign teachers by subject skill and balanced workload. Same teacher is preferred across all sections in a class.
-              Lock keeps a row out of rebalance.
+            <p
+              className="muted"
+              style={{ margin: 0, fontSize: 11, opacity: 0.82, lineHeight: 1.45 }}
+              title="Auto-assign teachers by subject skill and balanced workload. The same teacher is preferred across sections in a class. Lock keeps a row out of rebalance."
+            >
+              Balance workload by skill; prefer one teacher per class across sections. Locked rows skip rebalance.
             </p>
             {!mappingComplete ? (
               <div className="sms-alert sms-alert--warning">
@@ -1624,7 +1584,32 @@ export function AcademicStructureSetupStep({
               filters={{ grade: smartGradeFilter, subject: smartSubjectFilter, teacher: smartTeacherFilter }}
               showBulkActions
               autoAssignHomerooms={autoAssignDefaultRooms}
+              clearAutoHomeroomAssignments={clearAutoHomeroomAssignments}
+              autoAssignClassTeachers={autoAssignClassTeachers}
+              defaultRoomByClassId={defaultRoomByClassId}
+              homeroomSourceByClassId={homeroomSourceByClassId}
               slotsPerWeek={slotsPerWeek}
+              overviewContext={{
+                slotsPerWeek,
+                overCapacitySections,
+                schoolProgressPct: schoolProgress.pct,
+                schoolProgressWithIssues: schoolProgress.withIssues,
+              }}
+              filterUi={{
+                gradeValue: smartGradeFilter,
+                subjectValue: smartSubjectFilter,
+                teacherValue: smartTeacherFilter,
+                onGradeChange: setSmartGradeFilter,
+                onSubjectChange: setSmartSubjectFilter,
+                onTeacherChange: setSmartTeacherFilter,
+                gradeOptions: Array.from(new Set(classGroups.map((c) => c.gradeLevel).filter((g): g is number => g != null)))
+                  .sort((a, b) => a - b)
+                  .map((g) => ({ value: String(g), label: `Class ${g}` })),
+                subjectOptions: subjects.map((s) => ({ value: String(s.id), label: s.name })),
+                teacherOptions: staff
+                  .filter((s) => (s.roleNames ?? []).includes('TEACHER'))
+                  .map((s) => ({ value: String(s.id), label: s.fullName || s.email })),
+              }}
             />
           </div>
         </div>
@@ -1635,8 +1620,20 @@ export function AcademicStructureSetupStep({
           <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
             <div style={{ fontWeight: 900, fontSize: 15 }}>Sections overview</div>
             <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Homerooms, weekly periods, and readiness are managed here. Use Configure section to override one section.
+              Homerooms, weekly periods, readiness, and class teachers are managed here. Use Configure section to override one section.
             </p>
+            {missingClassTeacherSections.length > 0 ? (
+              <div className="sms-alert sms-alert--warning">
+                <div>
+                  <div className="sms-alert__title">Class teacher required before timetable generation</div>
+                  <div className="sms-alert__msg">
+                    {missingClassTeacherSections.length} section{missingClassTeacherSections.length === 1 ? '' : 's'} have mapped
+                    teaching but no class teacher. Use <strong>Smart assignment</strong> → <strong>Auto assign class teachers</strong>{' '}
+                    or pick manually below.
+                  </div>
+                </div>
+              </div>
+            ) : null}
             {quickWin ? (
               <div className="sms-alert sms-alert--info">
                 <div>
@@ -1657,6 +1654,7 @@ export function AcademicStructureSetupStep({
                 <thead>
                   <tr>
                     <th>Section</th>
+                    <th>Class teacher</th>
                     <th>Homeroom</th>
                     <th>Subjects on</th>
                     <th>Periods / week</th>
@@ -1708,11 +1706,45 @@ export function AcademicStructureSetupStep({
                             {row.section ? ` · ${row.section}` : ''}
                           </div>
                         </td>
+                        <td style={{ minWidth: 220 }}>
+                          <SelectKeeper
+                            id={`ov-ct-${row.classGroupId}`}
+                            value={classTeacherByClassId[row.classGroupId] ?? ''}
+                            onChange={(nv) => patchSectionClassTeacher(row.classGroupId, nv)}
+                            options={classTeacherStaffOptions}
+                          />
+                          <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                            {((classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto' ||
+                              (classTeacherSourceByClassId[row.classGroupId] ?? '') === 'manual') &&
+                            (classTeacherByClassId[row.classGroupId] ?? '').trim() !== '' ? (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '2px 7px',
+                                  borderRadius: 6,
+                                  fontSize: 10,
+                                  fontWeight: 900,
+                                  letterSpacing: 0.4,
+                                  background:
+                                    (classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto'
+                                      ? 'rgba(234, 88, 12, 0.18)'
+                                      : 'rgba(100, 116, 139, 0.16)',
+                                  color: (classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto' ? '#9a3412' : '#475569',
+                                }}
+                              >
+                                {(classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto' ? 'AUTO' : 'MANUAL'}
+                              </span>
+                            ) : null}
+                            {sectionMissingClassTeacher(row.classGroupId, effectiveAllocForCt, classTeacherByClassId) ? (
+                              <span style={{ fontSize: 11, fontWeight: 800, color: '#b45309' }}>Missing</span>
+                            ) : null}
+                          </div>
+                        </td>
                         <td style={{ minWidth: 260 }}>
                           <SelectKeeper
                             id={`ov-room-${row.classGroupId}`}
                             value={v}
-                            onChange={(nv) => setDefaultRoomByClassId((prev) => ({ ...prev, [row.classGroupId]: nv }))}
+                            onChange={(nv) => patchSectionHomeroom(row.classGroupId, nv)}
                             options={classDefaultRoomSelectOptions}
                           />
                           {conflict ? (
@@ -2033,7 +2065,7 @@ export function AcademicStructureSetupStep({
                     <SelectKeeper
                       id={`edit-homeroom-${editingClassId}`}
                       value={homeroomVal}
-                      onChange={(nv) => setDefaultRoomByClassId((prev) => ({ ...prev, [editingClassId]: nv }))}
+                      onChange={(nv) => patchSectionHomeroom(editingClassId, nv)}
                       options={classDefaultRoomSelectOptions}
                     />
                   </div>

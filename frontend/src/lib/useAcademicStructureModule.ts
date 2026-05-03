@@ -4,11 +4,15 @@ import { api } from '../lib/api';
 import { toast } from '../lib/toast';
 import {
   buildEffectiveAllocRows,
+  estimateSlotsPerWeek,
+  homeroomMapFromDraft,
   type AcademicAllocRow,
   type ClassSubjectConfigRow,
   type SectionSubjectOverrideRow,
 } from './academicStructureUtils';
 import type { AssignmentSlotMeta } from './academicStructureSmartAssign';
+import { assignHomeroomsGreedy, classGroupsToHomeroomSections, roomsToHomeroomInputs } from './homeroomAssignment';
+import { runAutoAssignClassTeachers, type ClassTeacherSource } from './classTeacherAutoAssign';
 import { useApiTags } from './apiTags';
 import { useImpactStore } from './impactStore';
 
@@ -40,6 +44,8 @@ type RoomOption = {
   type?: string | null;
   labType?: string | null;
   isSchedulable?: boolean;
+  capacity?: number | null;
+  rawFloorNumber?: number | null;
 };
 
 type ClassGroupRow = {
@@ -49,6 +55,7 @@ type ClassGroupRow = {
   gradeLevel: number | null;
   section: string | null;
   defaultRoomId: number | null;
+  classTeacherStaffId?: number | null;
 };
 
 type SubjectRow = { id: number; code: string; name: string; weeklyFrequency: number | null };
@@ -84,7 +91,14 @@ type AcademicStructurePayload = {
   allocations: { classGroupId: number; subjectId: number; weeklyFrequency: number; staffId: number | null; roomId: number | null }[];
   classSubjectConfigs?: ClassSubjectConfigRow[];
   sectionSubjectOverrides?: SectionSubjectOverrideRow[];
-  assignmentSlotMeta?: { classGroupId: number; subjectId: number; source: string; locked: boolean }[];
+  assignmentSlotMeta?: {
+    classGroupId: number;
+    subjectId: number;
+    source: string;
+    locked: boolean;
+    roomSource?: string | null;
+    roomLocked?: boolean | null;
+  }[];
 };
 
 type SpringPage<T> = { content: T[]; totalElements?: number };
@@ -93,6 +107,16 @@ function pageContent<T>(data: SpringPage<T> | T[] | null | undefined): T[] {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   return Array.isArray(data.content) ? data.content : [];
+}
+
+function assignmentSlotMetaFromApi(
+  x: NonNullable<AcademicStructurePayload['assignmentSlotMeta']>[number],
+): AssignmentSlotMeta | null {
+  const src = x.source;
+  if (src !== 'auto' && src !== 'manual' && src !== 'rebalanced') return null;
+  const roomSource = x.roomSource === 'auto' || x.roomSource === 'manual' ? x.roomSource : undefined;
+  const roomLocked = x.roomLocked === true ? true : undefined;
+  return { source: src as AssignmentSlotMeta['source'], locked: !!x.locked, roomSource, roomLocked };
 }
 
 export type UseAcademicStructureModuleResult = {
@@ -118,12 +142,24 @@ export type UseAcademicStructureModuleResult = {
   setDefaultRoomByClassId: React.Dispatch<React.SetStateAction<Record<number, string>>>;
   assignmentMeta: Record<string, AssignmentSlotMeta>;
   setAssignmentMeta: React.Dispatch<React.SetStateAction<Record<string, AssignmentSlotMeta>>>;
+  /** Section-level homeroom provenance ('auto' rows can be cleared by bulk automation). */
+  homeroomSourceByClassId: Record<number, 'auto' | 'manual' | ''>;
+  /** Class teacher (daily homeroom) staff id draft per section. */
+  classTeacherByClassId: Record<number, string>;
+  /** Manual source prevents bulk auto-assign class teachers from overwriting picks. */
+  classTeacherSourceByClassId: Record<number, ClassTeacherSource>;
+  patchSectionClassTeacher: (classGroupId: number, staffIdValue: string) => void;
+  autoAssignClassTeachers: () => void;
 
   // derived helpers
   classDefaultRoomSelectOptions: { value: string; label: string }[];
   classDefaultRoomUsage: Map<string, number>;
   classDefaultRoomHasConflicts: boolean;
   autoAssignDefaultRooms: () => void;
+  /** Clears homerooms that were applied by automatic homeroom assignment (keeps manual homerooms and locked row rooms). */
+  clearAutoHomeroomAssignments: () => void;
+  /** Mark a section homeroom as manually chosen (skips future bulk auto overwrite for that section). */
+  patchSectionHomeroom: (classGroupId: number, value: string) => void;
   defaultRoomsLoading: boolean;
 
   // dirty tracking + save
@@ -145,6 +181,9 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
   const [classSubjectConfigs, setClassSubjectConfigs] = useState<ClassSubjectConfigRow[]>([]);
   const [sectionSubjectOverrides, setSectionSubjectOverrides] = useState<SectionSubjectOverrideRow[]>([]);
   const [defaultRoomByClassId, setDefaultRoomByClassId] = useState<Record<number, string>>({});
+  const [homeroomSourceByClassId, setHomeroomSourceByClassId] = useState<Record<number, 'auto' | 'manual' | ''>>({});
+  const [classTeacherByClassId, setClassTeacherByClassId] = useState<Record<number, string>>({});
+  const [classTeacherSourceByClassId, setClassTeacherSourceByClassId] = useState<Record<number, ClassTeacherSource>>({});
   const [assignmentMeta, setAssignmentMeta] = useState<Record<string, AssignmentSlotMeta>>({});
   const [hydrated, setHydrated] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -154,12 +193,14 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
     classSubjectConfigs,
     sectionSubjectOverrides,
     defaultRoomByClassId,
+    classTeacherByClassId,
     assignmentMeta,
   });
   academicDraftRef.current = {
     classSubjectConfigs,
     sectionSubjectOverrides,
     defaultRoomByClassId,
+    classTeacherByClassId,
     assignmentMeta,
   };
 
@@ -205,18 +246,25 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
       for (const x of d.assignmentSlotMeta) {
         if (!x) continue;
         const sk = `${x.classGroupId}:${x.subjectId}`;
-        const src = x.source;
-        if (src === 'auto' || src === 'manual' || src === 'rebalanced') {
-          rec[sk] = { source: src, locked: !!x.locked };
-        }
+        const meta = assignmentSlotMetaFromApi(x);
+        if (meta) rec[sk] = meta;
       }
       setAssignmentMeta(rec);
     } else {
       setAssignmentMeta({});
     }
 
+    const nextDefaults: Record<number, string> = {};
+    for (const r of d.classGroups ?? []) {
+      nextDefaults[r.classGroupId] = r.defaultRoomId != null ? String(r.defaultRoomId) : '';
+    }
+
+    const homeroomMap = homeroomMapFromDraft(d.classGroups ?? [], nextDefaults);
+
     if ((d.classSubjectConfigs?.length ?? 0) > 0) {
-      setAllocRows(buildEffectiveAllocRows(d.classGroups ?? [], d.classSubjectConfigs ?? [], d.sectionSubjectOverrides ?? []));
+      setAllocRows(
+        buildEffectiveAllocRows(d.classGroups ?? [], d.classSubjectConfigs ?? [], d.sectionSubjectOverrides ?? [], homeroomMap),
+      );
     } else {
       setAllocRows(
         (d.allocations ?? []).map((a) => ({
@@ -229,10 +277,22 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
       );
     }
 
-    const nextDefaults: Record<number, string> = {};
+    const nextHomeroomSrc: Record<number, 'manual' | 'auto' | ''> = {};
     for (const r of d.classGroups ?? []) {
-      nextDefaults[r.classGroupId] = r.defaultRoomId != null ? String(r.defaultRoomId) : '';
+      nextHomeroomSrc[r.classGroupId] = r.defaultRoomId != null ? 'manual' : '';
     }
+    setHomeroomSourceByClassId(nextHomeroomSrc);
+
+    const nextCt: Record<number, string> = {};
+    const nextCtSrc: Record<number, ClassTeacherSource> = {};
+    for (const r of d.classGroups ?? []) {
+      const rawId = r.classTeacherStaffId;
+      nextCt[r.classGroupId] = rawId != null && Number.isFinite(Number(rawId)) ? String(rawId) : '';
+      nextCtSrc[r.classGroupId] = rawId != null && Number.isFinite(Number(rawId)) ? 'manual' : '';
+    }
+    setClassTeacherByClassId(nextCt);
+    setClassTeacherSourceByClassId(nextCtSrc);
+
     setDefaultRoomByClassId(nextDefaults);
     setHydrated(true);
   }, [academicStructureQuery.data, academicStructureQuery.isFetching, hydrated]);
@@ -272,57 +332,125 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
     return false;
   }, [classDefaultRoomUsage]);
 
+  const patchSectionHomeroom = useCallback((classGroupId: number, value: string) => {
+    setDefaultRoomByClassId((prev) => ({ ...prev, [classGroupId]: value }));
+    setHomeroomSourceByClassId((prev) => ({
+      ...prev,
+      [classGroupId]: value.trim() !== '' ? 'manual' : '',
+    }));
+  }, []);
+
+  const patchSectionClassTeacher = useCallback((classGroupId: number, staffIdValue: string) => {
+    const v = String(staffIdValue ?? '').trim();
+    setClassTeacherByClassId((prev) => ({ ...prev, [classGroupId]: v }));
+    setClassTeacherSourceByClassId((prev) => ({
+      ...prev,
+      [classGroupId]: v !== '' ? 'manual' : '',
+    }));
+  }, []);
+
+  const autoAssignClassTeachers = useCallback(() => {
+    const cgRows = academicStructureQuery.data?.classGroups ?? [];
+    if (!cgRows.length || !classSubjectConfigs.length) {
+      toast.info('Class teachers', 'Add sections and academic mappings first.');
+      return;
+    }
+    const hm = homeroomMapFromDraft(cgRows, defaultRoomByClassId);
+    const effective = buildEffectiveAllocRows(cgRows, classSubjectConfigs, sectionSubjectOverrides, hm);
+    const slotsPw = estimateSlotsPerWeek(basicInfoQuery.data ?? academicStructureQuery.data?.basicInfo ?? null);
+    const mini = cgRows.map((c) => ({ classGroupId: c.classGroupId, gradeLevel: c.gradeLevel }));
+    const { nextTeachers, nextSource, stats } = runAutoAssignClassTeachers({
+      classGroups: mini,
+      effectiveAllocRows: effective,
+      classTeacherByClassGroupId: classTeacherByClassId,
+      classTeacherSourceByClassGroupId: classTeacherSourceByClassId,
+      schoolSlotsPerWeek: slotsPw,
+    });
+    setClassTeacherByClassId(nextTeachers);
+    setClassTeacherSourceByClassId(nextSource);
+    toast.success(
+      'Class teacher assignment complete',
+      `Assigned: ${stats.assigned} · Unique: ${stats.uniqueAssignments} · Shared: ${stats.sharedAssignments} · Locked skipped: ${stats.skippedLocked} · No eligible teacher: ${stats.skippedNoEligibleTeacher}`,
+    );
+  }, [
+    academicStructureQuery.data?.classGroups,
+    academicStructureQuery.data?.basicInfo,
+    classSubjectConfigs,
+    sectionSubjectOverrides,
+    defaultRoomByClassId,
+    classTeacherByClassId,
+    classTeacherSourceByClassId,
+    basicInfoQuery.data,
+  ]);
+
   const autoAssignDefaultRooms = useCallback(() => {
-    const classes = (academicStructureQuery.data?.classGroups ?? []).slice();
-    const all = rooms.slice();
-    if (classes.length === 0 || all.length === 0) return;
+    const cgRows = academicStructureQuery.data?.classGroups ?? [];
+    if (cgRows.length === 0 || rooms.length === 0) {
+      toast.info('Homerooms', 'Add class sections and rooms first.');
+      return;
+    }
 
-    const isClassroom = (r: RoomOption) => String(r.type ?? '').toUpperCase() === 'CLASSROOM';
-    const numericPrefix = (s: string) => {
-      const m = String(s ?? '').trim().match(/^(\d{1,4})/);
-      return m ? Number(m[1]) : null;
-    };
-    const sortedRooms = all
-      .filter((r) => isClassroom(r))
-      .sort((a, b) => {
-        const ba = String(a.buildingName ?? a.building ?? '').localeCompare(String(b.buildingName ?? b.building ?? ''));
-        if (ba !== 0) return ba;
-        return a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true });
-      });
+    const roomInputs = roomsToHomeroomInputs(rooms as unknown as Array<Record<string, unknown>>);
+    const lockedCg = new Set<number>();
+    for (const [k, meta] of Object.entries(assignmentMeta)) {
+      if (!meta?.roomLocked) continue;
+      const cgId = Number(String(k).split(':')[0]);
+      if (Number.isFinite(cgId)) lockedCg.add(cgId);
+    }
+    const sections = classGroupsToHomeroomSections(cgRows as ClassGroupRow[], homeroomSourceByClassId, lockedCg);
+    const { assignments, stats } = assignHomeroomsGreedy({
+      sections,
+      rooms: roomInputs,
+      assumeHeadcountWhenUnknown: 28,
+    });
 
-    const next = { ...defaultRoomByClassId };
-    const used = new Set(Object.values(next).filter(Boolean));
-
-    for (const cg of classes) {
-      if (next[cg.classGroupId]) continue;
-      const grade = cg.gradeLevel;
-      if (typeof grade !== 'number' || !Number.isFinite(grade)) continue;
-      const picked = sortedRooms.find((r) => {
-        const n = numericPrefix(r.roomNumber);
-        if (n == null) return false;
-        if (Math.floor(n / 100) !== grade) return false;
-        return !used.has(String(r.id));
-      });
-      if (picked) {
-        next[cg.classGroupId] = String(picked.id);
-        used.add(String(picked.id));
+    setDefaultRoomByClassId((prev) => {
+      const next = { ...prev };
+      for (const [cgIdStr, rid] of Object.entries(assignments)) {
+        next[Number(cgIdStr)] = String(rid);
       }
-    }
+      return next;
+    });
+    setHomeroomSourceByClassId((prev) => {
+      const n = { ...prev };
+      for (const cgIdStr of Object.keys(assignments)) {
+        n[Number(cgIdStr)] = 'auto';
+      }
+      return n;
+    });
 
-    let rr = 0;
-    for (const cg of classes) {
-      if (next[cg.classGroupId]) continue;
-      if (sortedRooms.length === 0) break;
-      const unused = sortedRooms.find((r) => !used.has(String(r.id)));
-      const picked = unused ?? sortedRooms[rr % sortedRooms.length];
-      rr += 1;
-      next[cg.classGroupId] = String(picked.id);
-      used.add(String(picked.id));
-    }
+    toast.success(
+      'Homeroom assignment completed',
+      `Assigned: ${stats.assigned} · Consecutive clusters: ${stats.consecutiveClusters} · Lower-floor optimized: ${stats.lowerFloorOptimized} · Skipped locked sections: ${stats.skippedLockedSections} · Conflicts: ${stats.conflicts}`,
+    );
+  }, [academicStructureQuery.data?.classGroups, rooms, homeroomSourceByClassId, assignmentMeta]);
 
-    setDefaultRoomByClassId(next);
-    toast.success('Auto-assigned', 'Assigned default rooms. Review conflicts/exceptions and adjust if needed.');
-  }, [academicStructureQuery.data?.classGroups, defaultRoomByClassId, rooms]);
+  const clearAutoHomeroomAssignments = useCallback(() => {
+    setHomeroomSourceByClassId((srcPrev) => {
+      const autoIds = Object.entries(srcPrev)
+        .filter(([, v]) => v === 'auto')
+        .map(([id]) => Number(id));
+      setDefaultRoomByClassId((drPrev) => {
+        const next = { ...drPrev };
+        for (const id of autoIds) next[id] = '';
+        return next;
+      });
+      const nextSrc = { ...srcPrev };
+      for (const id of autoIds) delete nextSrc[id];
+      return nextSrc;
+    });
+    setAssignmentMeta((prev) => {
+      const out = { ...prev };
+      for (const [key, meta] of Object.entries(out)) {
+        if (meta?.roomSource === 'auto' && !meta.roomLocked) {
+          const { roomSource: _rs, ...rest } = meta;
+          out[key] = rest as AssignmentSlotMeta;
+        }
+      }
+      return out;
+    });
+    toast.info('Homerooms', 'Cleared auto-assigned homerooms. Manual homerooms and locked row rooms were kept.');
+  }, []);
 
   // ---- dirty tracking ----
   const serverSnapshot = academicStructureQuery.data;
@@ -332,28 +460,42 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
       classSubjectConfigs,
       sectionSubjectOverrides,
       defaultRoomByClassId,
+      classTeacherByClassId,
+      classTeacherSourceByClassId,
       assignmentMeta,
     });
-  }, [classSubjectConfigs, sectionSubjectOverrides, defaultRoomByClassId, assignmentMeta]);
+  }, [
+    classSubjectConfigs,
+    sectionSubjectOverrides,
+    defaultRoomByClassId,
+    classTeacherByClassId,
+    classTeacherSourceByClassId,
+    assignmentMeta,
+  ]);
 
   const serverSignature = useMemo(() => {
     if (!serverSnapshot) return '';
     const defaults: Record<number, string> = {};
+    const serverCt: Record<number, string> = {};
+    const serverCtSrc: Record<number, ClassTeacherSource> = {};
     for (const r of serverSnapshot.classGroups ?? []) {
       defaults[r.classGroupId] = r.defaultRoomId != null ? String(r.defaultRoomId) : '';
+      serverCt[r.classGroupId] = r.classTeacherStaffId != null && Number.isFinite(Number(r.classTeacherStaffId)) ? String(r.classTeacherStaffId) : '';
+      serverCtSrc[r.classGroupId] =
+        r.classTeacherStaffId != null && Number.isFinite(Number(r.classTeacherStaffId)) ? 'manual' : '';
     }
     const meta: Record<string, AssignmentSlotMeta> = {};
     for (const x of serverSnapshot.assignmentSlotMeta ?? []) {
       const sk = `${x.classGroupId}:${x.subjectId}`;
-      const src = x.source;
-      if (src === 'auto' || src === 'manual' || src === 'rebalanced') {
-        meta[sk] = { source: src, locked: !!x.locked };
-      }
+      const m = assignmentSlotMetaFromApi(x);
+      if (m) meta[sk] = m;
     }
     return JSON.stringify({
       classSubjectConfigs: serverSnapshot.classSubjectConfigs ?? [],
       sectionSubjectOverrides: serverSnapshot.sectionSubjectOverrides ?? [],
       defaultRoomByClassId: defaults,
+      classTeacherByClassId: serverCt,
+      classTeacherSourceByClassId: serverCtSrc,
       assignmentMeta: meta,
     });
   }, [serverSnapshot]);
@@ -372,17 +514,34 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
       sd[r.classGroupId] = r.defaultRoomId != null ? String(r.defaultRoomId) : '';
     }
     if (JSON.stringify(defaultRoomByClassId) !== JSON.stringify(sd)) n += 1;
+    const serverCt: Record<number, string> = {};
+    const serverCtSrc: Record<number, ClassTeacherSource> = {};
+    for (const r of serverSnapshot.classGroups ?? []) {
+      serverCt[r.classGroupId] =
+        r.classTeacherStaffId != null && Number.isFinite(Number(r.classTeacherStaffId)) ? String(r.classTeacherStaffId) : '';
+      serverCtSrc[r.classGroupId] =
+        r.classTeacherStaffId != null && Number.isFinite(Number(r.classTeacherStaffId)) ? 'manual' : '';
+    }
+    if (JSON.stringify(classTeacherByClassId) !== JSON.stringify(serverCt)) n += 1;
+    if (JSON.stringify(classTeacherSourceByClassId) !== JSON.stringify(serverCtSrc)) n += 1;
     const sm: Record<string, AssignmentSlotMeta> = {};
     for (const x of serverSnapshot.assignmentSlotMeta ?? []) {
       const sk = `${x.classGroupId}:${x.subjectId}`;
-      const src = x.source;
-      if (src === 'auto' || src === 'manual' || src === 'rebalanced') {
-        sm[sk] = { source: src, locked: !!x.locked };
-      }
+      const m = assignmentSlotMetaFromApi(x);
+      if (m) sm[sk] = m;
     }
     if (JSON.stringify(assignmentMeta) !== JSON.stringify(sm)) n += 1;
     return n;
-  }, [dirty, serverSnapshot, classSubjectConfigs, sectionSubjectOverrides, defaultRoomByClassId, assignmentMeta]);
+  }, [
+    dirty,
+    serverSnapshot,
+    classSubjectConfigs,
+    sectionSubjectOverrides,
+    defaultRoomByClassId,
+    classTeacherByClassId,
+    classTeacherSourceByClassId,
+    assignmentMeta,
+  ]);
 
   // ---- reset / save ----
   const resetToServer = useCallback(() => {
@@ -398,15 +557,31 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
     const meta: Record<string, AssignmentSlotMeta> = {};
     for (const x of d.assignmentSlotMeta ?? []) {
       const sk = `${x.classGroupId}:${x.subjectId}`;
-      const src = x.source;
-      if (src === 'auto' || src === 'manual' || src === 'rebalanced') {
-        meta[sk] = { source: src, locked: !!x.locked };
-      }
+      const m = assignmentSlotMetaFromApi(x);
+      if (m) meta[sk] = m;
     }
     setAssignmentMeta(meta);
+    const homeroomMap = homeroomMapFromDraft(d.classGroups ?? [], defaults);
+    const nextHomeroomSrc: Record<number, 'manual' | 'auto' | ''> = {};
+    for (const r of d.classGroups ?? []) {
+      nextHomeroomSrc[r.classGroupId] = r.defaultRoomId != null ? 'manual' : '';
+    }
+    setHomeroomSourceByClassId(nextHomeroomSrc);
+
+    const nextCt: Record<number, string> = {};
+    const nextCtSrc: Record<number, ClassTeacherSource> = {};
+    for (const r of d.classGroups ?? []) {
+      nextCt[r.classGroupId] =
+        r.classTeacherStaffId != null && Number.isFinite(Number(r.classTeacherStaffId)) ? String(r.classTeacherStaffId) : '';
+      nextCtSrc[r.classGroupId] =
+        r.classTeacherStaffId != null && Number.isFinite(Number(r.classTeacherStaffId)) ? 'manual' : '';
+    }
+    setClassTeacherByClassId(nextCt);
+    setClassTeacherSourceByClassId(nextCtSrc);
+
     if ((d.classSubjectConfigs?.length ?? 0) > 0) {
       setAllocRows(
-        buildEffectiveAllocRows(d.classGroups ?? [], d.classSubjectConfigs ?? [], d.sectionSubjectOverrides ?? []),
+        buildEffectiveAllocRows(d.classGroups ?? [], d.classSubjectConfigs ?? [], d.sectionSubjectOverrides ?? [], homeroomMap),
       );
     } else {
       setAllocRows(
@@ -430,12 +605,18 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
         classSubjectConfigs: configsPayload,
         sectionSubjectOverrides: overridesPayload,
         defaultRoomByClassId: roomsDraft,
+        classTeacherByClassId: ctDraft,
         assignmentMeta: metaDraft,
       } = academicDraftRef.current;
       const defaultRooms = cgs.map((r) => {
         const raw = roomsDraft[r.classGroupId];
         const rid = raw && String(raw).trim() !== '' ? Number(raw) : NaN;
         return { classGroupId: r.classGroupId, roomId: Number.isFinite(rid) ? rid : null };
+      });
+      const classTeachers = cgs.map((r) => {
+        const raw = ctDraft[r.classGroupId];
+        const sid = raw && String(raw).trim() !== '' ? Number(raw) : NaN;
+        return { classGroupId: r.classGroupId, staffId: Number.isFinite(sid) ? sid : null };
       });
       const assignmentSlotMetaList = Object.entries(metaDraft).map(([k, v]) => {
         const [a, b] = k.split(':');
@@ -444,12 +625,15 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
           subjectId: Number(b),
           source: v.source,
           locked: v.locked,
+          roomSource: v.roomSource ?? null,
+          roomLocked: v.roomLocked ?? null,
         };
       });
       await api.put('/api/v1/onboarding/academic-structure', {
         classSubjectConfigs: configsPayload,
         sectionSubjectOverrides: overridesPayload,
         defaultRooms,
+        classTeachers,
         assignmentSlotMeta: assignmentSlotMetaList,
       });
     },
@@ -493,11 +677,18 @@ export function useAcademicStructureModule(): UseAcademicStructureModuleResult {
     setDefaultRoomByClassId,
     assignmentMeta,
     setAssignmentMeta,
+    homeroomSourceByClassId,
+    classTeacherByClassId,
+    classTeacherSourceByClassId,
+    patchSectionClassTeacher,
+    autoAssignClassTeachers,
 
     classDefaultRoomSelectOptions,
     classDefaultRoomUsage,
     classDefaultRoomHasConflicts,
     autoAssignDefaultRooms,
+    clearAutoHomeroomAssignments,
+    patchSectionHomeroom,
     defaultRoomsLoading: roomsQuery.isLoading,
 
     dirty,

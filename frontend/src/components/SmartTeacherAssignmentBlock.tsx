@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SelectKeeper } from './SelectKeeper';
 import { toast } from '../lib/toast';
-import { buildEffectiveAllocRows, type ClassSubjectConfigRow, type SectionSubjectOverrideRow } from '../lib/academicStructureUtils';
+import { buildEffectiveAllocRows, homeroomMapFromDraft, type ClassSubjectConfigRow, type SectionSubjectOverrideRow } from '../lib/academicStructureUtils';
 import {
   type AssignmentSource,
   type AssignmentSlotMeta,
@@ -11,6 +11,7 @@ import {
   slotKey,
   applyUniformGradeSubjectTeacher,
   applySectionTeacher,
+  mergeAssignmentSlotMeta,
 } from '../lib/academicStructureSmartAssign';
 import {
   computeTeacherDemandSummary,
@@ -24,6 +25,15 @@ const DEMAND_STATUS_RANK: Record<TeacherDemandStatus, number> = {
   WARN: 1,
   OK: 2,
 };
+
+/** Used only for “needs attention” when a lab-like subject still resolves to homeroom only. */
+function preferredTeachingRoomCategory(subjectName: string, subjectCode: string): string | null {
+  const s = `${subjectName} ${subjectCode}`.toLowerCase();
+  if (s.includes('physics') || s.includes('chemistry') || s.includes('biology') || s.includes('science')) return 'LAB';
+  if (s.includes('computer') || s.includes('informatics') || s.includes('it ') || s.includes('csc') || s.includes('ip ')) return 'COMPUTER';
+  if (s.includes('music')) return 'MUSIC';
+  return null;
+}
 
 type StaffRow = {
   id: number;
@@ -39,6 +49,26 @@ type StaffRow = {
 type ClassG = { classGroupId: number; code: string; displayName: string; gradeLevel: number | null; section: string | null };
 type Sub = { id: number; name: string; code: string; weeklyFrequency: number | null };
 
+/** Passed from Academic module shell — weekly hint, progress, section capacity warnings. */
+export type SmartAssignmentOverviewContext = {
+  slotsPerWeek: number | null;
+  overCapacitySections: Array<{ classGroupId: number; label: string; totalPeriods: number; capacity: number; overBy: number }>;
+  schoolProgressPct: number;
+  schoolProgressWithIssues: number;
+};
+
+export type SmartAssignmentFilterUi = {
+  gradeValue: string;
+  subjectValue: string;
+  teacherValue: string;
+  onGradeChange: (v: string) => void;
+  onSubjectChange: (v: string) => void;
+  onTeacherChange: (v: string) => void;
+  gradeOptions: { value: string; label: string }[];
+  subjectOptions: { value: string; label: string }[];
+  teacherOptions: { value: string; label: string }[];
+};
+
 type Props = {
   classGroups: ClassG[];
   subjects: Sub[];
@@ -53,12 +83,25 @@ type Props = {
   subjectsCatalogForLabels: { id: number; name: string; code: string }[];
   filters?: { grade: string; subject: string; teacher: string };
   showBulkActions?: boolean;
-  autoAssignHomerooms?: () => void;
+  /** Single bulk homeroom automation (uses floor/building/capacity-aware placement). */
+  autoAssignHomerooms: () => void;
+  /** Greedy assignment of homeroom (class) teachers from effective subject-teaching allocations. */
+  autoAssignClassTeachers: () => void;
+  /** Clears homerooms assigned by automation only. */
+  clearAutoHomeroomAssignments?: () => void;
+  /**
+   * Draft homerooms keyed by classGroupId → room id string (same persistence as overview homeroom column).
+   */
+  defaultRoomByClassId: Record<number, string>;
+  /** Tracks whether each section homeroom was last set automatically vs manually (controls bulk overwrite). */
+  homeroomSourceByClassId?: Record<number, 'auto' | 'manual' | ''>;
   /**
    * When a teacher doesn't have `maxWeeklyLectureLoad` set, this is used as the fallback
    * teacher capacity for load checks / KPI (instead of hardcoded 32).
    */
   slotsPerWeek?: number | null;
+  overviewContext?: SmartAssignmentOverviewContext | null;
+  filterUi?: SmartAssignmentFilterUi | null;
 };
 
 export function SmartTeacherAssignmentBlock({
@@ -76,7 +119,13 @@ export function SmartTeacherAssignmentBlock({
   filters,
   showBulkActions = false,
   autoAssignHomerooms,
+  autoAssignClassTeachers,
+  clearAutoHomeroomAssignments,
+  defaultRoomByClassId,
+  homeroomSourceByClassId = {},
   slotsPerWeek,
+  overviewContext = null,
+  filterUi = null,
 }: Props) {
   const [manualOverrideMode, setManualOverrideMode] = useState(false);
   const [bulkDrawerOpen, setBulkDrawerOpen] = useState(false);
@@ -91,6 +140,21 @@ export function SmartTeacherAssignmentBlock({
   const [demandSort, setDemandSort] = useState<{ key: DemandSortKey; dir: 'asc' | 'desc' }>({
     key: 'subject',
     dir: 'asc',
+  });
+
+  const [overviewExpanded, setOverviewExpanded] = useState(() => {
+    try {
+      return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('smart-assign-overview-collapsed') !== '1';
+    } catch {
+      return true;
+    }
+  });
+  const [demandExpanded, setDemandExpanded] = useState(() => {
+    try {
+      return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('smart-assign-demand-collapsed') !== '1';
+    } catch {
+      return true;
+    }
   });
 
   const toggleDemandSort = useCallback((column: DemandSortKey) => {
@@ -124,13 +188,21 @@ export function SmartTeacherAssignmentBlock({
   );
 
   const cgs = useMemo(
-    () => classGroups.map((c) => ({ classGroupId: c.classGroupId, gradeLevel: c.gradeLevel })),
+    () =>
+      classGroups.map((c) => ({
+        classGroupId: c.classGroupId,
+        gradeLevel: c.gradeLevel,
+        section: c.section ?? null,
+        code: c.code ?? null,
+      })),
     [classGroups],
   );
 
+  const homeroomMap = useMemo(() => homeroomMapFromDraft(classGroups, defaultRoomByClassId), [classGroups, defaultRoomByClassId]);
+
   const effective = useMemo(
-    () => buildEffectiveAllocRows(cgs, classSubjectConfigs, sectionSubjectOverrides),
-    [cgs, classSubjectConfigs, sectionSubjectOverrides],
+    () => buildEffectiveAllocRows(cgs, classSubjectConfigs, sectionSubjectOverrides, homeroomMap),
+    [cgs, classSubjectConfigs, sectionSubjectOverrides, homeroomMap],
   );
 
   const staffNorm = useMemo(
@@ -199,17 +271,19 @@ export function SmartTeacherAssignmentBlock({
         subName: s.name,
         periods: a.weeklyFrequency,
         staffId: a.staffId,
-        roomId: (a as any).roomId ?? null,
+        roomId: a.roomId ?? null,
         k: slotKey(a.classGroupId, a.subjectId),
       });
     }
     const q = sectionSearch.trim().toLowerCase();
     return out.filter((r) => {
       const m = assignmentMeta[r.k];
-      const locked = m?.locked ?? false;
+      const teacherLocked = m?.locked ?? false;
+      const roomLockedRow = !!(m?.roomLocked ?? false);
+      const anyLocked = teacherLocked || roomLockedRow;
       const isUnassigned = r.staffId == null;
       if (onlyUnassigned && !isUnassigned) return false;
-      if (onlyLocked && !locked) return false;
+      if (onlyLocked && !anyLocked) return false;
       if (
         onlyConflicts &&
         !(
@@ -337,7 +411,7 @@ export function SmartTeacherAssignmentBlock({
   const preferredRoomTypeBySubjectId = useMemo(() => {
     const m = new Map<number, string | null>();
     for (const s of subjects) {
-      m.set(Number(s.id), detectPreferredRoom(s.name, s.code));
+      m.set(Number(s.id), preferredTeachingRoomCategory(s.name, s.code));
     }
     return m;
   }, [subjects]);
@@ -352,8 +426,10 @@ export function SmartTeacherAssignmentBlock({
       const teacherOver = r.staffId != null ? teacherLoadById.get(Number(r.staffId))?.status === 'over' : false;
 
       const pref = preferredRoomTypeBySubjectId.get(Number(r.subId)) ?? null;
-      // roomId null means "homeroom" in our UI. Treat it as "needs attention" only when the subject strongly prefers a lab-like room.
-      const noRoomForPreferred = pref != null && r.roomId == null;
+      const homeroomId = homeroomMap.get(r.classGroupId) ?? null;
+      const usesHomeroomOnly =
+        homeroomId == null ? r.roomId == null : r.roomId === homeroomId || r.roomId == null;
+      const noRoomForPreferred = pref != null && usesHomeroomOnly;
 
       // Only treat as "missing teacher" when this slot actually has periods.
       // period=0 means the subject is disabled for this section.
@@ -372,7 +448,7 @@ export function SmartTeacherAssignmentBlock({
       else healthy.push(r);
     }
     return { needs, healthy };
-  }, [flatRows, assignmentMeta, teacherLoadById, preferredRoomTypeBySubjectId]);
+  }, [flatRows, assignmentMeta, teacherLoadById, preferredRoomTypeBySubjectId, homeroomMap]);
 
   const missingTeacherReport = useMemo(() => {
     const byKey = new Map<
@@ -450,12 +526,13 @@ export function SmartTeacherAssignmentBlock({
   // IMPORTANT: avoid page-level horizontal scrolling.
   // Use flexible columns that can shrink to the viewport (minmax(0, ...)),
   // and rely on ellipsis within cells rather than fixed min widths.
-  const rowGridCols = 'minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 0.85fr) minmax(0, 0.8fr) minmax(0, 0.65fr) minmax(0, 0.6fr)';
+  const rowGridCols =
+    'minmax(0, 1.05fr) minmax(184px, 1.95fr) minmax(96px, 0.82fr) minmax(184px, 1.85fr) minmax(72px, 0.52fr) minmax(72px,max-content)';
 
   const renderRow = (row: (typeof flatRows)[number]) => {
     const m = assignmentMeta[row.k];
     const src: AssignmentSource | '—' = m?.source ?? '—';
-    const lo = m?.locked ?? false;
+    const teacherLocked = m?.locked ?? false;
     const tl = row.staffId != null ? teacherLoadById.get(Number(row.staffId)) : null;
     const load = tl?.load ?? 0;
     const max = tl?.max ?? 0;
@@ -483,66 +560,61 @@ export function SmartTeacherAssignmentBlock({
             : 'Needs review';
 
     const roomValue = row.roomId != null ? String(row.roomId) : '';
+    const hmId = homeroomMap.get(row.classGroupId);
+    const rowUsesHomeroom =
+      hmId != null && row.roomId != null && Number(row.roomId) === Number(hmId);
+    const roomSrcMeta = m?.roomSource;
+    const roomBadgeLabel =
+      roomSrcMeta === 'manual'
+        ? 'MANUAL'
+        : roomSrcMeta === 'auto'
+          ? 'AUTO'
+          : rowUsesHomeroom && homeroomSourceByClassId[row.classGroupId] === 'manual'
+            ? 'MANUAL'
+            : rowUsesHomeroom && homeroomSourceByClassId[row.classGroupId] === 'auto'
+              ? 'AUTO'
+              : '—';
+    const roomLocked = !!m?.roomLocked;
 
     return (
       <div
         key={row.k}
         style={{
-          border: '1px solid rgba(15,23,42,0.08)',
-          borderRadius: 12,
-          background: 'rgba(255,255,255,0.9)',
-          padding: 10,
+          border: '1px solid rgba(15,23,42,0.06)',
+          borderRadius: 10,
+          background: 'rgba(255,255,255,0.92)',
+          padding: 6,
         }}
       >
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: rowGridCols,
-            gap: 10,
+            gap: 6,
             alignItems: 'center',
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 950, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div style={{ fontWeight: 900, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {row.subName}
             </div>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+            <div className="muted" style={{ fontSize: 11, fontWeight: 750, opacity: 0.85 }}>
               {row.periods} / wk
             </div>
           </div>
 
-          <div>
+          <div style={{ minWidth: 0 }}>
             <SelectKeeper value={row.staffId != null ? String(row.staffId) : ''} onChange={(v) => setTeacherOnSlot(row.classGroupId, row.subId, v)} options={teachOpts(row.subId)} />
-          </div>
-
-          <div>
-            {row.staffId != null && tl ? (
-              <div>
-                <div style={{ height: 8, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.min(140, Math.round((load / Math.max(1, max)) * 100))}%`, height: '100%', background: barColor }} />
-                </div>
-                <div className="muted" style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>
-                  {load}/{max}{ratio > 1 ? ` · Overloaded +${Math.max(0, load - max)}` : ''}
-                </div>
-              </div>
-            ) : (
-              <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>—</div>
-            )}
-          </div>
-
-          <div>
-            <SelectKeeper value={roomValue} onChange={(v) => setRoomOnSlot(row.classGroupId, row.subId, v)} options={roomOptions} />
-          </div>
-
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
+            <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
             <span
               style={{
-                display: 'inline-block',
-                padding: '2px 8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '2px 7px',
                 borderRadius: 999,
-                fontSize: 12,
+                  fontSize: 10,
                 fontWeight: 900,
-                flex: '0 0 auto',
                 background:
                   statusLabel === 'AUTO'
                     ? 'rgba(249,115,22,0.12)'
@@ -564,17 +636,130 @@ export function SmartTeacherAssignmentBlock({
                           ? '#b91c1c'
                           : '#64748b',
               }}
-              title={conflictReasonLabel ?? undefined}
+                title="Teacher assignment source"
             >
-              {lo ? 'LOCKED' : statusLabel}
+                {statusLabel}
+                {teacherLocked ? <span aria-hidden>🔒</span> : null}
             </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !teacherLocked;
+                  setAssignmentMeta((prev) => ({
+                    ...prev,
+                    [row.k]: mergeAssignmentSlotMeta(prev[row.k], {
+                      source: m?.source ?? 'manual',
+                      locked: next,
+                      conflictReason: m?.conflictReason,
+                    }),
+                  }));
+                }}
+                title={
+                  teacherLocked
+                    ? 'Unlock teacher assignment (auto-assign / rebalance may change)'
+                    : 'Lock teacher assignment'
+                }
+                style={{
+                  appearance: 'none',
+                  border: '1px solid rgba(15,23,42,0.12)',
+                  background: teacherLocked ? 'rgba(37,99,235,0.12)' : 'rgba(100,116,139,0.08)',
+                  color: teacherLocked ? '#1d4ed8' : '#475569',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {teacherLocked ? 'Teacher locked' : 'Teacher lock'}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            {row.staffId != null && tl ? (
+              <div>
+                <div style={{ height: 8, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.min(140, Math.round((load / Math.max(1, max)) * 100))}%`, height: '100%', background: barColor }} />
+                </div>
+                <div className="muted" style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>
+                  {load}/{max}{ratio > 1 ? ` · Overloaded +${Math.max(0, load - max)}` : ''}
+                </div>
+              </div>
+            ) : (
+              <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>—</div>
+            )}
+          </div>
+
+          <div style={{ minWidth: 0 }}>
+            <SelectKeeper value={roomValue} onChange={(v) => setRoomOnSlot(row.classGroupId, row.subId, v)} options={roomOptions} />
+            <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '2px 7px',
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 900,
+                  background:
+                    roomBadgeLabel === 'AUTO'
+                      ? 'rgba(249,115,22,0.12)'
+                      : roomBadgeLabel === 'MANUAL'
+                        ? 'rgba(37,99,235,0.12)'
+                        : 'rgba(100,116,139,0.10)',
+                  color:
+                    roomBadgeLabel === 'AUTO' ? '#c2410c' : roomBadgeLabel === 'MANUAL' ? '#1d4ed8' : '#64748b',
+                }}
+                title="Room assignment source for this subject slot"
+              >
+                {roomBadgeLabel}
+                {roomLocked ? <span aria-hidden>🔒</span> : null}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextLocked = !roomLocked;
+                  setAssignmentMeta((prev) => ({
+                    ...prev,
+                    [row.k]: mergeAssignmentSlotMeta(prev[row.k], {
+                      source: prev[row.k]?.source ?? 'manual',
+                      locked: prev[row.k]?.locked ?? false,
+                      conflictReason: prev[row.k]?.conflictReason,
+                      roomLocked: nextLocked,
+                      roomSource: nextLocked ? (prev[row.k]?.roomSource ?? 'manual') : prev[row.k]?.roomSource,
+                    }),
+                  }));
+                }}
+                title={roomLocked ? 'Unlock room assignment' : 'Lock room assignment'}
+                style={{
+                  appearance: 'none',
+                  border: '1px solid rgba(15,23,42,0.12)',
+                  background: roomLocked ? 'rgba(249,115,22,0.12)' : 'rgba(100,116,139,0.08)',
+                  color: roomLocked ? '#c2410c' : '#475569',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {roomLocked ? 'Room locked' : 'Room lock'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
             {conflictReasonLabel ? (
               <span
                 style={{
                   display: 'inline-block',
-                  padding: '2px 8px',
+                  padding: '2px 7px',
                   borderRadius: 999,
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: 900,
                   background: 'rgba(220,38,38,0.10)',
                   color: '#b91c1c',
@@ -587,42 +772,19 @@ export function SmartTeacherAssignmentBlock({
               >
                 {conflictReasonLabel}
               </span>
-            ) : null}
+            ) : (
+              <span className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
+                —
+              </span>
+            )}
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0, overflow: 'hidden' }}>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
               <button
                 type="button"
-                onClick={() => {
-                  const locked = !lo;
-                  setAssignmentMeta((prev) => ({
-                    ...prev,
-                    [row.k]: { source: m?.source ?? 'manual', locked, conflictReason: m?.conflictReason },
-                  }));
-                }}
-                title={lo ? 'Unlock' : 'Lock'}
-                style={{
-                  appearance: 'none',
-                  border: '1px solid rgba(15,23,42,0.14)',
-                  background: lo ? 'rgba(249,115,22,0.14)' : 'rgba(100,116,139,0.10)',
-                  color: lo ? '#c2410c' : '#475569',
-                  padding: '4px 10px',
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 950,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  flex: '0 0 auto',
-                }}
-              >
-                {lo ? 'Locked' : 'Lock'}
-              </button>
-
-              <button
-                type="button"
                 className="btn secondary"
-                style={{ fontSize: 12, padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' }}
+                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}
                 onClick={() => setTeacherOnSlot(row.classGroupId, row.subId, '')}
                 title="Clear teacher"
               >
@@ -640,35 +802,35 @@ export function SmartTeacherAssignmentBlock({
     defaultOpen: boolean,
   ) => {
     return (
-      <div className="stack" style={{ gap: 10 }}>
+      <div className="stack" style={{ gap: 8 }}>
         {groups.map((g) => (
           <details
             key={g.grade}
             open={defaultOpen}
-            style={{ border: '1px solid rgba(15,23,42,0.08)', borderRadius: 12, background: 'rgba(255,255,255,0.75)' }}
+            style={{ border: '1px solid rgba(15,23,42,0.06)', borderRadius: 10, background: 'rgba(255,255,255,0.85)' }}
           >
             <summary
               className="row"
-              style={{ cursor: 'pointer', padding: '10px 12px', listStyle: 'none', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}
+              style={{ cursor: 'pointer', padding: '7px 9px', listStyle: 'none', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}
             >
-              <div style={{ fontWeight: 950 }}>{`Grade ${g.grade}`}</div>
-              <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
+              <div style={{ fontWeight: 900, fontSize: 13 }}>{`Grade ${g.grade}`}</div>
+              <div className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
                 {g.sections.length} section{g.sections.length === 1 ? '' : 's'} · {g.totalRows} row{g.totalRows === 1 ? '' : 's'}
               </div>
             </summary>
-            <div className="stack" style={{ gap: 10, padding: 12, paddingTop: 0 }}>
+            <div className="stack" style={{ gap: 8, padding: '0 9px 9px' }}>
               {g.sections.map(({ cg, rows }) => (
                 <details
                   key={cg.classGroupId}
                   open={defaultOpen}
-                  style={{ border: '1px solid rgba(15,23,42,0.08)', borderRadius: 12, background: 'rgba(255,255,255,0.9)' }}
+                  style={{ border: '1px solid rgba(15,23,42,0.06)', borderRadius: 10, background: 'rgba(255,255,255,0.95)' }}
                 >
                   <summary
                     className="row"
-                    style={{ cursor: 'pointer', padding: '10px 12px', listStyle: 'none', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}
+                    style={{ cursor: 'pointer', padding: '7px 9px', listStyle: 'none', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}
                   >
-                    <div style={{ fontWeight: 900 }}>{cg.displayName || cg.code}</div>
-                    <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>
+                    <div style={{ fontWeight: 850, fontSize: 12 }}>{cg.displayName || cg.code}</div>
+                    <div className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
                       {rows.length} subject{rows.length === 1 ? '' : 's'}
                     </div>
                   </summary>
@@ -677,23 +839,24 @@ export function SmartTeacherAssignmentBlock({
                       style={{
                         display: 'grid',
                         gridTemplateColumns: rowGridCols,
-                        gap: 10,
-                        padding: '10px 10px 0 10px',
-                        fontSize: 12,
-                        fontWeight: 950,
+                        gap: 6,
+                        padding: '6px 6px 0 6px',
+                        fontSize: 10,
+                        fontWeight: 850,
                         color: 'var(--color-text-muted)',
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em',
+                        opacity: 0.85,
                       }}
                     >
                       <div>Subject</div>
                       <div>Assigned teacher</div>
                       <div>Teacher load</div>
                       <div>Room</div>
-                      <div>Source</div>
-                      <div style={{ textAlign: 'right' }}>Lock · Actions</div>
+                      <div>Alert</div>
+                      <div style={{ textAlign: 'right' }}>Actions</div>
                     </div>
-                    <div className="stack" style={{ gap: 8, padding: 10 }}>
+                    <div className="stack" style={{ gap: 5, padding: 6 }}>
                       {rows.map(renderRow)}
                     </div>
                   </div>
@@ -717,6 +880,7 @@ export function SmartTeacherAssignmentBlock({
       mode,
       subjectOnly,
       slotsPerWeek ?? null,
+      homeroomMap,
     );
     setClassSubjectConfigs(r.classSubjectConfigs);
     setSectionSubjectOverrides(r.sectionSubjectOverrides);
@@ -751,6 +915,16 @@ export function SmartTeacherAssignmentBlock({
     }
     if (r.warnings.length === 0 && mode === 'auto') {
       toast.success('Smart assign', 'Teachers applied by skill, grade cohesion, and load.');
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('smart-assign-overview-collapsed', '1');
+          sessionStorage.setItem('smart-assign-demand-collapsed', '1');
+        }
+      } catch {
+        /* ignore */
+      }
+      setOverviewExpanded(false);
+      setDemandExpanded(false);
     } else if (r.warnings.length === 0 && mode === 'rebalance') {
       toast.success('Rebalanced', 'Non-locked rows were redistributed where possible.');
     } else if (mode === 'reset') {
@@ -758,77 +932,9 @@ export function SmartTeacherAssignmentBlock({
     }
   };
 
-  function detectPreferredRoom(subjectName: string, subjectCode: string) {
-    const s = `${subjectName} ${subjectCode}`.toLowerCase();
-    if (s.includes('physics') || s.includes('chemistry') || s.includes('biology') || s.includes('science')) return 'LAB';
-    if (s.includes('computer') || s.includes('informatics') || s.includes('it ') || s.includes('csc') || s.includes('ip ')) return 'COMPUTER';
-    if (s.includes('music')) return 'MUSIC';
-    return null;
-  }
-
-  function pickRoomForSubject(subjectName: string, subjectCode: string) {
-    const pref = detectPreferredRoom(subjectName, subjectCode);
-    // roomOptions only contains labels; best-effort match by label keywords.
-    if (pref === 'LAB') {
-      const lab = roomOptions.find((r) => r.value && /lab/i.test(r.label));
-      if (lab) return lab.value;
-    }
-    if (pref === 'COMPUTER') {
-      const comp = roomOptions.find((r) => r.value && /(computer|cs)\b/i.test(r.label));
-      if (comp) return comp.value;
-      const lab = roomOptions.find((r) => r.value && /lab/i.test(r.label));
-      if (lab) return lab.value;
-    }
-    if (pref === 'MUSIC') {
-      const mus = roomOptions.find((r) => r.value && /music/i.test(r.label));
-      if (mus) return mus.value;
-    }
-    // default: use homeroom (null / empty selection)
-    return '';
-  }
-
-  const autoAssignRooms = () => {
-    const targets = flatRows.filter((r) => {
-      const m = assignmentMeta[r.k];
-      if (m?.locked) return false;
-      if (m?.source === 'manual') return false;
-      // only fill missing room
-      return r.roomId == null;
-    });
-    if (!targets.length) {
-      toast.info('Rooms', 'No rows need a room assignment.');
-      return;
-    }
-    setSectionSubjectOverrides((prev) => {
-      const next = prev.slice();
-      const idxByKey = new Map<string, number>();
-      for (let i = 0; i < next.length; i++) idxByKey.set(`${next[i]!.classGroupId}:${next[i]!.subjectId}`, i);
-      for (const t of targets) {
-        const sub = subjects.find((s) => s.id === t.subId);
-        if (!sub) continue;
-        const picked = pickRoomForSubject(sub.name, sub.code);
-        const rid = picked && picked.trim() !== '' ? Number(picked) : null;
-        const key = `${t.classGroupId}:${t.subId}`;
-        const idx = idxByKey.get(key);
-        if (idx != null) {
-          next[idx] = { ...next[idx]!, roomId: rid };
-        } else {
-          next.push({ classGroupId: t.classGroupId, subjectId: t.subId, periodsPerWeek: null, teacherId: null, roomId: rid });
-        }
-      }
-      return next;
-    });
-    toast.success('Rooms', 'Room suggestions applied (labs where possible, otherwise homeroom).');
-  };
-
-  const fixAllPossibleIssues = () => {
-    // Best-effort: fill teachers -> rebalance -> fill rooms.
-    if (!teacherDemand.hasSevereShortage) {
-      run('auto', null);
-    }
-    run('rebalance', null);
-    autoAssignRooms();
-    toast.success('Fix all', 'Applied best-effort fixes. Remaining rows (if any) need manual decisions.');
+  const clearAutomaticAssignments = () => {
+    run('reset', null);
+    clearAutoHomeroomAssignments?.();
   };
 
   const setTeacherOnSlot = (classGroupId: number, subjectId: number, newId: string) => {
@@ -847,9 +953,19 @@ export function SmartTeacherAssignmentBlock({
       setClassSubjectConfigs(r.cfg);
       setSectionSubjectOverrides(r.ovs);
       setAssignmentMeta((m) => {
-        const n = { ...m };
-        delete n[slotKey(classGroupId, subjectId)];
-        return n;
+        const k = slotKey(classGroupId, subjectId);
+        const prev = m[k];
+        const next = { ...m };
+        delete next[k];
+        if (prev?.roomSource || prev?.roomLocked) {
+          next[k] = {
+            source: 'manual',
+            locked: false,
+            roomSource: prev.roomSource,
+            roomLocked: prev.roomLocked,
+          };
+        }
+        return next;
       });
       toast.info('Cleared for class+subject', 'Removed the default teacher for this subject for the whole class (all sections in this grade).');
       return;
@@ -859,14 +975,21 @@ export function SmartTeacherAssignmentBlock({
     const r = applySectionTeacher(classSubjectConfigs, sectionSubjectOverrides, cgs, classGroupId, subjectId, id);
     setClassSubjectConfigs(r.cfg);
     setSectionSubjectOverrides(r.ovs);
-    setAssignmentMeta((m) => ({
+    setAssignmentMeta((m) => {
+      const k = slotKey(classGroupId, subjectId);
+      const prev = m[k];
+      return {
       ...m,
-      [slotKey(classGroupId, subjectId)]: { source: 'manual' as const, locked: lock },
-    }));
+        [k]: mergeAssignmentSlotMeta(prev, {
+          source: 'manual',
+          locked: lock,
+          conflictReason: prev?.conflictReason,
+        }),
+      };
+    });
   };
 
   const setRoomOnSlot = (classGroupId: number, subjectId: number, newId: string) => {
-    const lock = manualOverrideMode;
     const rid = newId && String(newId).trim() !== '' ? Number(newId) : null;
     if (newId && rid != null && !Number.isFinite(rid)) return;
 
@@ -877,15 +1000,24 @@ export function SmartTeacherAssignmentBlock({
         next[idx] = { ...next[idx], roomId: rid };
         return next;
       }
-      // Create a minimal override row (inherit periods/teacher unless explicitly overridden elsewhere).
       next.push({ classGroupId, subjectId, periodsPerWeek: null, teacherId: null, roomId: rid });
       return next;
     });
 
-    setAssignmentMeta((m) => ({
+    setAssignmentMeta((m) => {
+      const k = slotKey(classGroupId, subjectId);
+      const prev = m[k];
+      return {
       ...m,
-      [slotKey(classGroupId, subjectId)]: { source: 'manual' as const, locked: lock },
-    }));
+        [k]: mergeAssignmentSlotMeta(prev ?? { source: 'manual', locked: false }, {
+          source: prev?.source ?? 'manual',
+          locked: prev?.locked ?? false,
+          conflictReason: prev?.conflictReason,
+          roomSource: 'manual',
+          roomLocked: true,
+        }),
+      };
+    });
   };
 
   const teachOpts = (subjectId: number) =>
@@ -904,354 +1036,647 @@ export function SmartTeacherAssignmentBlock({
       .map((s) => ({ value: String(s.id), label: s.fullName || s.email }))
       .sort((a, b) => a.label.localeCompare(b.label));
 
-  return (
-    <div className="stack" style={{ gap: 12 }}>
-      <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-        <div className="row" style={{ gap: 10, flexWrap: 'wrap', flex: '1 1 auto' }}>
-          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
-            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Total rows</div>
-            <div style={{ fontSize: 18, fontWeight: 950 }}>{kpis.total}</div>
-          </div>
-          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
-            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Assigned</div>
-            <div style={{ fontSize: 18, fontWeight: 950, color: '#166534' }}>{kpis.assigned}</div>
-          </div>
-          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
-            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Pending</div>
-            <div style={{ fontSize: 18, fontWeight: 950, color: kpis.pending ? '#b91c1c' : '#166534' }}>{kpis.pending}</div>
-          </div>
-          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
-            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Overloaded</div>
-            <div style={{ fontSize: 18, fontWeight: 950, color: kpis.overloadedTeachers ? '#c2410c' : '#166534' }}>{kpis.overloadedTeachers}</div>
-          </div>
-          <div className="card" style={{ padding: 10, borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.75)' }}>
-            <div className="muted" style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase' }}>Conflicts</div>
-            <div style={{ fontSize: 18, fontWeight: 950, color: kpis.conflicts ? '#b91c1c' : '#166534' }}>{kpis.conflicts}</div>
-          </div>
-        </div>
-      </div>
+  const filterSummaryText = useMemo(() => {
+    const bits: string[] = [];
+    if (filterUi?.gradeValue) {
+      const lab = filterUi.gradeOptions.find((o) => o.value === filterUi.gradeValue)?.label;
+      bits.push(lab ?? `Class ${filterUi.gradeValue}`);
+    }
+    if (filterUi?.subjectValue) {
+      const lab = filterUi.subjectOptions.find((o) => o.value === filterUi.subjectValue)?.label;
+      bits.push(lab ?? 'Subject');
+    }
+    if (filterUi?.teacherValue) {
+      const lab = filterUi.teacherOptions.find((o) => o.value === filterUi.teacherValue)?.label;
+      bits.push(lab ?? 'Teacher');
+    }
+    const q = sectionSearch.trim();
+    if (q) bits.push(`Search "${q}"`);
+    if (onlyUnassigned) bits.push('Unassigned only');
+    if (onlyLocked) bits.push('Teacher or room locked');
+    if (onlyOverloaded) bits.push('Overloaded only');
+    if (onlyConflicts) bits.push('Conflicts only');
+    return bits.length ? bits.join(' · ') : 'Showing all rows';
+  }, [
+    filterUi,
+    sectionSearch,
+    onlyUnassigned,
+    onlyLocked,
+    onlyOverloaded,
+    onlyConflicts,
+  ]);
 
-      <div
-        className="card"
+  const persistOverviewOpen = (open: boolean) => {
+    setOverviewExpanded(open);
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('smart-assign-overview-collapsed', open ? '0' : '1');
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistDemandOpen = (open: boolean) => {
+    setDemandExpanded(open);
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('smart-assign-demand-collapsed', open ? '0' : '1');
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const ghostBtnSx = {
+    border: '1px solid rgba(15,23,42,0.12)',
+    background: 'transparent',
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: 700,
+    padding: '6px 10px',
+    borderRadius: 8,
+    cursor: 'pointer',
+  } as const;
+
+  return (
+    <div className="stack smart-assign-root" style={{ gap: 32 }}>
+      {/* SECTION 1 — Assignment overview (collapsible) */}
+      <details
+        open={overviewExpanded}
+        onToggle={(e) => persistOverviewOpen(e.currentTarget.open)}
         style={{
-          padding: 12,
           borderRadius: 12,
-          border: '1px solid rgba(15,23,42,0.1)',
-          background: 'rgba(255,255,255,0.82)',
+          border: '1px solid rgba(15,23,42,0.06)',
+          background: 'rgba(248,250,252,0.94)',
+          padding: '8px 12px',
         }}
       >
-        <div style={{ fontWeight: 950, fontSize: 14 }}>Teacher demand summary</div>
-        <p className="muted" style={{ margin: '6px 0 12px', fontSize: 12, lineHeight: 1.45 }}>
-          Totals weekly periods mapped across sections vs aggregate capacity from teachers who have the TEACHER role and are explicitly tagged for each subject.
-          {slotsPerWeek != null ? ` Fallback weekly cap when a teacher has no personal cap: ${slotsPerWeek} periods.` : ''}{' '}
-          Tap a column header to sort ascending or descending.
-        </p>
-        {teacherDemand.hasSevereShortage ? (
-          <div className="sms-alert sms-alert--warning" style={{ marginBottom: 12 }}>
-            <div>
-              <div className="sms-alert__title">Severe shortage</div>
-              <div className="sms-alert__msg">
-                Smart auto-assign is blocked until capacity meets demand or reaches the near-limit band (≥90%) for every demanded subject.
-              </div>
-            </div>
-          </div>
-        ) : null}
-        <div
+        <summary
           style={{
-            height: 320,
-            overflow: 'auto',
-            border: '1px solid rgba(15,23,42,0.08)',
-            borderRadius: 10,
-            WebkitOverflowScrolling: 'touch',
+            cursor: 'pointer',
+            fontWeight: 800,
+            fontSize: 13,
+            listStyle: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
           }}
         >
-          <table
-            className="data-table"
-            style={{
-              fontSize: 13,
-              width: '100%',
-              margin: 0,
-              borderCollapse: 'separate',
-              borderSpacing: 0,
-            }}
-          >
-            <thead
+          <span>Assignment overview</span>
+          <span className="muted" style={{ fontSize: 11, fontWeight: 750 }}>
+            {overviewExpanded ? 'Hide' : 'Show'}
+          </span>
+        </summary>
+
+        <div className="stack" style={{ gap: 16, marginTop: 12 }}>
+          {overviewContext ? (
+    <div className="stack" style={{ gap: 12 }}>
+              {overviewContext.slotsPerWeek != null ? (
+                <div
+                  className="muted"
+                  style={{ fontSize: 11, lineHeight: 1.45, opacity: 0.82 }}
+                  title={
+                    `About ${overviewContext.slotsPerWeek} teachable slots per week for your school schedule. Aim to keep each section's total weekly subject periods within this budget when possible.`
+                  }
+                >
+                  Weekly capacity hint: ~<strong>{overviewContext.slotsPerWeek}</strong> teachable slots/week.
+          </div>
+              ) : null}
+
+              {overviewContext.overCapacitySections.length ? (
+                <details style={{ fontSize: 11 }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 800, opacity: 0.88 }}>
+                    {overviewContext.overCapacitySections.length} section
+                    {overviewContext.overCapacitySections.length === 1 ? '' : 's'} over weekly capacity
+                  </summary>
+                  <div className="stack" style={{ gap: 6, marginTop: 8 }}>
+                    {overviewContext.overCapacitySections.slice(0, 10).map((s) => (
+                      <div key={s.classGroupId} className="row" style={{ gap: 10, justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 750 }}>{s.label}</span>
+                        <span className="muted" style={{ fontWeight: 750 }}>
+                          {s.totalPeriods} / {s.capacity} (+{s.overBy})
+                        </span>
+          </div>
+                    ))}
+                    {overviewContext.overCapacitySections.length > 10 ? (
+                      <div className="muted" style={{ fontSize: 11, fontWeight: 750 }}>
+                        +{overviewContext.overCapacitySections.length - 10} more…
+          </div>
+                    ) : null}
+          </div>
+                </details>
+              ) : null}
+
+              <div className="row" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 900,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      color: 'var(--color-text-muted)',
+                      opacity: 0.85,
+                    }}
+                  >
+                    School progress
+          </div>
+                  <div style={{ fontSize: 15, fontWeight: 950, marginTop: 2 }}>
+                    {overviewContext.schoolProgressPct}% sections ready
+        </div>
+                  <div className="muted" style={{ fontSize: 11, opacity: 0.82 }}>
+                    {overviewContext.schoolProgressWithIssues} section
+                    {overviewContext.schoolProgressWithIssues === 1 ? '' : 's'} need attention
+      </div>
+                </div>
+                <div style={{ flex: '1 1 160px', minWidth: 120 }}>
+                  <div
+                    style={{
+                      height: 8,
+                      borderRadius: 999,
+                      background: 'rgba(15,23,42,0.08)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${overviewContext.schoolProgressPct}%`,
+                        height: '100%',
+                        borderRadius: 999,
+                        background:
+                          overviewContext.schoolProgressPct >= 100 ? '#16a34a' : 'var(--color-primary)',
+                        transition: 'width 0.25s ease',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : slotsPerWeek != null ? (
+            <div className="muted" style={{ fontSize: 11, opacity: 0.78 }} title="Used when estimating loads if teacher caps are unset.">
+              Weekly capacity fallback for load checks: <strong>{slotsPerWeek}</strong> periods.
+            </div>
+          ) : null}
+
+          <div className="row" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'stretch' }}>
+            <div
               style={{
-                position: 'sticky',
-                top: 0,
-                zIndex: 2,
-                background: 'rgba(248,250,252,0.98)',
-                boxShadow: '0 1px 0 rgba(15,23,42,0.08)',
+                padding: '7px 10px',
+                borderRadius: 10,
+                border: '1px solid rgba(15,23,42,0.06)',
+                background: 'rgba(255,255,255,0.72)',
+                minWidth: 88,
               }}
             >
-              <tr>
-                <th
-                  scope="col"
-                  style={{ verticalAlign: 'middle' }}
-                  aria-sort={
-                    demandSort.key === 'subject'
-                      ? demandSort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
-                  }
-                >
-                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('subject')}>
-                    Subject
-                    {demandSort.key === 'subject' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th
-                  scope="col"
-                  style={{ verticalAlign: 'middle' }}
-                  aria-sort={
-                    demandSort.key === 'required'
-                      ? demandSort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
-                  }
-                >
-                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('required')}>
-                    Required periods
-                    {demandSort.key === 'required' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th
-                  scope="col"
-                  style={{ verticalAlign: 'middle' }}
-                  aria-sort={
-                    demandSort.key === 'qualified'
-                      ? demandSort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
-                  }
-                >
-                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('qualified')}>
-                    Qualified teachers
-                    {demandSort.key === 'qualified' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th
-                  scope="col"
-                  style={{ verticalAlign: 'middle' }}
-                  aria-sort={
-                    demandSort.key === 'capacity'
-                      ? demandSort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
-                  }
-                >
-                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('capacity')}>
-                    Available capacity
-                    {demandSort.key === 'capacity' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th
-                  scope="col"
-                  style={{ verticalAlign: 'middle' }}
-                  aria-sort={
-                    demandSort.key === 'teachersNeeded'
-                      ? demandSort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
-                  }
-                >
-                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('teachersNeeded')}>
-                    Teachers needed
-                    {demandSort.key === 'teachersNeeded' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th
-                  scope="col"
-                  style={{ verticalAlign: 'middle' }}
-                  aria-sort={
-                    demandSort.key === 'status'
-                      ? demandSort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
-                  }
-                >
-                  <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('status')}>
-                    Status
-                    {demandSort.key === 'status' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th scope="col" style={{ textAlign: 'right', verticalAlign: 'middle' }}>
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-            {sortedDemandRows.map((row) => {
-              const tone =
-                row.status === 'OK' ? '#166534' : row.status === 'WARN' ? '#b45309' : '#b91c1c';
-              const needsFix = row.requiredPeriods > 0 && row.status !== 'OK';
-              return (
-                <tr key={row.subjectId}>
-                  <td style={{ fontWeight: 800 }}>
-                    {row.subjectName || `Subject ${row.subjectId}`}
-                    {row.subjectCode ? (
-                      <span className="muted" style={{ fontWeight: 700, marginLeft: 6 }}>
-                        ({row.subjectCode})
-                      </span>
-                    ) : null}
-                  </td>
-                  <td>{row.requiredPeriods}</td>
-                  <td>{row.qualifiedTeacherCount}</td>
-                  <td>{row.availableCapacity}</td>
-                  <td>{row.teachersNeeded ?? '—'}</td>
-                  <td style={{ fontWeight: 850, color: tone }}>{row.statusDetail}</td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {needsFix ? (
-                      <span className="row" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                        <Link className="btn secondary" style={{ padding: '4px 8px', fontSize: 11 }} to="/app/teachers">
-                          Add teacher
-                        </Link>
-                        <Link className="btn secondary" style={{ padding: '4px 8px', fontSize: 11 }} to="/app/teachers">
-                          Capacity
-                        </Link>
-                        <Link className="btn secondary" style={{ padding: '4px 8px', fontSize: 11 }} to="/app/academic">
-                          Frequency
-                        </Link>
-                        <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 11 }} onClick={() => run('rebalance', row.subjectId)}>
-                          Rebalance
-                        </button>
-                      </span>
-                    ) : (
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        —
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-      </div>
+              <div className="muted" style={{ fontSize: 10, fontWeight: 900, textTransform: 'uppercase', opacity: 0.85 }}>
+                Total rows
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 950 }}>{kpis.total}</div>
+            </div>
+            <div
+              style={{
+                padding: '7px 10px',
+                borderRadius: 10,
+                border: '1px solid rgba(15,23,42,0.06)',
+                background: 'rgba(255,255,255,0.72)',
+                minWidth: 88,
+              }}
+            >
+              <div className="muted" style={{ fontSize: 10, fontWeight: 900, textTransform: 'uppercase', opacity: 0.85 }}>
+                Assigned
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 950, color: '#166534' }}>{kpis.assigned}</div>
+            </div>
+            <div
+              style={{
+                padding: '7px 10px',
+                borderRadius: 10,
+                border: '1px solid rgba(15,23,42,0.06)',
+                background: 'rgba(255,255,255,0.72)',
+                minWidth: 88,
+              }}
+            >
+              <div className="muted" style={{ fontSize: 10, fontWeight: 900, textTransform: 'uppercase', opacity: 0.85 }}>
+                Pending
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 950, color: kpis.pending ? '#b91c1c' : '#166534' }}>{kpis.pending}</div>
+            </div>
+            <div
+              style={{
+                padding: '7px 10px',
+                borderRadius: 10,
+                border: '1px solid rgba(15,23,42,0.06)',
+                background: 'rgba(255,255,255,0.72)',
+                minWidth: 88,
+              }}
+            >
+              <div className="muted" style={{ fontSize: 10, fontWeight: 900, textTransform: 'uppercase', opacity: 0.85 }}>
+                Overloaded
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 950, color: kpis.overloadedTeachers ? '#c2410c' : '#166534' }}>
+                {kpis.overloadedTeachers}
+              </div>
+            </div>
+            <div
+              style={{
+                padding: '7px 10px',
+                borderRadius: 10,
+                border: '1px solid rgba(15,23,42,0.06)',
+                background: 'rgba(255,255,255,0.72)',
+                minWidth: 88,
+              }}
+            >
+              <div className="muted" style={{ fontSize: 10, fontWeight: 900, textTransform: 'uppercase', opacity: 0.85 }}>
+                Conflicts
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 950, color: kpis.conflicts ? '#b91c1c' : '#166534' }}>{kpis.conflicts}</div>
+            </div>
+          </div>
 
-      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', position: 'sticky', top: 0, zIndex: 5, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(6px)' }}>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => run('auto', null)}
-          disabled={!classSubjectConfigs.length || teacherDemand.hasSevereShortage}
-          title={
-            teacherDemand.hasSevereShortage
-              ? 'Resolve severe shortages in the Teacher demand summary above.'
-              : undefined
-          }
-        >
+          <details
+            open={demandExpanded}
+            onToggle={(e) => persistDemandOpen(e.currentTarget.open)}
+            style={{
+              borderRadius: 10,
+              border: '1px solid rgba(15,23,42,0.06)',
+              background: 'rgba(255,255,255,0.72)',
+              padding: '8px 10px',
+            }}
+          >
+            <summary style={{ cursor: 'pointer', fontWeight: 800, fontSize: 12, listStyle: 'none', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <span>
+                Teacher demand summary{' '}
+                <span className="muted" style={{ fontWeight: 750 }}>
+                  {demandExpanded ? '' : '(expand)'}
+                </span>
+              </span>
+              <span
+                className="muted"
+                style={{ fontWeight: 750, fontSize: 11 }}
+                title={
+                  `Totals weekly periods mapped across sections vs aggregate qualified teacher capacity for teachers explicitly tagged per subject.${slotsPerWeek != null ? ` Default weekly cap when a teacher has no personal cap: ${slotsPerWeek} periods.` : ''} Tap headers to sort.`
+                }
+              >
+                ℹ
+              </span>
+            </summary>
+
+            <div className="stack" style={{ gap: 12, marginTop: 12 }}>
+              {teacherDemand.hasSevereShortage ? (
+                <div className="sms-alert sms-alert--warning" style={{ marginBottom: 0 }}>
+                  <div>
+                    <div className="sms-alert__title">Severe shortage</div>
+                    <div className="sms-alert__msg">
+                      Smart auto-assign is blocked until capacity meets demand or reaches the near-limit band (≥90%) for every demanded subject.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div
+                style={{
+                  maxHeight: 260,
+                  overflow: 'auto',
+                  border: '1px solid rgba(15,23,42,0.06)',
+                  borderRadius: 10,
+                  WebkitOverflowScrolling: 'touch',
+                }}
+              >
+                <table
+                  className="data-table"
+                  style={{
+                    fontSize: 12,
+                    width: '100%',
+                    margin: 0,
+                    borderCollapse: 'separate',
+                    borderSpacing: 0,
+                  }}
+                >
+                  <thead
+                    style={{
+                      position: 'sticky',
+                      top: 0,
+                      zIndex: 2,
+                      background: 'rgba(248,250,252,0.98)',
+                      boxShadow: '0 1px 0 rgba(15,23,42,0.06)',
+                    }}
+                  >
+                    <tr>
+                      <th scope="col" style={{ verticalAlign: 'middle' }} aria-sort={demandSort.key === 'subject' ? (demandSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('subject')}>
+                          Subject
+                          {demandSort.key === 'subject' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                        </button>
+                      </th>
+                      <th scope="col" style={{ verticalAlign: 'middle' }} aria-sort={demandSort.key === 'required' ? (demandSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('required')}>
+                          Required periods
+                          {demandSort.key === 'required' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                        </button>
+                      </th>
+                      <th scope="col" style={{ verticalAlign: 'middle' }} aria-sort={demandSort.key === 'qualified' ? (demandSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('qualified')}>
+                          Qualified teachers
+                          {demandSort.key === 'qualified' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                        </button>
+                      </th>
+                      <th scope="col" style={{ verticalAlign: 'middle' }} aria-sort={demandSort.key === 'capacity' ? (demandSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('capacity')}>
+                          Available capacity
+                          {demandSort.key === 'capacity' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                        </button>
+                      </th>
+                      <th scope="col" style={{ verticalAlign: 'middle' }} aria-sort={demandSort.key === 'teachersNeeded' ? (demandSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('teachersNeeded')}>
+                          Teachers needed
+                          {demandSort.key === 'teachersNeeded' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                        </button>
+                      </th>
+                      <th scope="col" style={{ verticalAlign: 'middle' }} aria-sort={demandSort.key === 'status' ? (demandSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <button type="button" className="demand-sort-th" onClick={() => toggleDemandSort('status')}>
+                          Status
+                          {demandSort.key === 'status' ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
+                        </button>
+                      </th>
+                      <th scope="col" style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedDemandRows.map((row) => {
+                      const tone = row.status === 'OK' ? '#166534' : row.status === 'WARN' ? '#b45309' : '#b91c1c';
+                      const needsFix = row.requiredPeriods > 0 && row.status !== 'OK';
+                      const ghostLinkSxLocal = {
+                        ...ghostBtnSx,
+                        textDecoration: 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '3px 8px',
+                        fontSize: 11,
+                      } as const;
+                      return (
+                        <tr key={row.subjectId}>
+                          <td style={{ fontWeight: 800 }}>
+                            {row.subjectName || `Subject ${row.subjectId}`}
+                            {row.subjectCode ? (
+                              <span className="muted" style={{ fontWeight: 700, marginLeft: 6 }}>
+                                ({row.subjectCode})
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>{row.requiredPeriods}</td>
+                          <td>{row.qualifiedTeacherCount}</td>
+                          <td>{row.availableCapacity}</td>
+                          <td>{row.teachersNeeded ?? '—'}</td>
+                          <td style={{ fontWeight: 850, color: tone }}>{row.statusDetail}</td>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            {needsFix ? (
+                              <span className="row" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                <Link style={ghostLinkSxLocal} to="/app/teachers">
+                                  Add teacher
+                                </Link>
+                                <Link style={ghostLinkSxLocal} to="/app/teachers">
+                                  Capacity
+                                </Link>
+                                <Link style={ghostLinkSxLocal} to="/app/academic">
+                                  Frequency
+                                </Link>
+                                <button type="button" style={{ ...ghostBtnSx, fontSize: 11, padding: '3px 8px' }} onClick={() => run('rebalance', row.subjectId)}>
+                                  Rebalance
+                                </button>
+                              </span>
+                            ) : (
+                              <span className="muted" style={{ fontSize: 11 }}>
+                                —
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+        </div>
+      </details>
+
+      {/* SECTION 2 + sticky review header */}
+      <div
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 8,
+          marginLeft: -2,
+          marginRight: -2,
+          padding: '10px 10px 12px',
+          background: 'rgba(255,255,255,0.94)',
+          backdropFilter: 'blur(10px)',
+          borderBottom: '1px solid rgba(15,23,42,0.06)',
+          borderRadius: '0 0 12px 12px',
+        }}
+      >
+        <div className="stack" style={{ gap: 12 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => run('auto', null)}
+              disabled={!classSubjectConfigs.length || teacherDemand.hasSevereShortage}
+              title={
+                teacherDemand.hasSevereShortage ? 'Resolve severe shortages in Teacher demand summary (overview).' : undefined
+              }
+            >
           Auto assign teachers
         </button>
         <button
           type="button"
           className="btn secondary"
-          onClick={() => run('rebalance', null)}
+              onClick={autoAssignClassTeachers}
           disabled={!classSubjectConfigs.length}
+              title="Pick a class teacher per section from current subject-teacher assignments (before timetable)."
         >
+              Auto assign class teachers
+            </button>
+            <button type="button" style={ghostBtnSx} onClick={() => run('rebalance', null)} disabled={!classSubjectConfigs.length}>
           Rebalance loads
         </button>
-        <button type="button" className="btn secondary" onClick={() => run('reset', null)} disabled={!classSubjectConfigs.length}>
-          Clear Auto Assigned Rows
-        </button>
-        <button type="button" className="btn secondary" onClick={autoAssignRooms} disabled={!classSubjectConfigs.length}>
-          Auto assign rooms
-        </button>
-        {autoAssignHomerooms ? (
-          <button type="button" className="btn secondary" onClick={autoAssignHomerooms}>
+            <button type="button" style={ghostBtnSx} onClick={autoAssignHomerooms} disabled={!classSubjectConfigs.length}>
             Auto assign homerooms
           </button>
-        ) : null}
-        <button type="button" className="btn" onClick={fixAllPossibleIssues} disabled={!classSubjectConfigs.length}>
-          Fix all possible issues
+            <button type="button" style={ghostBtnSx} onClick={clearAutomaticAssignments} disabled={!classSubjectConfigs.length}>
+              Clear auto assignments
         </button>
         {subjFilter ? (
-          <button type="button" className="btn secondary" onClick={() => run('rebalance', Number(subjFilter) || null)}>
-            Rebalance selected subject
+              <button type="button" style={ghostBtnSx} onClick={() => run('rebalance', Number(subjFilter) || null)}>
+                Rebalance filtered subject
           </button>
         ) : null}
-        <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+
+            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap', marginLeft: 'auto' }}>
+              <label className="row" style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', color: '#64748b', alignItems: 'center', whiteSpace: 'nowrap' }}>
           <input type="checkbox" checked={manualOverrideMode} onChange={(e) => setManualOverrideMode(e.target.checked)} />
-          Manual Edit Mode (locks edits)
+                Manual edit
         </label>
-        <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+              {showBulkActions ? (
+                <button type="button" style={ghostBtnSx} onClick={() => setBulkDrawerOpen(true)}>
+                  Bulk actions
+                </button>
+              ) : null}
+              <button type="button" style={ghostBtnSx} onClick={() => setInsightsOpen(true)}>
+                Insights
+              </button>
+            </div>
+          </div>
+
+          <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 2 }}>
+            {filterUi ? (
+              <>
+                <div style={{ flex: '0 1 140px', minWidth: 104 }}>
+                  <SelectKeeper
+                    value={filterUi.subjectValue}
+                    onChange={filterUi.onSubjectChange}
+                    options={filterUi.subjectOptions}
+                    emptyValueLabel="All subjects"
+                  />
+                </div>
+                <div style={{ flex: '0 1 120px', minWidth: 96 }}>
+                  <SelectKeeper
+                    value={filterUi.gradeValue}
+                    onChange={filterUi.onGradeChange}
+                    options={filterUi.gradeOptions}
+                    emptyValueLabel="All grades"
+                  />
+                </div>
+                <div style={{ flex: '0 1 140px', minWidth: 104 }}>
+                  <SelectKeeper
+                    value={filterUi.teacherValue}
+                    onChange={filterUi.onTeacherChange}
+                    options={filterUi.teacherOptions}
+                    emptyValueLabel="All teachers"
+                  />
+                </div>
+              </>
+            ) : null}
+            <input
+              value={sectionSearch}
+              onChange={(e) => setSectionSearch(e.target.value)}
+              placeholder="Search sections…"
+              style={{
+                flex: filterUi ? '1 1 140px' : '1 1 200px',
+                minWidth: filterUi ? 120 : 160,
+                maxWidth: 280,
+                fontSize: 12,
+                padding: '6px 10px',
+                borderRadius: 8,
+                border: '1px solid rgba(15,23,42,0.12)',
+              }}
+            />
+            <details style={{ flex: '0 0 auto' }}>
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: '#64748b',
+                  listStyle: 'none',
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(15,23,42,0.08)',
+                  background: 'rgba(248,250,252,0.9)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                More filters
+              </summary>
+              <div className="row" style={{ gap: 12, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <label className="row" style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', alignItems: 'center', opacity: 0.88 }}>
             <input type="checkbox" checked={onlyUnassigned} onChange={(e) => setOnlyUnassigned(e.target.checked)} />
             Only unassigned
           </label>
-          <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+                <label
+                  className="row"
+                  style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', alignItems: 'center', opacity: 0.88 }}
+                  title="Teacher-lock or room-lock enabled"
+                >
             <input type="checkbox" checked={onlyLocked} onChange={(e) => setOnlyLocked(e.target.checked)} />
             Only locked
           </label>
-          <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+                <label className="row" style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', alignItems: 'center', opacity: 0.88 }}>
             <input type="checkbox" checked={onlyOverloaded} onChange={(e) => setOnlyOverloaded(e.target.checked)} />
             Only overloaded
           </label>
-          <label className="row" style={{ gap: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+                <label className="row" style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', alignItems: 'center', opacity: 0.88 }}>
             <input type="checkbox" checked={onlyConflicts} onChange={(e) => setOnlyConflicts(e.target.checked)} />
             Only conflicts
           </label>
-          <input
-            value={sectionSearch}
-            onChange={(e) => setSectionSearch(e.target.value)}
-            placeholder="Search section…"
-            style={{ width: 220 }}
-          />
         </div>
-        {showBulkActions ? (
-          <button type="button" className="btn secondary" onClick={() => setBulkDrawerOpen(true)}>
-            Bulk actions
-          </button>
-        ) : null}
-        <button type="button" className="btn secondary" onClick={() => setInsightsOpen(true)} style={{ marginLeft: 'auto' }}>
-          Insights ▸
-        </button>
+            </details>
       </div>
 
-      <div className="row" style={{ gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 100%', minWidth: 320 }}>
+          <div className="stack" style={{ gap: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 950, fontSize: 15 }}>
+                {`Needs attention (${needsAttention.needs.length} row${needsAttention.needs.length === 1 ? '' : 's'})`}
+              </div>
+              <div
+                className="muted"
+                style={{ fontSize: 11, fontWeight: 700, opacity: 0.78, marginTop: 6 }}
+                title="missing teacher · overload · preferred room missing · conflicts · locked conflicts"
+              >
+                {filterSummaryText}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION 3 — Review workspace */}
+      <div className="stack" style={{ gap: 24 }}>
           {flatRows.length === 0 ? (
-            <div className="muted" style={{ padding: 12 }}>
+          <div className="muted" style={{ padding: '12px 8px', fontSize: 12, opacity: 0.82 }}>
               No section mappings yet. First click <strong>Configure class</strong> for a grade to enable subjects and set default periods.
               Then come back and click <strong>Auto assign teachers</strong>.
             </div>
           ) : (
-            <div className="stack" style={{ gap: 10 }}>
-              <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ fontWeight: 950 }}>{`Needs attention (${needsAttention.needs.length} row${needsAttention.needs.length === 1 ? '' : 's'})`}</div>
-                  <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
-                    Showing: missing teacher · overload · preferred room missing · conflicts · locked conflicts
-                  </div>
-                </div>
+          <>
+            <div style={{ padding: '8px 8px 16px', minWidth: 0 }}>
                 {needsAttention.needs.length === 0 ? (
-                  <div className="muted">No issues found in the current filters.</div>
+                <div className="muted" style={{ fontSize: 12, opacity: 0.82 }}>
+                  No issues found in the current filters.
+                </div>
                 ) : (
                   renderGrouped(groupedNeeds, true)
                 )}
               </div>
 
-              <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ fontWeight: 950 }}>Healthy assignments</div>
-                  <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Collapsed by default</div>
-                </div>
+            <details
+              style={{
+                borderRadius: 12,
+                border: '1px solid rgba(15,23,42,0.06)',
+                background: 'rgba(248,250,252,0.55)',
+                padding: '10px 12px',
+              }}
+            >
+              <summary style={{ cursor: 'pointer', fontWeight: 800, fontSize: 13, listStyle: 'none' }}>
+                Healthy assignments ({needsAttention.healthy.length} row{needsAttention.healthy.length === 1 ? '' : 's'})
+              </summary>
+              <div style={{ marginTop: 16 }}>
                 {needsAttention.healthy.length === 0 ? (
-                  <div className="muted">No healthy rows for current filters.</div>
+                  <div className="muted" style={{ fontSize: 12, opacity: 0.82 }}>
+                    No healthy rows for current filters.
+                  </div>
                 ) : (
                   renderGrouped(groupedHealthy, false)
                 )}
               </div>
-            </div>
+            </details>
+          </>
           )}
-        </div>
       </div>
 
       {insightsOpen ? (
@@ -1508,7 +1933,8 @@ export function SmartTeacherAssignmentBlock({
                   const n = { ...m };
                   for (const cg of classGroups) {
                     if (Number(cg.gradeLevel) !== g) continue;
-                    n[slotKey(cg.classGroupId, s)] = { source: 'manual' as const, locked: true };
+                    const sk = slotKey(cg.classGroupId, s);
+                    n[sk] = mergeAssignmentSlotMeta(n[sk], { source: 'manual', locked: true });
                   }
                   return n;
                 });
@@ -1552,6 +1978,20 @@ export function SmartTeacherAssignmentBlock({
                       }
                       return next;
                     });
+                    setAssignmentMeta((m) => {
+                      const n = { ...m };
+                      for (const cid of inGrade) {
+                        const sk = slotKey(cid, s);
+                        n[sk] = mergeAssignmentSlotMeta(n[sk], {
+                          source: n[sk]?.source ?? 'manual',
+                          locked: n[sk]?.locked ?? false,
+                          conflictReason: n[sk]?.conflictReason,
+                          roomSource: 'manual',
+                          roomLocked: true,
+                        });
+                      }
+                      return n;
+                    });
                     toast.success('Bulk', `Room applied to all sections in class ${g} for the selected subject.`);
                   }}
                 >
@@ -1560,7 +2000,8 @@ export function SmartTeacherAssignmentBlock({
               </div>
 
               <div className="stack">
-                <label style={{ fontSize: 12, fontWeight: 900 }}>Lock</label>
+                <label style={{ fontSize: 12, fontWeight: 900 }}>Lock filtered grade rows</label>
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                         <button
                           type="button"
                           className="btn secondary"
@@ -1574,15 +2015,48 @@ export function SmartTeacherAssignmentBlock({
                       for (const row of flatRows) {
                         if (!inGrade.includes(row.classGroupId)) continue;
                         const cur = n[row.k];
-                        n[row.k] = { source: cur?.source ?? 'manual', locked: true, conflictReason: cur?.conflictReason };
+                          n[row.k] = mergeAssignmentSlotMeta(cur, {
+                            source: cur?.source ?? 'manual',
+                            locked: true,
+                            conflictReason: cur?.conflictReason,
+                          });
                       }
                       return n;
                     });
-                    toast.success('Bulk', `Locked all rows in class ${g}.`);
-                  }}
-                >
-                  Lock grade
+                      toast.success('Bulk', `Teacher-lock applied to visible slots in Class ${g}.`);
+                    }}
+                  >
+                    Lock teachers
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={!gradeFilter}
+                    onClick={() => {
+                      const g = Number(gradeFilter);
+                      if (!Number.isFinite(g)) return;
+                      const inGrade = classGroups.filter((cg) => Number(cg.gradeLevel) === g).map((cg) => cg.classGroupId);
+                      setAssignmentMeta((m) => {
+                        const n = { ...m };
+                        for (const row of flatRows) {
+                          if (!inGrade.includes(row.classGroupId)) continue;
+                          const cur = n[row.k];
+                          n[row.k] = mergeAssignmentSlotMeta(cur, {
+                            source: cur?.source ?? 'manual',
+                            locked: cur?.locked ?? false,
+                            conflictReason: cur?.conflictReason,
+                            roomLocked: true,
+                            roomSource: cur?.roomSource ?? 'manual',
+                          });
+                        }
+                        return n;
+                      });
+                      toast.success('Bulk', `Room-lock applied to visible slots in Class ${g}.`);
+                    }}
+                  >
+                    Lock rooms
                         </button>
+                </div>
         </div>
       </div>
           </div>

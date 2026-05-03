@@ -9,4 +9,8 @@ public record OnboardingAcademicSlotMetaDTO(
         int subjectId,
         /** "auto" | "manual" | "rebalanced" */
         String source,
-        boolean locked) {}
+        boolean locked,
+        /** Optional: room assignment provenance — "auto" | "manual". */
+        String roomSource,
+        /** Optional: when true, bulk homeroom automation skips changing this slot's room override. */
+        Boolean roomLocked) {}

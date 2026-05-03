@@ -175,6 +175,7 @@ public class TimetableEngineService {
             m.put("gradeLevel", cg.getGradeLevel());
             m.put("section", cg.getSection());
             m.put("defaultRoomId", cg.getDefaultRoomId());
+            m.put("classTeacherStaffId", cg.getClassTeacherStaffId());
             return m;
         }).toList();
 

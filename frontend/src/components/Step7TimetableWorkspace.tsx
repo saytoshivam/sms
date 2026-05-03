@@ -163,7 +163,13 @@ type SetupDTO = {
   schoolId: number;
   workingDays: string[];
   slots: { id: number; startTime: string; endTime: string; slotOrder: number; isBreak: boolean }[];
-  classGroups: { id: number; code: string; displayName: string; defaultRoomId: number | null }[];
+  classGroups: {
+    id: number;
+    code: string;
+    displayName: string;
+    defaultRoomId: number | null;
+    classTeacherStaffId?: number | null;
+  }[];
   subjects: { id: number; code: string; name: string; weeklyFrequency?: number | null }[];
   teachers: { id: number; fullName: string; maxWeeklyLectureLoad: number | null; teachableSubjectIds: number[] }[];
   rooms: { id: number; building: string; roomNumber: string; type: string; isSchedulable: boolean }[];
@@ -451,6 +457,8 @@ export default function Step7TimetableWorkspace({
         overloadedTeacherCount: 0,
         frequencyMismatchCount: 0,
         schoolSlotsPerWeek: null as number | null,
+        missingClassTeacherCount: 0,
+        classTeachersAssigned: false,
       };
     }
 
@@ -460,6 +468,21 @@ export default function Step7TimetableWorkspace({
     const teachersAssigned = missingTeacher === 0 && (s.allocations ?? []).length > 0;
 
     const roomsAssigned = (s.allocations ?? []).some((a) => a.roomId != null) || (s.classGroups ?? []).some((cg) => cg.defaultRoomId != null);
+
+    const teachingSections = new Set<number>();
+    for (const a of s.allocations ?? []) {
+      const wf = Number(a.weeklyFrequency ?? 0);
+      const st = a.staffId == null ? 0 : Number(a.staffId);
+      if (wf <= 0 || !(st > 0)) continue;
+      teachingSections.add(Number(a.classGroupId));
+    }
+    let missingClassTeacherCount = 0;
+    for (const cid of teachingSections) {
+      const cg = (s.classGroups ?? []).find((c) => Number(c.id) === Number(cid));
+      const ctRaw = cg?.classTeacherStaffId;
+      if (ctRaw == null || !Number.isFinite(Number(ctRaw))) missingClassTeacherCount += 1;
+    }
+    const classTeachersAssigned = missingClassTeacherCount === 0;
 
     const capFallback = Number(s.capacities?.schoolSlotsPerWeek ?? 0);
     const allocByTeacher = new Map<number, number>();
@@ -488,6 +511,8 @@ export default function Step7TimetableWorkspace({
         overloadedTeacherCount: overloaded,
         frequencyMismatchCount: 0,
         schoolSlotsPerWeek: Number.isFinite(capFallback) ? capFallback : null,
+        missingClassTeacherCount,
+        classTeachersAssigned,
       };
     }
 
@@ -519,6 +544,8 @@ export default function Step7TimetableWorkspace({
       overloadedTeacherCount: overloaded,
       frequencyMismatchCount: freqMismatch,
       schoolSlotsPerWeek: Number.isFinite(capFallback) ? capFallback : null,
+      missingClassTeacherCount,
+      classTeachersAssigned,
     };
   }, [setup.data, entriesSource]);
 
@@ -603,8 +630,20 @@ export default function Step7TimetableWorkspace({
   const hasBlockingIssues = useMemo(() => {
     // Publishing must be blocked when we *know* the draft is not valid.
     // Even if the last generate response didn't include conflicts, a frequency mismatch is a hard blocker.
-    return kpis.hardConflicts > 0 || readiness.frequencyMismatchCount > 0 || !readiness.timeSlotsConfigured || !readiness.academicStructureCompleted;
-  }, [kpis.hardConflicts, readiness.frequencyMismatchCount, readiness.timeSlotsConfigured, readiness.academicStructureCompleted]);
+    return (
+      kpis.hardConflicts > 0 ||
+      readiness.frequencyMismatchCount > 0 ||
+      !readiness.timeSlotsConfigured ||
+      !readiness.academicStructureCompleted ||
+      !readiness.classTeachersAssigned
+    );
+  }, [
+    kpis.hardConflicts,
+    readiness.frequencyMismatchCount,
+    readiness.timeSlotsConfigured,
+    readiness.academicStructureCompleted,
+    readiness.classTeachersAssigned,
+  ]);
 
   const upsertCell = useMutation({
     mutationFn: async (body: { dayOfWeek: string; timeSlotId: number; subjectId: number; staffId: number; roomId: number | null }) => {
@@ -861,8 +900,18 @@ export default function Step7TimetableWorkspace({
                       <div className="mt-1 text-xs font-bold text-slate-500">Before generation: checklist & safety gates.</div>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Chip tone={readiness.overloadedTeacherCount > 0 || readiness.frequencyMismatchCount > 0 ? 'warn' : 'good'}>
-                        {readiness.overloadedTeacherCount > 0 || readiness.frequencyMismatchCount > 0 ? 'Ready (conflicts expected)' : 'Ready'}
+                      <Chip
+                        tone={
+                          readiness.overloadedTeacherCount > 0 ||
+                          readiness.frequencyMismatchCount > 0 ||
+                          !readiness.classTeachersAssigned
+                            ? 'warn'
+                            : 'good'
+                        }
+                      >
+                        {readiness.overloadedTeacherCount > 0 || readiness.frequencyMismatchCount > 0 || !readiness.classTeachersAssigned
+                          ? 'Ready (review warnings)'
+                          : 'Ready'}
                       </Chip>
                     </div>
                   </div>
@@ -874,6 +923,20 @@ export default function Step7TimetableWorkspace({
                       title="Teachers assigned"
                       detail={readiness.teachersAssigned ? 'All allocations have teachers' : `${readiness.missingTeacherCount} allocation(s) missing teacher`}
                       badge={readiness.missingTeacherCount ? <Chip tone="warn">{readiness.missingTeacherCount}</Chip> : undefined}
+                    />
+                    <ReadinessRow
+                      ok={readiness.classTeachersAssigned}
+                      title="Class teachers assigned"
+                      detail={
+                        readiness.classTeachersAssigned
+                          ? 'Every section with teaching work has a class teacher'
+                          : `${readiness.missingClassTeacherCount} section(s) teaching subjects but missing class teacher (Academic structure → Overview / Smart assignment)`
+                      }
+                      badge={
+                        readiness.missingClassTeacherCount ? (
+                          <Chip tone="warn">{readiness.missingClassTeacherCount}</Chip>
+                        ) : undefined
+                      }
                     />
                     <ReadinessRow ok={readiness.roomsAssigned} title="Rooms assigned" detail="Room hints available (homeroom or allocation room)" />
                     <ReadinessRow

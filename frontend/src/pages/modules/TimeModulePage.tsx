@@ -59,7 +59,7 @@ function compareTime(a: string, b: string): number {
 }
 
 export function TimeModulePage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const tabFromUrl = (searchParams.get('tab') ?? 'basic') as 'basic' | 'slots';
   const [tab, setTab] = useState<'basic' | 'slots'>(tabFromUrl);
   useEffect(() => setTab(tabFromUrl), [tabFromUrl]);
@@ -91,13 +91,6 @@ export function TimeModulePage() {
     if (s.length === 0) return { level: 'warn', label: 'No time slots' };
     return { level: 'ok', label: `${s.length} slot${s.length === 1 ? '' : 's'} · ${b.workingDays.length} day${b.workingDays.length === 1 ? '' : 's'}` };
   }, [basic.isLoading, basic.isError, basic.data, slots.isLoading, slots.isError, slots.data]);
-
-  const setTabUrl = (next: 'basic' | 'slots') => {
-    const sp = new URLSearchParams(searchParams);
-    if (next === 'basic') sp.delete('tab');
-    else sp.set('tab', next);
-    setSearchParams(sp, { replace: true });
-  };
 
   return (
     <ModulePage
@@ -507,7 +500,9 @@ function SlotsEditor({
         title="Edit time slot"
         confirmLabel={updateSlot.isPending ? 'Saving…' : 'Save'}
         confirmDisabled={updateSlot.isPending}
-        onConfirm={() => editingId != null && editDraft && updateSlot.mutate({ id: editingId, draft: editDraft })}
+        onConfirm={() => {
+          if (editingId != null && editDraft) updateSlot.mutate({ id: editingId, draft: editDraft });
+        }}
         onClose={() => {
           setEditingId(null);
           setEditDraft(null);
