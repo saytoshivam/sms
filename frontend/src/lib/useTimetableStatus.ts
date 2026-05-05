@@ -19,7 +19,7 @@ import {
  * top.
  */
 
-type Version = { id: number; status: string; version: number };
+type Version = { id: number; status: string; version: number; generatedAt?: string | null; publishedAt?: string | null };
 
 export type TimetableStatusLevel = 'idle' | 'ok' | 'warn' | 'error' | 'info';
 
@@ -37,12 +37,15 @@ export type UseTimetableStatusResult = {
   versionLoading: boolean;
   entries: EntryRef[];
   entriesLoading: boolean;
-  versionStatus: 'DRAFT' | 'REVIEW' | 'PUBLISHED' | 'UNKNOWN';
+  /** Versions list or published peek still loading — wait before hub “not started” decisions. */
+  timetableHealthExtrasLoading: boolean;
+  versionStatus: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'UNKNOWN';
   conflicts: { hard: number; soft: number; total: number };
   conflictsList: Conflict[];
   publishBlocked: boolean;
   publishBlockedReason: string | null;
   hasEntries: boolean;
+  /** School has at least one non-empty timetable version marked PUBLISHED (not tied to workspace pointer). */
   hasPublishedTimetable: boolean;
   status: TimetableStatus;
   versionLabel: string | null;
@@ -60,13 +63,35 @@ export function useTimetableStatus(): UseTimetableStatusResult {
     queryFn: async () => (await api.post<Version>('/api/v2/timetable/versions/workspace')).data,
   });
 
+  const versionsQuery = useQuery({
+    queryKey: ['ttv2-versions'],
+    queryFn: async () => (await api.get<Version[]>('/api/v2/timetable/versions')).data,
+  });
+
+  const latestPublishedVersion = useMemo(() => {
+    const list = versionsQuery.data ?? [];
+    const pubs = list.filter((v) => String(v.status).toUpperCase() === 'PUBLISHED');
+    pubs.sort((a, b) => (b.version ?? 0) - (a.version ?? 0));
+    return pubs[0] ?? null;
+  }, [versionsQuery.data]);
+
   const versionId = draftQuery.data?.id ?? null;
+  const latestPublishedId = latestPublishedVersion?.id ?? null;
+  /** When workspace isn't the latest published row, peek that version's entry count for hub / badges. */
+  const needPublishedPeek = Boolean(latestPublishedId != null && versionId !== latestPublishedId);
 
   const entriesQuery = useQuery({
     queryKey: ['tt-entries', versionId],
     enabled: Boolean(versionId),
     queryFn: async () =>
       (await api.get<EntryRef[]>(`/api/timetable/entries?timetableVersionId=${encodeURIComponent(String(versionId))}`)).data,
+  });
+
+  const publishedPeekQuery = useQuery({
+    queryKey: ['tt-entries', latestPublishedId],
+    enabled: needPublishedPeek && Boolean(latestPublishedId),
+    queryFn: async () =>
+      (await api.get<EntryRef[]>(`/api/timetable/entries?timetableVersionId=${encodeURIComponent(String(latestPublishedId))}`)).data,
   });
 
   const setup = setupQuery.data ?? null;
@@ -82,26 +107,49 @@ export function useTimetableStatus(): UseTimetableStatusResult {
 
   const conflicts = useMemo(() => summariseConflicts(conflictsList), [conflictsList]);
 
-  const versionStatus: 'DRAFT' | 'REVIEW' | 'PUBLISHED' | 'UNKNOWN' = useMemo(() => {
+  const versionStatus: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'UNKNOWN' = useMemo(() => {
     const raw = String(draftQuery.data?.status ?? '').toUpperCase();
-    if (raw === 'DRAFT' || raw === 'REVIEW' || raw === 'PUBLISHED') return raw;
+    if (raw === 'DRAFT' || raw === 'PUBLISHED' || raw === 'ARCHIVED') return raw;
     return 'UNKNOWN';
   }, [draftQuery.data]);
 
   const hasEntries = entries.length > 0;
-  const hasPublishedTimetable = versionStatus === 'PUBLISHED' && hasEntries;
+
+  const timetableHealthExtrasLoading = Boolean(
+    versionsQuery.isLoading ||
+      versionsQuery.isFetching ||
+      (needPublishedPeek && latestPublishedId != null && (publishedPeekQuery.isLoading || publishedPeekQuery.isFetching)),
+  );
+
+  const hasPublishedTimetable = useMemo(() => {
+    const pid = latestPublishedId;
+    if (pid == null) return false;
+    if (!needPublishedPeek) {
+      return hasEntries && String(draftQuery.data?.status ?? '').toUpperCase() === 'PUBLISHED';
+    }
+    return (publishedPeekQuery.data?.length ?? 0) > 0;
+  }, [
+    latestPublishedId,
+    needPublishedPeek,
+    hasEntries,
+    draftQuery.data?.status,
+    publishedPeekQuery.data?.length,
+  ]);
 
   const publishBlockedReason: string | null = useMemo(() => {
     if (!setup) return 'Setup is loading…';
+    if (versionStatus === 'PUBLISHED') {
+      return 'Workspace is showing the published timetable — generate or open a draft to publish updates.';
+    }
     if (conflicts.hard > 0) {
       return `${conflicts.hard} hard conflict${conflicts.hard === 1 ? '' : 's'} must be resolved before publishing.`;
     }
     if (!hasEntries) return 'Generate a draft before publishing.';
     return null;
-  }, [setup, conflicts.hard, hasEntries]);
+  }, [setup, conflicts.hard, hasEntries, versionStatus]);
 
   const status: TimetableStatus = useMemo(() => {
-    if (setupQuery.isLoading || draftQuery.isLoading || entriesQuery.isLoading) {
+    if (setupQuery.isLoading || draftQuery.isLoading || entriesQuery.isLoading || timetableHealthExtrasLoading) {
       return { level: 'idle', label: 'Loading' };
     }
     if (setupQuery.isError) return { level: 'error', label: 'Setup failed' };
@@ -132,8 +180,8 @@ export function useTimetableStatus(): UseTimetableStatusResult {
       return { level: 'idle', label: 'No draft yet', hint: 'Generate a draft to populate.' };
     }
     return {
-      level: versionStatus === 'REVIEW' ? 'info' : 'ok',
-      label: versionStatus === 'REVIEW' ? `In review · v${draftQuery.data?.version ?? '?'}` : `Draft · v${draftQuery.data?.version ?? '?'}`,
+      level: 'ok',
+      label: `Draft · v${draftQuery.data?.version ?? '?'}`,
     };
   }, [
     setupQuery.isLoading,
@@ -141,6 +189,7 @@ export function useTimetableStatus(): UseTimetableStatusResult {
     draftQuery.isLoading,
     draftQuery.data,
     entriesQuery.isLoading,
+    timetableHealthExtrasLoading,
     entries.length,
     conflicts.hard,
     conflicts.soft,
@@ -154,8 +203,8 @@ export function useTimetableStatus(): UseTimetableStatusResult {
     const s =
       versionStatus === 'PUBLISHED'
         ? 'Published'
-        : versionStatus === 'REVIEW'
-          ? 'In review'
+        : versionStatus === 'ARCHIVED'
+          ? 'Archived'
           : versionStatus === 'DRAFT'
             ? 'Draft'
             : 'Working copy';
@@ -170,6 +219,7 @@ export function useTimetableStatus(): UseTimetableStatusResult {
     versionLoading: draftQuery.isLoading,
     entries,
     entriesLoading: entriesQuery.isLoading,
+    timetableHealthExtrasLoading,
     versionStatus,
     conflicts,
     conflictsList,

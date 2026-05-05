@@ -78,7 +78,8 @@ const TEACHER = 'TEACHER';
 function isTeacher(s: StaffTeachable) {
   const r = s.roleNames ?? [];
   if (r.includes(TEACHER)) return true;
-  if (r.length === 0 && (s.teachableSubjectIds?.length ?? 0) > 0) return true;
+  // Staff roster rows explicitly linked to teachable subjects schedule like instructors even if IAM uses a non-TEACHER role slug.
+  if ((s.teachableSubjectIds?.length ?? 0) > 0) return true;
   return false;
 }
 

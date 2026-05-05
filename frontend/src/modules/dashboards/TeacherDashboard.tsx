@@ -42,8 +42,8 @@ export function TeacherDashboard({ profile }: { profile: MeProfile }) {
         tag="Teacher"
         subtitle={
           <>
-            <strong>{profile.email}</strong> — take attendance, log lectures, follow timetables, and watch class
-            progress.
+            <strong>{profile.email}</strong> — take attendance, log lectures, and follow your{' '}
+            <strong>published</strong> timetable (drafts stay in Operations Hub).
           </>
         }
       />
@@ -82,7 +82,6 @@ export function TeacherDashboard({ profile }: { profile: MeProfile }) {
         <div className="student-tile-grid">
           <WorkspaceTileLink to="/app/teacher/class-progress" icon="📊" label="Class progress" />
           <WorkspaceTileLink to="/app/teacher/timetable" icon="🗓" label="My timetable" />
-          <WorkspaceTileLink to="/app/timetable/rules" icon="🔁" label="Recurring slots" />
           <WorkspaceTileLink to="/app/attendance" icon="✅" label="Attendance" />
           <WorkspaceTileLink to="/app/lectures" icon="📖" label="Lectures" />
           <WorkspaceTileLink to="/app/students" icon="👥" label="Students" />

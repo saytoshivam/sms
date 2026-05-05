@@ -27,7 +27,7 @@ public class TimetableGridV2Controller {
     private final TimetableGridV2Service timetableGridV2Service;
 
     @GetMapping("/time-slots")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD','TEACHER','CLASS_TEACHER')")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
     public List<TimeSlotViewDTO> listTimeSlots() {
         return timetableGridV2Service.listTimeSlots();
     }
@@ -72,7 +72,7 @@ public class TimetableGridV2Controller {
     }
 
     @PostMapping("/versions/workspace")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD','TEACHER','CLASS_TEACHER')")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
     public TimetableVersionViewDTO workspaceVersion() {
         return timetableGridV2Service.currentWorkspaceVersion();
     }
@@ -90,7 +90,7 @@ public class TimetableGridV2Controller {
     }
 
     @GetMapping("/entries")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD','TEACHER','CLASS_TEACHER')")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
     public List<TimetableEntryViewDTO> listEntries(
             @RequestParam Integer timetableVersionId,
             @RequestParam Integer classGroupId

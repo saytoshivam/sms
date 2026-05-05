@@ -515,13 +515,7 @@ export function AppLayout() {
                     Lectures
                   </Link>
                   <Link className="student-drawer-link" to="/app/teacher/timetable" onClick={closeMenu}>
-                    Timetable
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/timetable/grid" onClick={closeMenu}>
-                    Timetable editor
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/timetable/rules" onClick={closeMenu}>
-                    Recurring slots
+                    My timetable
                   </Link>
                 </DrawerNavSection>
                 <DrawerNavSection title={FeatureArea.ATTENDANCE}>

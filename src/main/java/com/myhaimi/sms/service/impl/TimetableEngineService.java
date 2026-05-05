@@ -586,9 +586,13 @@ public class TimetableEngineService {
         stats.put("attemptsUsed", gen.stats().get("attemptsUsed"));
         stats.put("nodeBudget", gen.stats().get("nodeBudget"));
 
+        version.setGeneratedAt(generatedAt);
+        version.setStatus(TimetableStatus.DRAFT);
+        version = timetableVersionRepo.save(version);
+
         return new TimetableGenerateResponseDTO(
                 true,
-                new TimetableVersionViewDTO(version.getId(), version.getStatus().name(), version.getVersion()),
+                TimetableVersionViewDTO.from(version),
                 view,
                 hard,
                 soft,
@@ -1262,8 +1266,8 @@ public class TimetableEngineService {
     public TimetableEntryViewDTO updateCell(TimetableCellUpdateDTO dto) {
         Integer schoolId = requireSchoolId();
         TimetableVersion version = timetableVersionRepo.findByIdAndSchool_Id(dto.timetableVersionId(), schoolId).orElseThrow();
-        if (version.getStatus() == TimetableStatus.PUBLISHED) {
-            throw new IllegalStateException("Published timetable cannot be edited. Create a new draft version.");
+        if (version.getStatus() != TimetableStatus.DRAFT) {
+            throw new IllegalStateException("Only draft timetables can be edited. Create a new draft version.");
         }
 
         DayOfWeek dow;
@@ -1333,31 +1337,49 @@ public class TimetableEngineService {
     public TimetableVersionViewDTO saveDraft(Integer versionId) {
         Integer schoolId = requireSchoolId();
         TimetableVersion v = timetableVersionRepo.findByIdAndSchool_Id(versionId, schoolId).orElseThrow();
-        if (v.getStatus() == TimetableStatus.PUBLISHED) return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
-        v.setStatus(TimetableStatus.REVIEW);
-        v = timetableVersionRepo.save(v);
-        return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
+        return TimetableVersionViewDTO.from(v);
     }
 
     @Transactional
     public TimetableVersionViewDTO publish(Integer versionId) {
         Integer schoolId = requireSchoolId();
         TimetableVersion v = timetableVersionRepo.findByIdAndSchool_Id(versionId, schoolId).orElseThrow();
-        if (v.getStatus() == TimetableStatus.PUBLISHED) return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
+        if (v.getStatus() == TimetableStatus.PUBLISHED) {
+            return TimetableVersionViewDTO.from(v);
+        }
+        if (v.getStatus() != TimetableStatus.DRAFT) {
+            throw new IllegalStateException("Only a draft timetable can be published.");
+        }
 
         // Frequency completeness is a soft warning surfaced during generation/preview;
         // publish itself does not block on under-allocated subjects so admins can ship
         // a partial timetable when the engine could not satisfy every constraint.
 
-        // Archive existing published by downgrading to REVIEW
-        TimetableVersion published = timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.PUBLISHED).orElse(null);
-        if (published != null) {
-            published.setStatus(TimetableStatus.REVIEW);
-            timetableVersionRepo.save(published);
+        TimetableVersion previouslyPublished =
+                timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.PUBLISHED).orElse(null);
+        if (previouslyPublished != null) {
+            previouslyPublished.setStatus(TimetableStatus.ARCHIVED);
+            timetableVersionRepo.save(previouslyPublished);
         }
         v.setStatus(TimetableStatus.PUBLISHED);
+        v.setPublishedAt(Instant.now());
         v = timetableVersionRepo.save(v);
-        return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
+        return TimetableVersionViewDTO.from(v);
+    }
+
+    @Transactional
+    public TimetableVersionViewDTO archive(Integer versionId) {
+        Integer schoolId = requireSchoolId();
+        TimetableVersion v = timetableVersionRepo.findByIdAndSchool_Id(versionId, schoolId).orElseThrow();
+        if (v.getStatus() == TimetableStatus.PUBLISHED) {
+            throw new IllegalStateException("Cannot archive the active published timetable.");
+        }
+        if (v.getStatus() == TimetableStatus.ARCHIVED) {
+            return TimetableVersionViewDTO.from(v);
+        }
+        v.setStatus(TimetableStatus.ARCHIVED);
+        v = timetableVersionRepo.save(v);
+        return TimetableVersionViewDTO.from(v);
     }
 
     @Transactional(readOnly = true)

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/auth';
+import { RequireSchoolLeadership } from './components/RequireSchoolLeadership';
 import { AppLayout } from './pages/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
@@ -78,7 +79,14 @@ export default function App() {
         <Route path="teachers" element={<TeachersModulePage />} />
         <Route path="rooms" element={<RoomsModulePage />} />
         <Route path="time" element={<TimeModulePage />} />
-        <Route path="timetable" element={<TimetableModulePage />} />
+        <Route
+          path="timetable"
+          element={
+            <RequireSchoolLeadership>
+              <TimetableModulePage />
+            </RequireSchoolLeadership>
+          }
+        />
         <Route path="admin/register-school" element={<RegisterSchoolPage />} />
         <Route path="admin/plans-features" element={<PlatformPlansFeaturesPage />} />
         <Route path="admin/feature-catalog" element={<PlatformFeatureCatalogPage />} />
@@ -116,8 +124,22 @@ export default function App() {
         <Route path="lectures" element={<LecturesPage />} />
         <Route path="teacher/class-progress" element={<ClassProgressPage />} />
         <Route path="teacher/timetable" element={<TeacherTimetablePage />} />
-        <Route path="timetable/rules" element={<TimetableRulesPage />} />
-        <Route path="timetable/grid" element={<TimetableGridV2Page />} />
+        <Route
+          path="timetable/rules"
+          element={
+            <RequireSchoolLeadership>
+              <TimetableRulesPage />
+            </RequireSchoolLeadership>
+          }
+        />
+        <Route
+          path="timetable/grid"
+          element={
+            <RequireSchoolLeadership>
+              <TimetableGridV2Page />
+            </RequireSchoolLeadership>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/app" replace />} />

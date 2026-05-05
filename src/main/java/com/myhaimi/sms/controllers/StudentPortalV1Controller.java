@@ -7,6 +7,7 @@ import com.myhaimi.sms.DTO.studentportal.UnreadCountDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentExamCardDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentMarkRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
+import com.myhaimi.sms.DTO.timetable.PublishedStudentWeeklyTimetableDTO;
 import com.myhaimi.sms.DTO.timetable.TimetableOccurrenceDTO;
 import com.myhaimi.sms.entity.AnnouncementCategory;
 import com.myhaimi.sms.entity.User;
@@ -50,6 +51,13 @@ public class StudentPortalV1Controller {
         int studentId = linkedStudentId(principal);
         LocalDate t = LocalDate.now();
         return ResponseEntity.ok(studentPortalService.mySchedule(studentId, t, t));
+    }
+
+    /** Published class timetable: period × day grid for the student's section. */
+    @GetMapping("/timetable/weekly-published")
+    public PublishedStudentWeeklyTimetableDTO weeklyPublishedTimetable(@AuthenticationPrincipal UserDetails principal) {
+        int studentId = linkedStudentId(principal);
+        return studentPortalService.myWeeklyTimetable(studentId);
     }
 
     @GetMapping("/marks")

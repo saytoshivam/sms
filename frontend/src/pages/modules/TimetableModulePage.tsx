@@ -13,7 +13,7 @@ type BasicInfo = {
   workingDays?: string[];
 };
 
-type Version = { id: number; status: string; version: number };
+type Version = { id: number; status: string; version: number; generatedAt?: string | null; publishedAt?: string | null };
 
 const TABS = ['workspace', 'conflicts'] as const;
 type TimetableTab = (typeof TABS)[number];
@@ -63,6 +63,13 @@ export function TimetableModulePage() {
     return pubs[0] ?? null;
   }, [versions.data]);
 
+  const latestDraftVersion: Version | null = useMemo(() => {
+    const list = versions.data ?? [];
+    const drafts = list.filter((v) => String(v.status).toUpperCase() === 'DRAFT');
+    drafts.sort((a, b) => (b.version ?? 0) - (a.version ?? 0));
+    return drafts[0] ?? null;
+  }, [versions.data]);
+
   const [viewKey, setViewKey] = useState<'DRAFT' | 'PUBLISHED'>('DRAFT');
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLSpanElement | null>(null);
@@ -94,8 +101,8 @@ export function TimetableModulePage() {
     const v = lc.version.version != null ? `v${lc.version.version}` : '';
     const s = lc.versionStatus === 'PUBLISHED'
       ? 'Published'
-      : lc.versionStatus === 'REVIEW'
-        ? 'In review'
+      : lc.versionStatus === 'ARCHIVED'
+        ? 'Archived'
         : lc.versionStatus === 'DRAFT'
           ? 'Draft'
           : 'Working copy';
@@ -151,9 +158,24 @@ export function TimetableModulePage() {
         className="btn secondary"
         disabled={lc.saveDraftPending || !lc.hasEntries || lc.versionStatus === 'PUBLISHED'}
         onClick={() => void lc.saveDraft()}
-        title={lc.hasEntries ? 'Move the draft to review' : 'Generate a draft first'}
+        title={lc.hasEntries ? 'Save draft metadata' : 'Generate a draft first'}
       >
         {lc.saveDraftPending ? 'Saving…' : 'Save draft'}
+      </button>
+      <button
+        type="button"
+        className="btn secondary"
+        disabled={
+          lc.archiveDraftPending || lc.version == null || lc.versionStatus === 'PUBLISHED' || lc.versionStatus === 'ARCHIVED'
+        }
+        onClick={() => void lc.archiveDraft()}
+        title={
+          lc.versionStatus === 'PUBLISHED'
+            ? 'Cannot archive the live published timetable'
+            : 'Archive the current working version (draft only)'
+        }
+      >
+        {lc.archiveDraftPending ? 'Archiving…' : 'Archive'}
       </button>
       <button
         type="button"
@@ -170,7 +192,7 @@ export function TimetableModulePage() {
         disabled={lc.regeneratePending}
         onClick={() => void lc.regenerate()}
       >
-        {lc.regeneratePending ? 'Regenerating…' : 'Regenerate'}
+        {lc.regeneratePending ? 'Generating…' : 'Generate draft'}
       </button>
     </>
   );
@@ -180,7 +202,14 @@ export function TimetableModulePage() {
       title="Timetable"
       subtitle={
         <>
-          Generate, review conflicts, lock cells, and publish. Edits propagate immediately to teacher and student views.
+          Generate a draft, fix conflicts, then publish. Teachers and students only see the published timetable.
+          {latestDraftVersion || latestPublished ? (
+            <span style={{ display: 'inline-block', marginLeft: 8, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 800, background: 'rgba(37,99,235,0.08)', color: '#1e3a8a' }}>
+              {latestDraftVersion ? `Draft v${latestDraftVersion.version}` : 'No draft'}
+              {' · '}
+              {latestPublished ? `Published v${latestPublished.version}` : 'Not published'}
+            </span>
+          ) : null}
           {versionLabel ? (
             <span style={{ display: 'inline-block', marginLeft: 8, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 800, background: 'rgba(15,23,42,0.06)', color: '#0f172a' }}>
               {versionLabel}

@@ -12,6 +12,26 @@ import java.util.Optional;
 
 public interface TimetableEntryRepo extends JpaRepository<TimetableEntry, Integer> {
     List<TimetableEntry> findBySchool_IdAndTimetableVersion_Id(Integer schoolId, Integer versionId);
+
+    List<TimetableEntry> findBySchool_IdAndTimetableVersion_IdAndStaff_Id(Integer schoolId, Integer versionId, Integer staffId);
+
+    @Query(
+            "select e from TimetableEntry e join fetch e.timeSlot join fetch e.subject join fetch e.staff join fetch e.classGroup left join fetch e.room "
+                    + "where e.school.id = :schoolId and e.timetableVersion.id = :versionId")
+    List<TimetableEntry> fetchGraphBySchoolAndVersion(@Param("schoolId") Integer schoolId, @Param("versionId") Integer versionId);
+
+    @Query(
+            "select e from TimetableEntry e join fetch e.timeSlot join fetch e.subject join fetch e.staff join fetch e.classGroup left join fetch e.room "
+                    + "where e.school.id = :schoolId and e.timetableVersion.id = :versionId and e.staff.id = :staffId")
+    List<TimetableEntry> fetchGraphBySchoolVersionAndStaff(
+            @Param("schoolId") Integer schoolId, @Param("versionId") Integer versionId, @Param("staffId") Integer staffId);
+
+    @Query(
+            "select e from TimetableEntry e join fetch e.timeSlot join fetch e.subject join fetch e.staff join fetch e.classGroup left join fetch e.room "
+                    + "where e.school.id = :schoolId and e.timetableVersion.id = :versionId and e.classGroup.id = :classGroupId")
+    List<TimetableEntry> fetchGraphBySchoolVersionAndClassGroup(
+            @Param("schoolId") Integer schoolId, @Param("versionId") Integer versionId, @Param("classGroupId") Integer classGroupId);
+
     List<TimetableEntry> findBySchool_IdAndTimetableVersion_IdAndClassGroup_Id(Integer schoolId, Integer versionId, Integer classGroupId);
 
     long countBySchool_IdAndTimetableVersion_Id(Integer schoolId, Integer versionId);

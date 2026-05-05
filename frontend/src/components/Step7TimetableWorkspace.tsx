@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
@@ -6,6 +7,14 @@ import { toast } from '../lib/toast';
 import { extractTeacherDemandWarnings } from '../lib/teacherDemandAnalysis';
 import { ClassGroupSearchCombobox, useClassGroupsCatalog } from './ClassGroupSearchCombobox';
 import { OptionSearchCombobox } from './OptionSearchCombobox';
+import {
+  detectEntryConflicts,
+  detectStructuralConflicts,
+  summariseConflicts,
+  type Conflict as DetectedConflict,
+  type EntryRef,
+  type SetupSnapshot,
+} from '../lib/timetableConflicts';
 
 function Icon({
   name,
@@ -123,7 +132,7 @@ function Icon({
 }
 
 type TimeSlot = { id: number; startTime: string; endTime: string; slotOrder: number; isBreak: boolean };
-type Version = { id: number; status: string; version: number };
+type Version = { id: number; status: string; version: number; generatedAt?: string | null; publishedAt?: string | null };
 type Entry = {
   id: number;
   classGroupId: number;
@@ -138,7 +147,7 @@ type Entry = {
   roomLabel: string | null;
 };
 
-type Conflict = {
+type EngineConflict = {
   severity: 'HARD' | 'SOFT';
   kind: string;
   classGroupId: number | null;
@@ -153,8 +162,8 @@ type GenerateResponse = {
   success: boolean;
   version: { id: number; status: string; version: number };
   timetable: Entry[];
-  hardConflicts: Conflict[];
-  softConflicts: Conflict[];
+  hardConflicts: EngineConflict[];
+  softConflicts: EngineConflict[];
   generatedAt: string;
   stats?: Record<string, unknown>;
 };
@@ -298,6 +307,26 @@ export default function Step7TimetableWorkspace({
     enabled: me.isSuccess && !viewVersion,
   });
 
+  const versionsList = useQuery({
+    queryKey: ['ttv2-versions'],
+    queryFn: async () => (await api.get<Version[]>('/api/v2/timetable/versions')).data,
+    enabled: me.isSuccess,
+  });
+
+  const latestDraftListed = useMemo(() => {
+    const list = versionsList.data ?? [];
+    const d = list.filter((v) => String(v.status).toUpperCase() === 'DRAFT');
+    d.sort((a, b) => (b.version ?? 0) - (a.version ?? 0));
+    return d[0] ?? null;
+  }, [versionsList.data]);
+
+  const latestPublishedListed = useMemo(() => {
+    const list = versionsList.data ?? [];
+    const p = list.filter((v) => String(v.status).toUpperCase() === 'PUBLISHED');
+    p.sort((a, b) => (b.version ?? 0) - (a.version ?? 0));
+    return p[0] ?? null;
+  }, [versionsList.data]);
+
   const activeVersion = viewVersion ?? draft.data ?? null;
   const versionId = activeVersion?.id ?? null;
 
@@ -427,12 +456,66 @@ export default function Step7TimetableWorkspace({
     return row?.displayName ?? row?.code ?? '—';
   }, [classGroups.data, selectedClassGroupId]);
 
-  const conflicts = useMemo(() => {
+  const setupSnapshot = useMemo((): SetupSnapshot | null => {
+    const d = setup.data;
+    if (!d) return null;
     return {
-      hard: lastGenerate?.hardConflicts ?? [],
-      soft: lastGenerate?.softConflicts ?? [],
+      workingDays: d.workingDays ?? [],
+      slots: (d.slots ?? []).map((s) => ({ id: s.id, isBreak: !!s.isBreak, slotOrder: s.slotOrder })),
+      classGroups: (d.classGroups ?? []).map((cg) => ({
+        id: cg.id,
+        code: cg.code,
+        displayName: cg.displayName,
+        defaultRoomId: cg.defaultRoomId ?? null,
+      })),
+      subjects: (d.subjects ?? []).map((s) => ({
+        id: s.id,
+        code: s.code,
+        name: s.name,
+        weeklyFrequency: s.weeklyFrequency,
+      })),
+      teachers: (d.teachers ?? []).map((t) => ({
+        id: t.id,
+        fullName: t.fullName,
+        maxWeeklyLectureLoad: t.maxWeeklyLectureLoad ?? null,
+        teachableSubjectIds: t.teachableSubjectIds ?? [],
+      })),
+      rooms: (d.rooms ?? []).map((r) => ({ id: r.id, isSchedulable: r.isSchedulable !== false })),
+      allocations: (d.allocations ?? []).map((a) => ({
+        id: a.id,
+        classGroupId: a.classGroupId,
+        subjectId: a.subjectId,
+        staffId: a.staffId ?? null,
+        roomId: a.roomId ?? null,
+        weeklyFrequency: a.weeklyFrequency ?? null,
+      })),
+      capacities: d.capacities,
     };
-  }, [lastGenerate]);
+  }, [setup.data]);
+
+  const entryRefs: EntryRef[] = useMemo(
+    () =>
+      entriesSource.map((e) => ({
+        classGroupId: e.classGroupId,
+        subjectId: e.subjectId,
+        staffId: e.staffId,
+        roomId: e.roomId,
+        dayOfWeek: e.dayOfWeek,
+        timeSlotId: e.timeSlotId,
+      })),
+    [entriesSource],
+  );
+
+  const detectedConflicts = useMemo(() => {
+    const s = setupSnapshot;
+    if (!s) return [];
+    return [...detectStructuralConflicts(s), ...detectEntryConflicts(s, entryRefs)];
+  }, [setupSnapshot, entryRefs]);
+
+  const conflictSummary = useMemo(() => summariseConflicts(detectedConflicts), [detectedConflicts]);
+
+  const hardDetected = useMemo(() => detectedConflicts.filter((x) => x.severity === 'HARD'), [detectedConflicts]);
+  const softDetected = useMemo(() => detectedConflicts.filter((x) => x.severity === 'SOFT'), [detectedConflicts]);
 
   const lastGeneratedTime = useMemo(() => {
     const raw = lastGenerate?.generatedAt;
@@ -455,11 +538,11 @@ export default function Step7TimetableWorkspace({
       sectionsCovered: sec.size,
       teachersScheduled: t.size,
       roomsUsed: r.size,
-      hardConflicts: conflicts.hard.length,
-      softConflicts: conflicts.soft.length,
-      conflictsTotal: conflicts.hard.length + conflicts.soft.length,
+      hardConflicts: conflictSummary.hard,
+      softConflicts: conflictSummary.soft,
+      conflictsTotal: conflictSummary.total,
     };
-  }, [entriesSource, conflicts.hard.length, conflicts.soft.length]);
+  }, [entriesSource, conflictSummary.hard, conflictSummary.soft, conflictSummary.total]);
 
   const readiness = useMemo(() => {
     const s = setup.data;
@@ -626,7 +709,8 @@ export default function Step7TimetableWorkspace({
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['ttv2-draft-version'] });
-      toast.success('Saved', 'Draft moved to review.');
+      await qc.invalidateQueries({ queryKey: ['ttv2-versions'] });
+      toast.success('Saved', 'Draft saved.');
     },
     onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
@@ -638,9 +722,25 @@ export default function Step7TimetableWorkspace({
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['ttv2-draft-version'] });
-      toast.success('Published', 'Timetable is now active.');
+      await qc.invalidateQueries({ queryKey: ['ttv2-versions'] });
+      await qc.invalidateQueries({ queryKey: ['tt-entries'] });
+      toast.success('Published', 'Timetable is now active for teachers and students.');
     },
     onError: (e) => toast.error('Publish failed', formatApiError(e)),
+  });
+
+  const archive = useMutation({
+    mutationFn: async () => {
+      if (!versionId) throw new Error('Missing draft version');
+      return (await api.post(`/api/timetable/archive?timetableVersionId=${encodeURIComponent(String(versionId))}`)).data as Version;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['ttv2-draft-version'] });
+      await qc.invalidateQueries({ queryKey: ['ttv2-versions'] });
+      await qc.invalidateQueries({ queryKey: ['tt-entries'] });
+      toast.success('Archived', 'This version was archived.');
+    },
+    onError: (e) => toast.error('Archive failed', formatApiError(e)),
   });
 
   const hasBlockingIssues = useMemo(() => {
@@ -784,12 +884,20 @@ export default function Step7TimetableWorkspace({
     return () => ro.disconnect();
   }, [loading, loadError, tab, selectedClassGroupId, selectedTeacherId, selectedRoomId, teacherOptions.length, roomOptions.length]);
 
-  const jumpToConflict = (c: Conflict) => {
-    if (!c.dayOfWeek || !c.timeSlotId) return;
-    if (tab !== 'SECTION') setTab('SECTION');
-    if (c.classGroupId != null) setSelectedClassGroupId(String(c.classGroupId));
-    // Open the drawer for that cell; when section changes, drawer still shows correct key.
-    setDrawerKey(keyOf(c.dayOfWeek, c.timeSlotId));
+  const jumpToDetectedConflict = (c: DetectedConflict) => {
+    const day = c.refs?.days?.[0];
+    const tsId = c.refs?.timeSlotIds?.[0];
+    const cg = c.refs?.classGroupIds?.[0];
+    if (day && tsId != null && Number.isFinite(tsId)) {
+      if (tab !== 'SECTION') setTab('SECTION');
+      if (cg != null) setSelectedClassGroupId(String(cg));
+      setDrawerKey(keyOf(day, tsId));
+      return;
+    }
+    if (cg != null) {
+      if (tab !== 'SECTION') setTab('SECTION');
+      setSelectedClassGroupId(String(cg));
+    }
   };
 
   const viewTitle = useMemo(() => {
@@ -826,7 +934,7 @@ export default function Step7TimetableWorkspace({
                 <Chip tone="info">School slots/week: <span className="font-black">{readiness.schoolSlotsPerWeek ?? '—'}</span></Chip>
               </div>
               <div className="mt-2 text-xs font-bold text-slate-600">
-                Intelligent scheduling workspace powered by your academic structure (draft → conflicts → editor → publish).
+                Intelligent scheduling workspace powered by your academic structure (generate draft → resolve conflicts → publish).
               </div>
             </div>
 
@@ -982,59 +1090,113 @@ export default function Step7TimetableWorkspace({
                     <div className="mt-1 text-xs font-bold text-slate-500">Hard conflicts block publish. Soft conflicts are advisory.</div>
                   </div>
                   <div className="p-5 space-y-3 min-h-0 flex-1 overflow-y-auto">
-                    {!lastGenerate ? (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-600">
-                        Generate a draft to see conflicts.
-                      </div>
-                    ) : null}
-
-                    {conflicts.hard.length ? (
-                      <div className="space-y-2">
-                        <div className="text-xs font-extrabold uppercase tracking-wide text-rose-700">Hard ({conflicts.hard.length})</div>
-                        {conflicts.hard.map((c, i) => (
-                          <button
-                            key={`${c.kind}-${i}`}
-                            type="button"
-                            onClick={() => jumpToConflict(c)}
-                            className="w-full text-left rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 hover:bg-rose-100 transition"
-                          >
-                            <div className="text-sm font-black text-rose-900">{c.title}</div>
-                            <div className="mt-1 text-xs font-bold text-rose-800">{c.detail}</div>
-                            {c.classGroupCode || c.dayOfWeek || c.timeSlotId ? (
-                              <div className="mt-2 text-[11px] font-extrabold text-rose-700">
-                                {(c.classGroupCode ?? '—') + (c.dayOfWeek ? ` · ${c.dayOfWeek}` : '') + (c.timeSlotId ? ` · slot ${c.timeSlotId}` : '')}
-                              </div>
-                            ) : null}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {conflicts.soft.length ? (
-                      <div className="space-y-2">
-                        <div className="text-xs font-extrabold uppercase tracking-wide text-amber-700">Soft ({conflicts.soft.length})</div>
-                        {conflicts.soft.map((c, i) => (
-                          <button
-                            key={`${c.kind}-${i}`}
-                            type="button"
-                            onClick={() => jumpToConflict(c)}
-                            className="w-full text-left rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 hover:bg-amber-100 transition"
-                          >
-                            <div className="text-sm font-black text-amber-900">{c.title}</div>
-                            <div className="mt-1 text-xs font-bold text-amber-800">{c.detail}</div>
-                            {c.classGroupCode || c.dayOfWeek || c.timeSlotId ? (
-                              <div className="mt-2 text-[11px] font-extrabold text-amber-700">
-                                {(c.classGroupCode ?? '—') + (c.dayOfWeek ? ` · ${c.dayOfWeek}` : '') + (c.timeSlotId ? ` · slot ${c.timeSlotId}` : '')}
-                              </div>
-                            ) : null}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {lastGenerate && !conflicts.hard.length && !conflicts.soft.length ? (
+                    {detectedConflicts.length === 0 ? (
                       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
-                        No conflicts detected in the latest generated draft.
+                        No setup or timetable conflicts detected for this workspace.
+                      </div>
+                    ) : null}
+
+                    {hardDetected.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="text-xs font-extrabold uppercase tracking-wide text-rose-700">Hard ({hardDetected.length})</div>
+                        {hardDetected.map((c) => {
+                            const day = c.refs?.days?.[0];
+                            const tsId = c.refs?.timeSlotIds?.[0];
+                            const jumpOk = Boolean(day && tsId != null && Number.isFinite(tsId));
+                            return (
+                              <div key={c.id} className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                                <div className="text-sm font-black text-rose-900">{c.title}</div>
+                                <div className="mt-1 text-xs font-bold text-rose-800">{c.detail}</div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  {jumpOk ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => jumpToDetectedConflict(c)}
+                                      className="inline-flex rounded-xl border border-rose-300 bg-white px-3 py-1 text-[11px] font-extrabold text-rose-900 hover:bg-rose-100 transition"
+                                    >
+                                      Open in grid
+                                    </button>
+                                  ) : null}
+                                  {c.resolutions.map((r, i) =>
+                                    r.kind === 'link' ? (
+                                      <Link
+                                        key={i}
+                                        to={r.href}
+                                        className="inline-flex rounded-xl border border-rose-300 bg-white px-3 py-1 text-[11px] font-extrabold text-rose-900 hover:bg-rose-100 transition"
+                                      >
+                                        {r.label} →
+                                      </Link>
+                                    ) : (
+                                      <button
+                                        key={i}
+                                        type="button"
+                                        disabled={autoFix.isPending || autoGeneratePending}
+                                        onClick={() => {
+                                          if (r.actionId === 'auto-fix') void autoFix.mutate();
+                                          else void doGenerate();
+                                        }}
+                                        className="inline-flex rounded-xl border border-rose-300 bg-white px-3 py-1 text-[11px] font-extrabold text-rose-900 hover:bg-rose-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {r.label}
+                                      </button>
+                                    ),
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    ) : null}
+
+                    {softDetected.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="text-xs font-extrabold uppercase tracking-wide text-amber-700">Soft ({softDetected.length})</div>
+                        {softDetected.map((c) => {
+                            const day = c.refs?.days?.[0];
+                            const tsId = c.refs?.timeSlotIds?.[0];
+                            const jumpOk = Boolean(day && tsId != null && Number.isFinite(tsId));
+                            return (
+                              <div key={c.id} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                <div className="text-sm font-black text-amber-900">{c.title}</div>
+                                <div className="mt-1 text-xs font-bold text-amber-800">{c.detail}</div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  {jumpOk ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => jumpToDetectedConflict(c)}
+                                      className="inline-flex rounded-xl border border-amber-300 bg-white px-3 py-1 text-[11px] font-extrabold text-amber-950 hover:bg-amber-100 transition"
+                                    >
+                                      Open in grid
+                                    </button>
+                                  ) : null}
+                                  {c.resolutions.map((r, i) =>
+                                    r.kind === 'link' ? (
+                                      <Link
+                                        key={i}
+                                        to={r.href}
+                                        className="inline-flex rounded-xl border border-amber-300 bg-white px-3 py-1 text-[11px] font-extrabold text-amber-950 hover:bg-amber-100 transition"
+                                      >
+                                        {r.label} →
+                                      </Link>
+                                    ) : (
+                                      <button
+                                        key={i}
+                                        type="button"
+                                        disabled={autoFix.isPending || autoGeneratePending}
+                                        onClick={() => {
+                                          if (r.actionId === 'auto-fix') void autoFix.mutate();
+                                          else void doGenerate();
+                                        }}
+                                        className="inline-flex rounded-xl border border-amber-300 bg-white px-3 py-1 text-[11px] font-extrabold text-amber-950 hover:bg-amber-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {r.label}
+                                      </button>
+                                    ),
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
                       </div>
                     ) : null}
                   </div>
@@ -1214,14 +1376,20 @@ export default function Step7TimetableWorkspace({
               {/* Row 3: Publish Flow (full width) */}
               <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden w-full">
                   <div className="p-5 border-b border-slate-200">
-                    <div className="text-sm font-black">Publish Flow</div>
-                    <div className="mt-1 text-xs font-bold text-slate-500">Draft → Review → Publish. Publish is blocked by hard conflicts.</div>
+                    <div className="text-sm font-black">Publish flow</div>
+                    <div className="mt-1 text-xs font-bold text-slate-500">
+                      Drafts are admin-only. Publish replaces the live timetable; the previous live version is archived.
+                    </div>
                   </div>
                   <div className="p-5 flex items-start justify-between gap-4 flex-wrap">
                     <div className="space-y-2">
-                      <div className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Current version</div>
+                      <div className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Versions</div>
                       <div className="text-sm font-black text-slate-900">
-                        v{draft.data?.version ?? '—'} · <span className="uppercase">{draft.data?.status ?? '—'}</span>
+                        {latestDraftListed ? `Draft v${latestDraftListed.version}` : 'No draft'}{' · '}
+                        {latestPublishedListed ? `Published v${latestPublishedListed.version}` : 'Not published'}
+                      </div>
+                      <div className="text-xs font-bold text-slate-500">
+                        Workspace: v{activeVersion?.version ?? '—'} · <span className="uppercase">{activeVersion?.status ?? '—'}</span>
                       </div>
                       <div className="text-xs font-bold text-slate-600">
                         {hasBlockingIssues
@@ -1247,12 +1415,37 @@ export default function Step7TimetableWorkspace({
                         ].join(' ')}
                       >
                         <Icon name="save" className="h-4 w-4" />
-                        Save Draft
+                        Save draft
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => archive.mutate()}
+                        disabled={
+                          archive.isPending ||
+                          loading ||
+                          readOnly ||
+                          !versionId ||
+                          String(activeVersion?.status ?? '').toUpperCase() === 'PUBLISHED' ||
+                          String(activeVersion?.status ?? '').toUpperCase() === 'ARCHIVED'
+                        }
+                        className={[
+                          'inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-extrabold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-orange-300',
+                          archive.isPending || loading || readOnly
+                            ? 'opacity-60 cursor-not-allowed bg-white text-slate-900 border-slate-200'
+                            : 'bg-white text-slate-900 hover:bg-slate-50 border-slate-200',
+                        ].join(' ')}
+                      >
+                        Archive
                       </button>
                       <button
                         type="button"
                         onClick={() => publish.mutate()}
-                        disabled={publish.isPending || loading || hasBlockingIssues}
+                        disabled={
+                          publish.isPending ||
+                          loading ||
+                          hasBlockingIssues ||
+                          String(activeVersion?.status ?? '').toUpperCase() === 'PUBLISHED'
+                        }
                         className={[
                           'inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-extrabold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-orange-300',
                           publish.isPending || loading || hasBlockingIssues
@@ -1261,7 +1454,7 @@ export default function Step7TimetableWorkspace({
                         ].join(' ')}
                       >
                         <Icon name="publish" className="h-4 w-4" />
-                        Publish Final
+                        Publish timetable
                       </button>
                       <button
                         type="button"

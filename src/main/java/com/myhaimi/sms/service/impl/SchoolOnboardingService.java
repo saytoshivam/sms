@@ -1190,6 +1190,25 @@ public class SchoolOnboardingService {
         );
     }
 
+    /**
+     * Sets a fresh temporary password for an existing staff-linked login. The plaintext is returned once for admin handoff.
+     */
+    @Transactional
+    public OnboardingStaffUserCredentialDTO resetStaffLoginPassword(Integer staffId) {
+        Integer schoolId = requireSchoolId();
+        staffRepo.findByIdAndSchool_IdAndIsDeletedFalse(staffId, schoolId).orElseThrow();
+        User user = userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staffId).orElseThrow(() ->
+                new IllegalArgumentException("This staff member has no login account. Enable login from Edit staff first."));
+        String tempPassword = generateTempPassword();
+        user.setPassword(passwordEncoder.encode(tempPassword));
+        userRepo.save(user);
+        return new OnboardingStaffUserCredentialDTO(
+                user.getEmail(),
+                user.getUsername(),
+                tempPassword,
+                user.getRoles().stream().map(Role::getName).sorted().toList());
+    }
+
     @Transactional
     public void saveFees(OnboardingFeesSetupDTO dto) {
         Integer schoolId = requireSchoolId();

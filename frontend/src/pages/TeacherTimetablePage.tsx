@@ -45,6 +45,153 @@ export type TimetableOccurrence = {
   source: string;
 };
 
+export type PublishedTeacherWeekly = {
+  versionNumber: number | null;
+  publishedAt: string | null;
+  dayOrder: string[];
+  periods: { timeSlotId: number; slotOrder: number; startTime: string; endTime: string; breakSlot: boolean }[];
+  cells: {
+    dayOfWeek: string;
+    timeSlotId: number;
+    subject: string;
+    classGroupDisplayName: string;
+    room: string;
+    breakSlot: boolean;
+    free: boolean;
+  }[];
+  weeklyTeachingPeriods: number;
+  freePeriodsTotal: number;
+  todayCells: PublishedTeacherWeekly['cells'];
+};
+
+function dayShort(d: string): string {
+  const m: Record<string, string> = {
+    MONDAY: 'Mon',
+    TUESDAY: 'Tue',
+    WEDNESDAY: 'Wed',
+    THURSDAY: 'Thu',
+    FRIDAY: 'Fri',
+    SATURDAY: 'Sat',
+    SUNDAY: 'Sun',
+  };
+  return m[d] ?? d.slice(0, 3);
+}
+
+function TeacherPublishedWeekGrid({ data }: { data: PublishedTeacherWeekly }) {
+  if (data.versionNumber == null && data.periods.length === 0) {
+    return (
+      <p className="muted" style={{ margin: 0, fontSize: 14 }}>
+        No published timetable yet. Your school admin must publish a timetable before it appears here.
+      </p>
+    );
+  }
+
+  const cellKey = (day: string, slotId: number) => `${day}|${slotId}`;
+  const cmap = new Map<string, PublishedTeacherWeekly['cells'][0]>();
+  for (const c of data.cells) cmap.set(cellKey(c.dayOfWeek, c.timeSlotId), c);
+
+  const days = data.dayOrder.length ? data.dayOrder : ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+
+  return (
+    <div className="stack" style={{ gap: 12 }}>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'baseline' }}>
+        <span className="muted" style={{ fontSize: 13 }}>
+          Published v{data.versionNumber ?? '?'}
+          {data.publishedAt ? ` · ${new Date(data.publishedAt).toLocaleString()}` : ''}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>
+          Teaching load: {data.weeklyTeachingPeriods} period{data.weeklyTeachingPeriods === 1 ? '' : 's'}/wk
+        </span>
+        <span className="muted" style={{ fontSize: 13 }}>
+          Free periods (grid): {data.freePeriodsTotal}
+        </span>
+      </div>
+
+      <div className="teacher-tt-table-wrap" style={{ overflowX: 'auto' }}>
+        <table className="data-table teacher-tt-table" style={{ minWidth: 520 }} aria-label="Weekly published timetable">
+          <thead>
+            <tr>
+              <th scope="col">Period</th>
+              {days.map((d) => (
+                <th key={d} scope="col">
+                  {dayShort(d)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.periods.map((p) => (
+              <tr key={p.timeSlotId}>
+                <td style={{ whiteSpace: 'nowrap', fontWeight: 800 }}>
+                  P{p.slotOrder}
+                  <div className="muted" style={{ fontSize: 11, fontWeight: 700 }}>
+                    {String(p.startTime).slice(0, 5)}–{String(p.endTime).slice(0, 5)}
+                  </div>
+                  {p.breakSlot ? (
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309' }}>Break</div>
+                  ) : null}
+                </td>
+                {days.map((d) => {
+                  const c = cmap.get(cellKey(d, p.timeSlotId));
+                  if (!c) return <td key={d}>—</td>;
+                  if (c.breakSlot) {
+                    return (
+                      <td key={d} className="muted" style={{ fontSize: 12 }}>
+                        Break
+                      </td>
+                    );
+                  }
+                  if (c.free) {
+                    return (
+                      <td key={d} className="muted" style={{ fontSize: 12 }}>
+                        Free
+                      </td>
+                    );
+                  }
+                  return (
+                    <td key={d} style={{ fontSize: 12, verticalAlign: 'top' }}>
+                      <div style={{ fontWeight: 900 }}>{c.subject}</div>
+                      <div className="muted" style={{ fontWeight: 700 }}>
+                        {c.classGroupDisplayName}
+                      </div>
+                      <div className="muted">{c.room?.trim() ? c.room : '—'}</div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card stack" style={{ gap: 8, padding: 12 }}>
+        <div style={{ fontWeight: 900 }}>Today’s summary</div>
+        {data.todayCells.length === 0 ? (
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            No school today or no periods configured.
+          </p>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+            {data.todayCells.map((c, i) => (
+              <li key={`${c.timeSlotId}-${i}`}>
+                {c.breakSlot ? (
+                  <span>Break</span>
+                ) : c.free ? (
+                  <span className="muted">Free period</span>
+                ) : (
+                  <span>
+                    <strong>{c.subject}</strong> · {c.classGroupDisplayName} · {c.room?.trim() ? c.room : '—'}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function formatDayHeading(ymd: string): string {
   const d = new Date(ymd + 'T12:00:00');
   return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
@@ -218,6 +365,12 @@ export function TeacherTimetablePage() {
         .data,
   });
 
+  const weeklyPublished = useQuery({
+    queryKey: ['teacher-weekly-published'],
+    queryFn: async () => (await api.get<PublishedTeacherWeekly>('/api/v1/teacher/timetable/weekly-published')).data,
+    enabled: me.isSuccess && !leadershipView,
+  });
+
   const filterOptions = useMemo(() => {
     const rows = cal.data ?? [];
     const teachers = new Set<string>();
@@ -284,26 +437,35 @@ export function TeacherTimetablePage() {
     <div className="stack">
       <h2 style={{ margin: 0 }}>{leadershipView ? 'School timetable' : 'My timetable'}</h2>
       <p className="muted" style={{ margin: 0 }}>
-        Recurring weekly slots and dated one-off sessions in range.
         {leadershipView
-          ? ' Grouped by class and section for quick scanning.'
-          : ' When your account is linked to a staff profile, only your classes are shown.'}
+          ? 'Published timetable across all teachers for the selected date range. Grouped by class and section when filtering.'
+          : 'Read-only view of the published weekly timetable for your classes. Drafts are never shown here.'}
       </p>
 
-      <div className="teacher-tt-explainer">
-        <strong>What “Type” means</strong>
-        <ul>
-          <li>
-            <strong>Weekly</strong> — your normal class from the school’s <em>weekly timetable</em> (repeats on the same
-            weekday and time).
-          </li>
-          <li>
-            <strong>One-off</strong> — a session recorded as a <em>lecture on a specific date</em> (extra class,
-            substitution, demo slot, or a dated plan). It can show alongside a weekly row for the same time if both exist
-            in the system.
-          </li>
-        </ul>
-      </div>
+      {leadershipView ? (
+        <div className="teacher-tt-explainer">
+          <strong>What “Type” means</strong>
+          <ul>
+            <li>
+              <strong>Weekly</strong> — period from the school’s <em>published</em> timetable (same weekday and time each
+              week).
+            </li>
+          </ul>
+        </div>
+      ) : (
+        <div className="card stack" style={{ gap: 12, padding: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 16 }}>Weekly timetable</h3>
+          {weeklyPublished.isLoading ? (
+            <div className="muted">Loading weekly view…</div>
+          ) : weeklyPublished.error ? (
+            <div style={{ color: '#b91c1c', fontSize: 14 }}>
+              {String((weeklyPublished.error as any)?.response?.data ?? weeklyPublished.error)}
+            </div>
+          ) : weeklyPublished.data ? (
+            <TeacherPublishedWeekGrid data={weeklyPublished.data} />
+          ) : null}
+        </div>
+      )}
 
       <div className="card stack" style={{ gap: 12 }}>
         <div className="row" style={{ flexWrap: 'wrap', alignItems: 'end' }}>

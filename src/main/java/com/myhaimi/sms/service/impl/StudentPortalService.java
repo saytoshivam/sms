@@ -5,6 +5,7 @@ import com.myhaimi.sms.DTO.studentportal.FeeStatementLineDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentExamCardDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentMarkRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
+import com.myhaimi.sms.DTO.timetable.PublishedStudentWeeklyTimetableDTO;
 import com.myhaimi.sms.DTO.timetable.TimetableOccurrenceDTO;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.repository.FeeInvoiceRepo;
@@ -33,7 +34,7 @@ public class StudentPortalService {
     private static final String GREENWOOD_DEMO_SCHOOL_CODE = "greenwood-demo";
 
     private final StudentRepo studentRepo;
-    private final TimetableSlotService timetableSlotService;
+    private final PublishedTimetableCalendarService publishedTimetableCalendarService;
     private final StudentMarkRepo studentMarkRepo;
     private final SubjectRepo subjectRepo;
     private final LectureRepo lectureRepo;
@@ -51,7 +52,21 @@ public class StudentPortalService {
         if (student.getClassGroup() == null) {
             throw new IllegalStateException("You are not assigned to a class group yet");
         }
-        return timetableSlotService.calendarForClassGroup(tenantId, student.getClassGroup().getId(), from, to);
+        return publishedTimetableCalendarService.calendarForClassGroup(
+                tenantId, student.getClassGroup().getId(), from, to);
+    }
+
+    @Transactional(readOnly = true)
+    public PublishedStudentWeeklyTimetableDTO myWeeklyTimetable(int studentId) {
+        Integer tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            throw new IllegalStateException("Tenant context required");
+        }
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, tenantId).orElseThrow();
+        if (student.getClassGroup() == null) {
+            throw new IllegalStateException("You are not assigned to a class group yet");
+        }
+        return publishedTimetableCalendarService.studentWeeklyGrid(tenantId, student.getClassGroup().getId());
     }
 
     /**

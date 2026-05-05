@@ -66,6 +66,12 @@ public class TimetableEngineController {
         return timetableEngineService.publish(timetableVersionId);
     }
 
+    @PostMapping("/archive")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
+    public TimetableVersionViewDTO archive(@RequestParam Integer timetableVersionId) {
+        return timetableEngineService.archive(timetableVersionId);
+    }
+
     @PutMapping("/cell")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
     public TimetableEntryViewDTO updateCell(@Valid @RequestBody TimetableCellUpdateDTO dto) {
@@ -73,7 +79,7 @@ public class TimetableEngineController {
     }
 
     @GetMapping("/entries")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD','TEACHER','CLASS_TEACHER')")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
     public List<TimetableEntryViewDTO> entries(@RequestParam Integer timetableVersionId) {
         return timetableEngineService.listEntries(timetableVersionId);
     }

@@ -229,7 +229,7 @@ export function StudentDashboard({ profile }: { profile: MeProfile }) {
 
       <section className="student-tt-section" id="student-today-timetable">
         <div className="student-tt-head">
-          <span className="student-tt-title">Today’s Timetable</span>
+          <span className="student-tt-title">Today’s classes</span>
           <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="student-tt-tag" title={profile.schoolName?.trim() || undefined}>
               {profile.schoolName?.trim() || 'Your school'}

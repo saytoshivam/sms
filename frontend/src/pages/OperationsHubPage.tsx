@@ -33,6 +33,15 @@ type BasicInfo = {
 };
 
 type AcademicStructure = {
+  /** Enriched roster (roles + teachables) — required for section health; `/api/staff` alone does not include these. */
+  staff?: {
+    id: number;
+    fullName?: string;
+    email?: string;
+    teachableSubjectIds?: number[];
+    roleNames?: string[];
+    maxWeeklyLectureLoad?: number | null;
+  }[];
   classGroups: { classGroupId: number; gradeLevel: number | null; defaultRoomId: number | null; code?: string; displayName?: string; section?: string | null }[];
   classSubjectConfigs: ClassSubjectConfigRow[];
   sectionSubjectOverrides: SectionSubjectOverrideRow[];
@@ -205,6 +214,26 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
   const staffList = pageContent(staff.data ?? null);
   const roomList = pageContent(rooms.data ?? null);
 
+  /** Same source as Academic Structure UI: onboarding payload includes roleNames + teachables. Plain Staff list does not. */
+  const staffForAcademicHealth = useMemo((): StaffRow[] => {
+    const fromOnboarding = academic.data?.staff;
+    if (Array.isArray(fromOnboarding) && fromOnboarding.length > 0) {
+      return fromOnboarding.map((s) => ({
+        id: s.id,
+        fullName: s.fullName ?? '',
+        email: s.email ?? '',
+        teachableSubjectIds: s.teachableSubjectIds ?? [],
+        roleNames: s.roleNames ?? [],
+        maxWeeklyLectureLoad: s.maxWeeklyLectureLoad ?? null,
+      }));
+    }
+    return (staffList as StaffRow[]).map((s) => ({
+      ...s,
+      teachableSubjectIds: s.teachableSubjectIds ?? [],
+      roleNames: s.roleNames ?? [],
+    }));
+  }, [academic.data?.staff, staffList]);
+
   // ---- per-module readiness ----
   const academicReadiness = useMemo<{ level: StatusLevel; primary: string; secondary?: string }>(() => {
     const cgs = academic.data?.classGroups ?? [];
@@ -218,7 +247,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     let overCap = 0;
     let notStarted = 0;
     for (const cg of cgs) {
-      const h = computeSectionHealth(cg.classGroupId, effectiveAllocs, subjectList.length, staffList, slotsPerWeek);
+      const h = computeSectionHealth(cg.classGroupId, effectiveAllocs, subjectList.length, staffForAcademicHealth, slotsPerWeek);
       if (h.subjectCount === 0) notStarted += 1;
       if (h.overCapacity) overCap += 1;
       if (h.hasHardIssue || h.issueCount > 0) withIssues += 1;
@@ -227,7 +256,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     const primary = `${cgs.length} section${cgs.length === 1 ? '' : 's'} · ${notStarted} not started`;
     const secondary = overCap > 0 ? `${overCap} over capacity` : withIssues > 0 ? `${withIssues} need fixing` : 'Subjects mapped, teachers assigned.';
     return { level, primary, secondary };
-  }, [academic.data, effectiveAllocs, subjectList.length, staffList, slotsPerWeek]);
+  }, [academic.data, effectiveAllocs, subjectList.length, staffForAcademicHealth, slotsPerWeek]);
 
   const classesSectionsReadiness = useMemo<{ level: StatusLevel; primary: string; secondary?: string }>(() => {
     if (!academic.data && academic.isLoading) return { level: 'idle', primary: 'Loading…' };
@@ -261,7 +290,8 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
   }, [subjectList, academic.data]);
 
   const teachersReadiness = useMemo<{ level: StatusLevel; primary: string; secondary?: string }>(() => {
-    if (staffList.length === 0) return { level: 'idle', primary: 'No teachers yet', secondary: 'Onboard teachers and roles.' };
+    if (staffForAcademicHealth.length === 0)
+      return { level: 'idle', primary: 'No teachers yet', secondary: 'Onboard teachers and roles.' };
     // Derive load per teacher from effective allocations.
     const load = new Map<number, number>();
     for (const a of effectiveAllocs) {
@@ -269,7 +299,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
       load.set(a.staffId, (load.get(a.staffId) ?? 0) + (a.weeklyFrequency > 0 ? a.weeklyFrequency : 0));
     }
     let over = 0;
-    for (const s of staffList) {
+    for (const s of staffForAcademicHealth) {
       const cap = s.maxWeeklyLectureLoad && s.maxWeeklyLectureLoad > 0 ? s.maxWeeklyLectureLoad : slotsPerWeek;
       const used = load.get(s.id) ?? 0;
       if (cap != null && used > cap) over += 1;
@@ -277,10 +307,10 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     const level: StatusLevel = over > 0 ? 'warn' : 'ok';
     return {
       level,
-      primary: `${staffList.length} teacher${staffList.length === 1 ? '' : 's'}`,
+      primary: `${staffForAcademicHealth.length} teacher${staffForAcademicHealth.length === 1 ? '' : 's'}`,
       secondary: over > 0 ? `${over} over weekly load` : 'Loads within capacity.',
     };
-  }, [staffList, effectiveAllocs, slotsPerWeek]);
+  }, [staffForAcademicHealth, effectiveAllocs, slotsPerWeek]);
 
   const roomsReadiness = useMemo<{ level: StatusLevel; primary: string; secondary?: string }>(() => {
     const list = roomList ?? [];
@@ -303,13 +333,22 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
   }, [basicInfo.data, slotsPerWeek]);
 
   const timetableReadiness = useMemo<{ level: StatusLevel; primary: string; secondary?: string }>(() => {
-    if (!setupComplete) {
-      return { level: 'idle', primary: 'Setup pending', secondary: 'Finish required steps to generate.' };
-    }
-    if (ttStatus.setupLoading || ttStatus.versionLoading || ttStatus.entriesLoading) {
+    const ttBusy =
+      ttStatus.setupLoading || ttStatus.versionLoading || ttStatus.entriesLoading || ttStatus.timetableHealthExtrasLoading;
+    if (ttBusy) {
       return { level: 'idle', primary: 'Loading…', secondary: 'Reading timetable status.' };
     }
+    if (!setupComplete && !ttStatus.hasPublishedTimetable) {
+      return { level: 'idle', primary: 'Setup pending', secondary: 'Finish required steps to generate.' };
+    }
     if (!ttStatus.hasEntries) {
+      if (ttStatus.hasPublishedTimetable) {
+        return {
+          level: 'warn',
+          primary: 'Published timetable active',
+          secondary: 'Editing workspace has no draft rows — open Timetable to rebuild or copy from published.',
+        };
+      }
       return { level: 'warn', primary: 'No draft yet', secondary: 'Generate the first draft.' };
     }
     if (ttStatus.conflicts.hard > 0) {
@@ -347,6 +386,8 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     ttStatus.setupLoading,
     ttStatus.versionLoading,
     ttStatus.entriesLoading,
+    ttStatus.timetableHealthExtrasLoading,
+    ttStatus.hasPublishedTimetable,
     ttStatus.hasEntries,
     ttStatus.conflicts.hard,
     ttStatus.conflicts.soft,

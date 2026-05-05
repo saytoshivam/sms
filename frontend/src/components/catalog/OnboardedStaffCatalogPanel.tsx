@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
@@ -15,11 +15,19 @@ type SubjectCatalogRow = { id: number; code: string; name: string; weeklyFrequen
 
 type ClassGroupLite = { id: number; code?: string | null; gradeLevel?: number | null; section?: string | null; name?: string | null };
 
+type StaffLoginCredential = {
+  email: string;
+  username: string;
+  temporaryPassword: string;
+  roles: string[];
+};
+
 /**
  * “Onboarded staff” table + filters + edit/delete (same as onboarding Staff step).
  */
 export function OnboardedStaffCatalogPanel() {
   const invalidate = useApiTags();
+  const queryClient = useQueryClient();
 
   const [staffTableSearch, setStaffTableSearch] = useState('');
   const [staffTableRoles, setStaffTableRoles] = useState<string[]>([]);
@@ -40,6 +48,15 @@ export function OnboardedStaffCatalogPanel() {
     staffId?: number;
     draft?: StaffDraft;
   }>({ open: false });
+
+  const [staffResetLoginConfirm, setStaffResetLoginConfirm] = useState<{
+    open: boolean;
+    staffId?: number;
+    fullName?: string;
+    email?: string;
+  }>({ open: false });
+
+  const [staffCredReveal, setStaffCredReveal] = useState<(StaffLoginCredential & { fullName?: string }) | null>(null);
 
   const staffCatalog = useQuery({
     queryKey: ['onboarding-staff-view'],
@@ -132,6 +149,19 @@ export function OnboardedStaffCatalogPanel() {
       await invalidate(['staff']);
     },
     onError: () => setStaffDeleteAllModal((p) => ({ ...p, busy: false })),
+  });
+
+  const resetStaffLogin = useMutation({
+    mutationFn: async (args: { staffId: number; fullName: string }) =>
+      (await api.post<StaffLoginCredential>(`/api/v1/onboarding/staff/${args.staffId}/reset-login`)).data,
+    onSuccess: async (cred, vars) => {
+      setStaffResetLoginConfirm({ open: false });
+      await invalidate(['staff']);
+      await queryClient.invalidateQueries({ queryKey: ['onboarding-staff-view'] });
+      setStaffCredReveal({ ...cred, fullName: vars.fullName });
+      toast.success('Temporary password set', 'Share the new password with the staff member once.');
+    },
+    onError: (e) => toast.error('Could not reset login', formatApiError(e)),
   });
 
   const updateStaff = useMutation({
@@ -319,7 +349,15 @@ export function OnboardedStaffCatalogPanel() {
                     {
                       id: `staff-${s.staffId}-reset-login`,
                       label: 'Reset login',
-                      onSelect: () => toast.info('Login', 'Reset login is not supported yet.'),
+                      disabled: !s.hasLoginAccount,
+                      disabledReason: 'No login account — use Edit staff to create one.',
+                      onSelect: () =>
+                        setStaffResetLoginConfirm({
+                          open: true,
+                          staffId: s.staffId,
+                          fullName: s.fullName,
+                          email: s.email,
+                        }),
                     },
                     {
                       id: `staff-${s.staffId}-assign`,
@@ -546,6 +584,108 @@ export function OnboardedStaffCatalogPanel() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={staffResetLoginConfirm.open}
+        title="Reset login password?"
+        description={
+          staffResetLoginConfirm.fullName
+            ? `${staffResetLoginConfirm.fullName}${staffResetLoginConfirm.email ? ` (${staffResetLoginConfirm.email})` : ''}`
+            : 'Generate a new temporary password for this staff login.'
+        }
+        details={[
+          'The previous password stops working immediately.',
+          'The new password is shown only once on the next screen — copy it before closing.',
+        ]}
+        danger
+        confirmLabel={resetStaffLogin.isPending ? 'Resetting…' : 'Reset password'}
+        cancelLabel="Cancel"
+        confirmDisabled={resetStaffLogin.isPending || !staffResetLoginConfirm.staffId}
+        onConfirm={() => {
+          const id = staffResetLoginConfirm.staffId;
+          if (!id) return;
+          resetStaffLogin.mutate({ staffId: id, fullName: staffResetLoginConfirm.fullName ?? '' });
+        }}
+        onClose={() => {
+          if (!resetStaffLogin.isPending) setStaffResetLoginConfirm({ open: false });
+        }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(staffCredReveal)}
+        title="New temporary password"
+        description={
+          staffCredReveal?.fullName
+            ? `Share these details with ${staffCredReveal.fullName} once. For security, we do not show this password again after you close.`
+            : 'Copy the password before closing — it is not shown again.'
+        }
+        confirmLabel="Done"
+        cancelLabel="Close"
+        onConfirm={() => setStaffCredReveal(null)}
+        onClose={() => setStaffCredReveal(null)}
+      >
+        {staffCredReveal ? (
+          <div className="stack" style={{ gap: 12 }}>
+            <div>
+              <div className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
+                Username
+              </div>
+              <div style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 800, wordBreak: 'break-all' }}>
+                {staffCredReveal.username}
+              </div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
+                Email
+              </div>
+              <div style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 800, wordBreak: 'break-all' }}>
+                {staffCredReveal.email}
+              </div>
+            </div>
+            <div>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
+                  Temporary password
+                </div>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ fontSize: 12, padding: '4px 10px' }}
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(staffCredReveal.temporaryPassword).then(
+                      () => toast.success('Copied', 'Password copied to clipboard.'),
+                      () => toast.error('Copy failed', 'Select and copy the password manually.'),
+                    );
+                  }}
+                >
+                  Copy password
+                </button>
+              </div>
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '12px 14px',
+                  borderRadius: 12,
+                  background: 'rgba(15,23,42,0.06)',
+                  border: '1px solid rgba(15,23,42,0.08)',
+                  fontFamily: 'ui-monospace, monospace',
+                  fontWeight: 900,
+                  fontSize: 16,
+                  letterSpacing: '0.02em',
+                  wordBreak: 'break-all',
+                }}
+              >
+                {staffCredReveal.temporaryPassword}
+              </div>
+            </div>
+            {(staffCredReveal.roles?.length ?? 0) > 0 ? (
+              <div className="muted" style={{ fontSize: 12 }}>
+                Roles: {staffCredReveal.roles.join(', ')}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={staffDeleteModal.open}

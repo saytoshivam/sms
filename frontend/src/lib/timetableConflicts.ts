@@ -307,9 +307,15 @@ export function detectStructuralConflicts(setup: SetupSnapshot | null | undefine
 /**
  * Detect post-generation conflicts from the latest entries grid.
  * These are conditions the engine couldn't satisfy (or the user introduced via manual edits).
+ *
+ * When there are zero entries, we return none: comparing required weekly periods to scheduled
+ * counts would flag every allocation as “0/X” — that reads like bad subject config but actually
+ * just means “no draft scheduled yet”.
  */
 export function detectEntryConflicts(setup: SetupSnapshot | null | undefined, entries: EntryRef[] | null | undefined): Conflict[] {
-  if (!setup || !entries) return [];
+  if (!setup) return [];
+  const list = entries ?? [];
+  if (list.length === 0) return [];
 
   const out: Conflict[] = [];
   const subjectById = new Map(setup.subjects.map((s) => [s.id, s] as const));
@@ -317,7 +323,7 @@ export function detectEntryConflicts(setup: SetupSnapshot | null | undefined, en
 
   // ---- frequency mismatch (HARD) ----
   const countByClassSub = new Map<string, number>();
-  for (const e of entries) {
+  for (const e of list) {
     countByClassSub.set(`${e.classGroupId}:${e.subjectId}`, (countByClassSub.get(`${e.classGroupId}:${e.subjectId}`) ?? 0) + 1);
   }
   const subjectWeeklyById = new Map<number, number>();
@@ -352,7 +358,7 @@ export function detectEntryConflicts(setup: SetupSnapshot | null | undefined, en
       severity: 'HARD',
       kind: 'FREQUENCY_MISMATCH',
       title: `Weekly frequency mismatch in ${cg?.displayName ?? cg?.code ?? `class #${cgId}`}`,
-      detail: `${items.length} subject${items.length === 1 ? '' : 's'} have wrong period counts: ${sample}${items.length > 4 ? '…' : ''}.`,
+      detail: `${items.length} subject${items.length === 1 ? '' : 's'} are not at their required weekly period count on this timetable (${sample}${items.length > 4 ? '…' : ''}).`,
       resolutions: [
         { kind: 'action', label: 'Auto-fix', actionId: 'auto-fix' },
         { kind: 'action', label: 'Regenerate', actionId: 'regenerate' },
@@ -364,7 +370,7 @@ export function detectEntryConflicts(setup: SetupSnapshot | null | undefined, en
 
   // ---- teacher double-booked (HARD) ----
   const teacherSlotMap = new Map<string, EntryRef[]>();
-  for (const e of entries) {
+  for (const e of list) {
     const k = `${e.staffId}__${e.dayOfWeek}__${e.timeSlotId}`;
     const arr = teacherSlotMap.get(k) ?? [];
     arr.push(e);
@@ -395,7 +401,7 @@ export function detectEntryConflicts(setup: SetupSnapshot | null | undefined, en
 
   // ---- room double-booked (HARD) ----
   const roomSlotMap = new Map<string, EntryRef[]>();
-  for (const e of entries) {
+  for (const e of list) {
     if (e.roomId == null) continue;
     const k = `${e.roomId}__${e.dayOfWeek}__${e.timeSlotId}`;
     const arr = roomSlotMap.get(k) ?? [];

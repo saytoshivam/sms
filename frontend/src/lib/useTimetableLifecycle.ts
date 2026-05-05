@@ -17,8 +17,9 @@ import type { EntryRef, SetupSnapshot } from './timetableConflicts';
  * Backend reality:
  *   POST /api/v2/timetable/versions/draft         - ensure a draft exists
  *   POST /api/timetable/generate                   - rebuild the draft from setup (global engine)
- *   POST /api/timetable/save-draft?timetableVersionId=X - move DRAFT -> REVIEW
- *   POST /api/timetable/publish?timetableVersionId=X    - REVIEW/DRAFT -> PUBLISHED
+ *   POST /api/timetable/save-draft?timetableVersionId=X - no-op snapshot (compat)
+ *   POST /api/timetable/publish?timetableVersionId=X    - DRAFT -> PUBLISHED (prior published -> ARCHIVED)
+ *   POST /api/timetable/archive?timetableVersionId=X    - draft/archived bookkeeping
  *   POST /api/timetable/auto-fix                       - re-run respecting locks
  *
  * There's no rollback API, so "Discard & regenerate" simply runs auto-generate
@@ -30,7 +31,7 @@ import type { EntryRef, SetupSnapshot } from './timetableConflicts';
  * changes.
  */
 
-type Version = { id: number; status: string; version: number };
+type Version = { id: number; status: string; version: number; generatedAt?: string | null; publishedAt?: string | null };
 
 type AutoGenResponse = { stats?: { placedCount?: number; totalSessions?: number } };
 
@@ -45,7 +46,7 @@ export type UseTimetableLifecycleResult = {
   entriesLoading: boolean;
 
   // Derived UI state
-  versionStatus: 'DRAFT' | 'REVIEW' | 'PUBLISHED' | 'UNKNOWN';
+  versionStatus: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | 'UNKNOWN';
   conflicts: { hard: number; soft: number; total: number };
   publishBlocked: boolean;
   publishBlockedReason: string | null;
@@ -65,6 +66,8 @@ export type UseTimetableLifecycleResult = {
   clearDraftPending: boolean;
   autoFix: () => Promise<AutoGenResponse | undefined>;
   autoFixPending: boolean;
+  archiveDraft: () => Promise<Version | undefined>;
+  archiveDraftPending: boolean;
 };
 
 export function useTimetableLifecycle(): UseTimetableLifecycleResult {
@@ -100,7 +103,7 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
       return (await api.post<Version>(`/api/timetable/save-draft?timetableVersionId=${encodeURIComponent(String(versionId))}`)).data;
     },
     onSuccess: async () => {
-      toast.success('Draft saved', 'Moved to review.');
+      toast.success('Draft saved', 'Your draft is stored.');
       await invalidate(['timetable.draft']);
     },
     onError: (e) => toast.error('Save failed', formatApiError(e)),
@@ -156,6 +159,21 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
     onError: (e) => toast.error('Clear draft failed', formatApiError(e)),
   });
 
+  const archiveMut = useMutation({
+    mutationFn: async () => {
+      if (!versionId) throw new Error('Missing timetable version.');
+      return (
+        await api.post<Version>(`/api/timetable/archive?timetableVersionId=${encodeURIComponent(String(versionId))}`)
+      ).data;
+    },
+    onSuccess: async () => {
+      toast.success('Archived', 'This version was archived.');
+      clearAllImpact();
+      await invalidate(['timetable.draft', 'timetable.published', 'timetable.freshness']);
+    },
+    onError: (e) => toast.error('Archive failed', formatApiError(e)),
+  });
+
   const autoFixMut = useMutation({
     mutationFn: async () =>
       (
@@ -206,5 +224,7 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
     clearDraftPending: clearDraftMut.isPending,
     autoFix: () => autoFixMut.mutateAsync(),
     autoFixPending: autoFixMut.isPending,
+    archiveDraft: () => archiveMut.mutateAsync(),
+    archiveDraftPending: archiveMut.isPending,
   };
 }

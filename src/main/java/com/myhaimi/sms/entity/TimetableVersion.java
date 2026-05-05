@@ -30,6 +30,12 @@ public class TimetableVersion {
     @Column(nullable = false)
     private Integer version = 1;
 
+    @Column(name = "generated_at")
+    private Instant generatedAt;
+
+    @Column(name = "published_at")
+    private Instant publishedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

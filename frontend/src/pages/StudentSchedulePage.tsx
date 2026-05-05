@@ -47,6 +47,117 @@ function todayYmd() {
   return `${y}-${m}-${day}`;
 }
 
+type PublishedStudentCell = {
+  dayOfWeek: string;
+  timeSlotId: number;
+  subject: string;
+  teacherName: string;
+  room: string;
+  breakSlot: boolean;
+  free: boolean;
+};
+
+type PublishedStudentWeekly = {
+  versionNumber: number | null;
+  publishedAt: string | null;
+  dayOrder: string[];
+  periods: { timeSlotId: number; slotOrder: number; startTime: string; endTime: string; breakSlot: boolean }[];
+  cells: PublishedStudentCell[];
+  todayCells: PublishedStudentCell[];
+};
+
+function studentDayShort(d: string): string {
+  const m: Record<string, string> = {
+    MONDAY: 'Mon',
+    TUESDAY: 'Tue',
+    WEDNESDAY: 'Wed',
+    THURSDAY: 'Thu',
+    FRIDAY: 'Fri',
+    SATURDAY: 'Sat',
+    SUNDAY: 'Sun',
+  };
+  return m[d] ?? d.slice(0, 3);
+}
+
+function StudentPublishedWeekGrid({ data }: { data: PublishedStudentWeekly }) {
+  if (data.versionNumber == null && data.periods.length === 0) {
+    return (
+      <p className="muted" style={{ margin: 0, fontSize: 14 }}>
+        No published timetable yet. Ask your school office when it will be posted.
+      </p>
+    );
+  }
+  const cellKey = (day: string, slotId: number) => `${day}|${slotId}`;
+  const cmap = new Map<string, PublishedStudentCell>();
+  for (const c of data.cells) cmap.set(cellKey(c.dayOfWeek, c.timeSlotId), c);
+  const days = data.dayOrder.length ? data.dayOrder : ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+
+  return (
+    <div className="stack" style={{ gap: 12 }}>
+      <div className="muted" style={{ fontSize: 13 }}>
+        Published v{data.versionNumber ?? '?'}
+        {data.publishedAt ? ` · ${new Date(data.publishedAt).toLocaleString()}` : ''}
+      </div>
+      <div className="teacher-tt-table-wrap" style={{ overflowX: 'auto' }}>
+        <table className="data-table teacher-tt-table" style={{ minWidth: 520 }} aria-label="Class weekly timetable">
+          <thead>
+            <tr>
+              <th scope="col">Period</th>
+              {days.map((d) => (
+                <th key={d} scope="col">
+                  {studentDayShort(d)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.periods.map((p) => (
+              <tr key={p.timeSlotId}>
+                <td style={{ whiteSpace: 'nowrap', fontWeight: 800 }}>
+                  P{p.slotOrder}
+                  <div className="muted" style={{ fontSize: 11, fontWeight: 700 }}>
+                    {String(p.startTime).slice(0, 5)}–{String(p.endTime).slice(0, 5)}
+                  </div>
+                  {p.breakSlot ? (
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#b45309' }}>Break</div>
+                  ) : null}
+                </td>
+                {days.map((d) => {
+                  const c = cmap.get(cellKey(d, p.timeSlotId));
+                  if (!c) return <td key={d}>—</td>;
+                  if (c.breakSlot) {
+                    return (
+                      <td key={d} className="muted" style={{ fontSize: 12 }}>
+                        Break
+                      </td>
+                    );
+                  }
+                  if (c.free) {
+                    return (
+                      <td key={d} className="muted" style={{ fontSize: 12 }}>
+                        Free
+                      </td>
+                    );
+                  }
+                  return (
+                    <td key={d} style={{ fontSize: 12, verticalAlign: 'top' }}>
+                      <div style={{ fontWeight: 900 }}>{c.subject}</div>
+                      <div className="muted" style={{ fontWeight: 700 }}>
+                        {c.teacherName}
+                      </div>
+                      <div className="muted">{c.room?.trim() ? c.room : '—'}</div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function StudentSchedulePage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -74,6 +185,12 @@ export function StudentSchedulePage() {
   const subjAtt = useQuery({
     queryKey: ['student-subject-attendance'],
     queryFn: async () => (await api.get<SubjAtt[]>('/api/v1/student/me/subject-attendance')).data,
+  });
+
+  const weeklyPublished = useQuery({
+    queryKey: ['student-weekly-published'],
+    queryFn: async () =>
+      (await api.get<PublishedStudentWeekly>('/api/v1/student/me/timetable/weekly-published')).data,
   });
 
   const byDate = useMemo(() => {
@@ -184,9 +301,22 @@ export function StudentSchedulePage() {
         </div>
       </div>
       <p className="muted" style={{ margin: 0 }}>
-        Your class timetable (recurring slots and one-off lectures). Open attendance for a quick chart, or use the full
-        term attendance page.
+        Your class timetable comes from the school’s <strong>published</strong> schedule (read-only). Open attendance
+        for a quick chart, or use the full term attendance page.
       </p>
+
+      <div className="card stack" style={{ gap: 12, padding: 16 }}>
+        <h3 style={{ margin: 0, fontSize: 16 }}>Weekly class timetable</h3>
+        {weeklyPublished.isLoading ? (
+          <div className="muted">Loading…</div>
+        ) : weeklyPublished.error ? (
+          <div style={{ color: '#b91c1c', fontSize: 14 }}>
+            {String((weeklyPublished.error as any)?.response?.data ?? weeklyPublished.error)}
+          </div>
+        ) : weeklyPublished.data ? (
+          <StudentPublishedWeekGrid data={weeklyPublished.data} />
+        ) : null}
+      </div>
 
       <div className="card stack student-sched-today-card">
         <div className="student-sched-today-head">
@@ -225,8 +355,7 @@ export function StudentSchedulePage() {
               </button>
             </div>
             <div className="student-sched-explainer">
-              <strong>Weekly</strong> = your regular class from the school timetable. <strong>One-off</strong> = a dated
-              session (e.g. extra class or lecture logged for that day). Both can appear if your school records both.
+              <strong>Weekly</strong> = your regular class from the school’s published timetable for your section.
             </div>
             <div className="row" style={{ flexWrap: 'wrap', alignItems: 'end' }}>
               <div className="stack" style={{ gap: 6, minWidth: 160 }}>

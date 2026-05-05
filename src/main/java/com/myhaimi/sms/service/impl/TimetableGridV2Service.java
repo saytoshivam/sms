@@ -188,8 +188,8 @@ public class TimetableGridV2Service {
     public AutoFillResultDTO autoFill(AutoFillRequestDTO dto) {
         Integer schoolId = requireSchoolId();
         TimetableVersion version = timetableVersionRepo.findByIdAndSchool_Id(dto.timetableVersionId(), schoolId).orElseThrow();
-        if (version.getStatus() == TimetableStatus.PUBLISHED) {
-            throw new IllegalStateException("Published timetable cannot be edited. Create a new draft version.");
+        if (version.getStatus() != TimetableStatus.DRAFT) {
+            throw new IllegalStateException("Only draft timetables can be edited. Create or open a draft version.");
         }
         ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(dto.classGroupId(), schoolId).orElseThrow();
 
@@ -409,7 +409,7 @@ public class TimetableGridV2Service {
         Integer schoolId = requireSchoolId();
         TimetableVersion v = timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.DRAFT)
                 .orElse(null);
-        if (v != null) return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
+        if (v != null) return TimetableVersionViewDTO.from(v);
 
         School school = schoolRepo.findById(schoolId).orElseThrow();
         // Use max(version) + 1 (not count) to avoid collisions when versions have gaps.
@@ -422,51 +422,35 @@ public class TimetableGridV2Service {
         nv.setStatus(TimetableStatus.DRAFT);
         nv.setVersion(nextVersion);
         nv = timetableVersionRepo.save(nv);
-        return new TimetableVersionViewDTO(nv.getId(), nv.getStatus().name(), nv.getVersion());
+        return TimetableVersionViewDTO.from(nv);
     }
 
     /**
      * Returns the "workspace" version the UI should display:
-     * prefer DRAFT (editable), then REVIEW (saved), then PUBLISHED (read-only).
-     *
-     * Unlike {@link #ensureDraftVersion()}, this does NOT create a new draft when the latest version is in REVIEW/PUBLISHED.
+     * prefer the latest DRAFT (editable), otherwise the PUBLISHED timetable (read-only),
+     * otherwise bootstrap a new draft.
      */
     @Transactional(readOnly = true)
     public TimetableVersionViewDTO currentWorkspaceVersion() {
         Integer schoolId = requireSchoolId();
         TimetableVersion draft =
                 timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.DRAFT).orElse(null);
-        TimetableVersion review =
-                timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.REVIEW).orElse(null);
-
-        // Important UX: if a blank draft exists (often created implicitly by "ensure draft"),
-        // but the user previously saved a populated review timetable, show the review by default.
-        if (draft != null && review != null) {
-            long draftCount = timetableEntryRepo.countBySchool_IdAndTimetableVersion_Id(schoolId, draft.getId());
-            long reviewCount = timetableEntryRepo.countBySchool_IdAndTimetableVersion_Id(schoolId, review.getId());
-            if (draftCount <= 0 && reviewCount > 0) {
-                return new TimetableVersionViewDTO(review.getId(), review.getStatus().name(), review.getVersion());
-            }
-        }
 
         TimetableVersion v = draft;
-        if (v == null) v = review;
         if (v == null) {
             v = timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.PUBLISHED).orElse(null);
         }
         if (v == null) {
-            // no versions yet → behave like ensureDraftVersion() to bootstrap
-            TimetableVersionViewDTO created = ensureDraftVersion();
-            return created;
+            return ensureDraftVersion();
         }
-        return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
+        return TimetableVersionViewDTO.from(v);
     }
 
     @Transactional(readOnly = true)
     public List<TimetableVersionViewDTO> listVersions() {
         Integer schoolId = requireSchoolId();
         return timetableVersionRepo.findBySchool_IdOrderByVersionDesc(schoolId).stream()
-                .map(v -> new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion()))
+                .map(TimetableVersionViewDTO::from)
                 .toList();
     }
 
@@ -476,8 +460,8 @@ public class TimetableGridV2Service {
     public ClearVersionResultDTO clearVersion(Integer timetableVersionId) {
         Integer schoolId = requireSchoolId();
         TimetableVersion v = timetableVersionRepo.findByIdAndSchool_Id(timetableVersionId, schoolId).orElseThrow();
-        if (v.getStatus() == TimetableStatus.PUBLISHED) {
-            throw new IllegalStateException("Published timetable cannot be cleared. Create a new draft version.");
+        if (v.getStatus() != TimetableStatus.DRAFT) {
+            throw new IllegalStateException("Only draft timetables can be cleared. Create a new draft version.");
         }
         int deletedEntries = timetableEntryRepo.deleteBySchool_IdAndTimetableVersion_Id(schoolId, timetableVersionId);
         int deletedLocks = timetableLockRepo.deleteBySchool_IdAndTimetableVersion_Id(schoolId, timetableVersionId);
@@ -498,8 +482,8 @@ public class TimetableGridV2Service {
     public TimetableEntryViewDTO upsertEntry(TimetableEntryUpsertDTO dto) {
         Integer schoolId = requireSchoolId();
         TimetableVersion version = timetableVersionRepo.findByIdAndSchool_Id(dto.timetableVersionId(), schoolId).orElseThrow();
-        if (version.getStatus() == TimetableStatus.PUBLISHED) {
-            throw new IllegalStateException("Published timetable cannot be edited. Create a new draft version.");
+        if (version.getStatus() != TimetableStatus.DRAFT) {
+            throw new IllegalStateException("Only draft timetables can be edited. Create or open a draft version.");
         }
 
         ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(dto.classGroupId(), schoolId).orElseThrow();
@@ -590,8 +574,8 @@ public class TimetableGridV2Service {
     public void clearEntry(Integer timetableVersionId, Integer classGroupId, String dayOfWeek, Integer timeSlotId) {
         Integer schoolId = requireSchoolId();
         TimetableVersion version = timetableVersionRepo.findByIdAndSchool_Id(timetableVersionId, schoolId).orElseThrow();
-        if (version.getStatus() == TimetableStatus.PUBLISHED) {
-            throw new IllegalStateException("Published timetable cannot be edited. Create a new draft version.");
+        if (version.getStatus() != TimetableStatus.DRAFT) {
+            throw new IllegalStateException("Only draft timetables can be edited. Create or open a draft version.");
         }
         classGroupRepo.findByIdAndSchool_Id(classGroupId, schoolId).orElseThrow();
         SchoolTimeSlot slot = schoolTimeSlotRepo.findByIdAndSchool_Id(timeSlotId, schoolId).orElseThrow();

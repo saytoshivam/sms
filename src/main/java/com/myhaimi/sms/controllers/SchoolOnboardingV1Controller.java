@@ -16,6 +16,7 @@ import com.myhaimi.sms.DTO.OnboardingStaffCreateDTO;
 import com.myhaimi.sms.DTO.OnboardingStaffSetupResultDTO;
 import com.myhaimi.sms.DTO.OnboardingStaffViewDTO;
 import com.myhaimi.sms.DTO.OnboardingStaffUpdateDTO;
+import com.myhaimi.sms.DTO.OnboardingStaffUserCredentialDTO;
 import com.myhaimi.sms.DTO.StaffDeleteInfoDTO;
 import com.myhaimi.sms.DTO.OnboardingFeesSetupDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicStructureSaveDTO;
@@ -158,6 +159,12 @@ public class SchoolOnboardingV1Controller {
     public ResponseEntity<?> updateStaff(@PathVariable Integer id, @Valid @RequestBody OnboardingStaffUpdateDTO body) {
         // returns credential only when a login was newly created
         return ResponseEntity.ok(schoolOnboardingService.updateStaff(id, body));
+    }
+
+    @PostMapping("/staff/{id}/reset-login")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<OnboardingStaffUserCredentialDTO> resetStaffLogin(@PathVariable Integer id) {
+        return ResponseEntity.ok(schoolOnboardingService.resetStaffLoginPassword(id));
     }
 
     @GetMapping("/fees")
