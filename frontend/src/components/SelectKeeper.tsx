@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 import { themeUi } from '../theme/uiClasses';
@@ -14,7 +14,17 @@ export type SelectKeeperProps = {
   id?: string;
   disabled?: boolean;
   className?: string;
+  /** Filter options by label while open; selected value stays listed and pinned to top (below placeholder). */
+  searchable?: boolean;
 };
+
+function pinSelectedFirst(options: SelectKeeperOption[], selectedValue: string): SelectKeeperOption[] {
+  if (!selectedValue) return options;
+  const ix = options.findIndex((o) => o.value === selectedValue);
+  if (ix <= 0) return options;
+  const sel = options[ix]!;
+  return [sel, ...options.filter((_, i) => i !== ix)];
+}
 
 /** Dropdown with orange hover states (use instead of a native select when theme control matters). */
 export function SelectKeeper({
@@ -25,18 +35,44 @@ export function SelectKeeper({
   id: idProp,
   disabled,
   className,
+  searchable = false,
 }: SelectKeeperProps) {
   const gen = useId();
   const id = idProp ?? gen;
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
+  const panelRef = useRef<HTMLDivElement | HTMLUListElement | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const rows: SelectKeeperOption[] = emptyValueLabel
-    ? [{ value: '', label: emptyValueLabel }, ...options]
-    : options;
+  const rows = useMemo(() => {
+    const base: SelectKeeperOption[] = emptyValueLabel
+      ? [{ value: '', label: emptyValueLabel }, ...options]
+      : options.slice();
+
+    if (!searchable) return base;
+
+    const hasEmpty = Boolean(emptyValueLabel);
+    const emptyRow = hasEmpty ? base[0] : null;
+    const restOpts = hasEmpty ? base.slice(1) : base;
+
+    const q = searchQuery.trim().toLowerCase();
+    let filtered =
+      q.length > 0 ? restOpts.filter((o) => o.label.toLowerCase().includes(q)) : restOpts.slice();
+
+    if (q.length > 0 && value) {
+      const selected = restOpts.find((o) => o.value === value);
+      if (selected && !filtered.some((o) => o.value === value)) {
+        filtered = [selected, ...filtered];
+      }
+    }
+
+    const pinned = pinSelectedFirst(filtered, value);
+
+    return emptyRow ? [emptyRow, ...pinned] : pinned;
+  }, [emptyValueLabel, options, searchable, searchQuery, value]);
 
   const current = rows.find((r) => r.value === value);
   const buttonLabel = current?.label ?? (emptyValueLabel ?? 'Select…');
@@ -78,11 +114,21 @@ export function SelectKeeper({
   }, [open]);
 
   useEffect(() => {
+    if (!open) setSearchQuery('');
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !searchable) return;
+    const idr = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(idr);
+  }, [open, searchable]);
+
+  useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
       const t = e.target as Node;
       if (rootRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
       setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
@@ -119,34 +165,86 @@ export function SelectKeeper({
       </button>
       {open && menuStyle && typeof document !== 'undefined'
         ? createPortal(
-            <ul
-              ref={menuRef}
-              className="select-keeper__menu select-keeper__menu--portal"
-              style={menuStyle}
-              role="listbox"
-              aria-labelledby={id}
-            >
-              {rows.map((opt, idx) => (
-                <li key={`${id}-opt-${idx}-${opt.value}`} role="presentation">
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={opt.value === value}
-                    className={
-                      opt.value === value
-                        ? 'select-keeper__option select-keeper__option--selected'
-                        : 'select-keeper__option'
-                    }
-                    onClick={() => {
-                      onChange(opt.value);
-                      setOpen(false);
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                </li>
-              ))}
-            </ul>,
+            searchable ? (
+              <div
+                ref={panelRef}
+                className="select-keeper__panel select-keeper__menu--portal"
+                style={{
+                  ...menuStyle,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  padding: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                <input
+                  ref={searchRef}
+                  type="search"
+                  className="select-keeper__search"
+                  placeholder="Search…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Filter options"
+                />
+                <ul
+                  className="select-keeper__menu select-keeper__menu--in-panel"
+                  role="listbox"
+                  aria-labelledby={id}
+                >
+                  {rows.map((opt, idx) => (
+                    <li key={`${id}-opt-${idx}-${opt.value}-${opt.label.slice(0, 24)}`} role="presentation">
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={opt.value === value}
+                        className={
+                          opt.value === value
+                            ? 'select-keeper__option select-keeper__option--selected'
+                            : 'select-keeper__option'
+                        }
+                        onClick={() => {
+                          onChange(opt.value);
+                          setOpen(false);
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <ul
+                ref={panelRef}
+                className="select-keeper__menu select-keeper__menu--portal"
+                style={menuStyle}
+                role="listbox"
+                aria-labelledby={id}
+              >
+                {rows.map((opt, idx) => (
+                  <li key={`${id}-opt-${idx}-${opt.value}`} role="presentation">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={opt.value === value}
+                      className={
+                        opt.value === value
+                          ? 'select-keeper__option select-keeper__option--selected'
+                          : 'select-keeper__option'
+                      }
+                      onClick={() => {
+                        onChange(opt.value);
+                        setOpen(false);
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ),
             document.body,
           )
         : null}

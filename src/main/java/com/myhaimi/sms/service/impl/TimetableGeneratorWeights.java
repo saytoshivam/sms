@@ -2,25 +2,33 @@ package com.myhaimi.sms.service.impl;
 
 /**
  * Tunable weights for the timetable generator scoring.
- * Higher = more important (soft constraints only).
+ * Higher = more important (soft constraints only). Hard constraints are enforced separately.
  */
 public record TimetableGeneratorWeights(
+        /**
+         * Scales same-period and off-modal penalties in {@link TimetableGeneratorService} (80 = default “1×” baseline).
+         */
         int preferConsistentPeriod,
         int preferNearPeriod,
-        int avoidSameSubjectConsecutive,
-        int spreadAcrossWeek,
-        int avoidGapsInDay,
-        int preferMorningCore
+        /**
+         * Multiplier for penalizing stacking the same subject on the same day:
+         * penalty = spreadSameSubjectSameDay × (existingCountOnThatDay)².
+         */
+        int spreadSameSubjectSameDay,
+        /**
+         * Bonus when the slot falls on the round-robin target day for this weekly occurrence
+         * (occurrence i → workingDays[i mod workingDays.size()]).
+         */
+        int preferSpreadDay,
+        int preferClassTeacherFirstPeriod
 ) {
     public static TimetableGeneratorWeights balancedDefaults() {
         return new TimetableGeneratorWeights(
-                18, // consistent period is very important
-                10, // nearby period is good
-                14, // avoid same subject back-to-back
-                8,  // spread across days
-                6,  // avoid holes in a day
-                4   // morning preference (if subject type/core available)
+                80,
+                24,
+                48,
+                95,
+                12
         );
     }
 }
-

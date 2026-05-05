@@ -19,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.HashMap;
@@ -33,6 +35,7 @@ public class TimetableGridV2Service {
     private final SchoolTimeSlotRepo schoolTimeSlotRepo;
     private final TimetableVersionRepo timetableVersionRepo;
     private final TimetableEntryRepo timetableEntryRepo;
+    private final TimetableLockRepo timetableLockRepo;
     private final ClassGroupRepo classGroupRepo;
     private final SubjectRepo subjectRepo;
     private final StaffRepo staffRepo;
@@ -239,66 +242,135 @@ public class TimetableGridV2Service {
         int skippedNoAlloc = 0;
         List<String> warnings = new ArrayList<>();
 
-        int qi = 0;
-        for (DayOfWeek d : days) {
-            for (SchoolTimeSlot s : slots) {
-                String key = d.name() + "|" + s.getId();
+        // Period-major (P1×days, then P2×days, …) + pick the queued allocation that best matches same-period/modal
+        // scoring — aligns with TimetableGeneratorService phase-2 intent for memorizable rows.
+        List<SchoolTimeSlot> slotOrdered = new ArrayList<>(slots);
+        slotOrdered.sort(Comparator.comparingInt(SchoolTimeSlot::getSlotOrder));
+        boolean[] queueUsed = new boolean[queue.size()];
+
+        for (SchoolTimeSlot slot : slotOrdered) {
+            int slotOrder = slot.getSlotOrder();
+            for (DayOfWeek d : days) {
+                String key = d.name() + "|" + slot.getId();
                 if (entryByCell.containsKey(key)) {
                     skippedFilled += 1;
                     continue;
                 }
-                if (qi >= queue.size()) {
-                    skippedNoAlloc += 1;
-                    continue;
+
+                int bestIdx = -1;
+                long bestPen = Long.MAX_VALUE;
+                for (int i = 0; i < queue.size(); i++) {
+                    if (queueUsed[i]) continue;
+                    SubjectAllocation alloc = queue.get(i);
+                    if (alloc.getStaff() == null) continue;
+                    if (timetableEntryRepo.existsBySchool_IdAndTimetableVersion_IdAndStaff_IdAndDayOfWeekAndTimeSlot_Id(
+                            schoolId, version.getId(), alloc.getStaff().getId(), d, slot.getId())) {
+                        continue;
+                    }
+                    Integer subjId = alloc.getSubject() == null ? null : alloc.getSubject().getId();
+                    int matches = countSubjectSamePeriodElsewhere(entryByCell.values(), d, slotOrder, subjId);
+                    Integer modal = dominantSubjectPeriodElsewhere(entryByCell.values(), d, subjId);
+                    long pen = -14_000L * matches;
+                    if (modal != null) {
+                        pen += 9_000L * Math.abs(slotOrder - modal);
+                    }
+                    if (pen < bestPen) {
+                        bestPen = pen;
+                        bestIdx = i;
+                    }
                 }
 
-                boolean placedHere = false;
-                // Try a bounded number of allocations for this cell to avoid infinite loops in conflict-heavy scenarios.
-                int attempts = Math.min(queue.size() - qi, 12);
-                for (int a = 0; a < attempts; a++) {
-                    SubjectAllocation alloc = queue.get(qi);
-                    qi += 1;
+                if (bestIdx >= 0) {
+                    SubjectAllocation alloc = queue.get(bestIdx);
                     try {
-                        // Teacher conflict check (room optional; not auto-assigned)
-                        if (timetableEntryRepo.existsBySchool_IdAndTimetableVersion_IdAndStaff_IdAndDayOfWeekAndTimeSlot_Id(
-                                schoolId, version.getId(), alloc.getStaff().getId(), d, s.getId())) {
-                            skippedConflict += 1;
-                            continue;
-                        }
-
                         TimetableEntry e = new TimetableEntry();
                         e.setSchool(schoolRepo.findById(schoolId).orElseThrow());
                         e.setTimetableVersion(version);
                         e.setClassGroup(cg);
                         e.setDayOfWeek(d);
-                        e.setTimeSlot(s);
+                        e.setTimeSlot(slot);
                         e.setSubject(alloc.getSubject());
                         e.setStaff(alloc.getStaff());
                         Room allocRoom = alloc.getRoom();
                         e.setRoom(allocRoom != null ? allocRoom : cg.getDefaultRoom());
                         e = timetableEntryRepo.save(e);
                         entryByCell.put(key, e);
+                        queueUsed[bestIdx] = true;
                         placed += 1;
-                        placedHere = true;
-                        break;
                     } catch (Exception ex) {
                         skippedConflict += 1;
                     }
-                }
-
-                if (!placedHere && qi >= queue.size()) {
-                    skippedNoAlloc += 1;
+                } else {
+                    boolean anyUnused = false;
+                    for (boolean u : queueUsed) {
+                        if (!u) {
+                            anyUnused = true;
+                            break;
+                        }
+                    }
+                    if (anyUnused) {
+                        skippedConflict += 1;
+                    } else {
+                        skippedNoAlloc += 1;
+                    }
                 }
             }
         }
 
-        // Any remaining queue means we couldn't place all requested weekly frequencies.
-        int remaining = Math.max(0, queue.size() - qi);
+        int remaining = 0;
+        for (boolean u : queueUsed) {
+            if (!u) remaining++;
+        }
         if (remaining > 0) {
             warnings.add("Could not place " + remaining + " period(s). Add more time slots or reduce weekly frequencies.");
         }
 
         return new AutoFillResultDTO(placed, skippedFilled, skippedConflict, skippedNoAlloc, warnings);
+    }
+
+    private static int countSubjectSamePeriodElsewhere(
+            Collection<TimetableEntry> entries,
+            DayOfWeek excludeDay,
+            int slotOrder,
+            Integer subjectId
+    ) {
+        if (subjectId == null) return 0;
+        int n = 0;
+        for (TimetableEntry e : entries) {
+            if (e.getDayOfWeek() == null || e.getTimeSlot() == null || e.getSubject() == null) continue;
+            if (e.getDayOfWeek().equals(excludeDay)) continue;
+            if (!subjectId.equals(e.getSubject().getId())) continue;
+            if (e.getTimeSlot().getSlotOrder() != slotOrder) continue;
+            n++;
+        }
+        return n;
+    }
+
+    private static Integer dominantSubjectPeriodElsewhere(
+            Collection<TimetableEntry> entries,
+            DayOfWeek excludeDay,
+            Integer subjectId
+    ) {
+        if (subjectId == null) return null;
+        int[] hist = new int[64];
+        for (TimetableEntry e : entries) {
+            if (e.getDayOfWeek() == null || e.getTimeSlot() == null || e.getSubject() == null) continue;
+            if (e.getDayOfWeek().equals(excludeDay)) continue;
+            if (!subjectId.equals(e.getSubject().getId())) continue;
+            int so = e.getTimeSlot().getSlotOrder();
+            if (so >= 0 && so < hist.length) hist[so]++;
+        }
+        int bestSo = -1;
+        int bestCnt = 0;
+        for (int so = 0; so < hist.length; so++) {
+            int h = hist[so];
+            if (h == 0) continue;
+            if (h > bestCnt || (h == bestCnt && (bestSo < 0 || so < bestSo))) {
+                bestCnt = h;
+                bestSo = so;
+            }
+        }
+        return bestCnt > 0 ? bestSo : null;
     }
 
     private List<DayOfWeek> resolveWorkingDays(Integer schoolId) {
@@ -324,7 +396,9 @@ public class TimetableGridV2Service {
                 };
                 if (dow != null) set.add(dow);
             }
-            return new ArrayList<>(set);
+            ArrayList<DayOfWeek> out = new ArrayList<>(set);
+            out.sort(Comparator.comparingInt(DayOfWeek::getValue));
+            return out;
         } catch (Exception ignored) {
             return List.of();
         }
@@ -349,6 +423,65 @@ public class TimetableGridV2Service {
         nv.setVersion(nextVersion);
         nv = timetableVersionRepo.save(nv);
         return new TimetableVersionViewDTO(nv.getId(), nv.getStatus().name(), nv.getVersion());
+    }
+
+    /**
+     * Returns the "workspace" version the UI should display:
+     * prefer DRAFT (editable), then REVIEW (saved), then PUBLISHED (read-only).
+     *
+     * Unlike {@link #ensureDraftVersion()}, this does NOT create a new draft when the latest version is in REVIEW/PUBLISHED.
+     */
+    @Transactional(readOnly = true)
+    public TimetableVersionViewDTO currentWorkspaceVersion() {
+        Integer schoolId = requireSchoolId();
+        TimetableVersion draft =
+                timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.DRAFT).orElse(null);
+        TimetableVersion review =
+                timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.REVIEW).orElse(null);
+
+        // Important UX: if a blank draft exists (often created implicitly by "ensure draft"),
+        // but the user previously saved a populated review timetable, show the review by default.
+        if (draft != null && review != null) {
+            long draftCount = timetableEntryRepo.countBySchool_IdAndTimetableVersion_Id(schoolId, draft.getId());
+            long reviewCount = timetableEntryRepo.countBySchool_IdAndTimetableVersion_Id(schoolId, review.getId());
+            if (draftCount <= 0 && reviewCount > 0) {
+                return new TimetableVersionViewDTO(review.getId(), review.getStatus().name(), review.getVersion());
+            }
+        }
+
+        TimetableVersion v = draft;
+        if (v == null) v = review;
+        if (v == null) {
+            v = timetableVersionRepo.findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.PUBLISHED).orElse(null);
+        }
+        if (v == null) {
+            // no versions yet → behave like ensureDraftVersion() to bootstrap
+            TimetableVersionViewDTO created = ensureDraftVersion();
+            return created;
+        }
+        return new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion());
+    }
+
+    @Transactional(readOnly = true)
+    public List<TimetableVersionViewDTO> listVersions() {
+        Integer schoolId = requireSchoolId();
+        return timetableVersionRepo.findBySchool_IdOrderByVersionDesc(schoolId).stream()
+                .map(v -> new TimetableVersionViewDTO(v.getId(), v.getStatus().name(), v.getVersion()))
+                .toList();
+    }
+
+    public record ClearVersionResultDTO(int deletedEntries, int deletedLocks) {}
+
+    @Transactional
+    public ClearVersionResultDTO clearVersion(Integer timetableVersionId) {
+        Integer schoolId = requireSchoolId();
+        TimetableVersion v = timetableVersionRepo.findByIdAndSchool_Id(timetableVersionId, schoolId).orElseThrow();
+        if (v.getStatus() == TimetableStatus.PUBLISHED) {
+            throw new IllegalStateException("Published timetable cannot be cleared. Create a new draft version.");
+        }
+        int deletedEntries = timetableEntryRepo.deleteBySchool_IdAndTimetableVersion_Id(schoolId, timetableVersionId);
+        int deletedLocks = timetableLockRepo.deleteBySchool_IdAndTimetableVersion_Id(schoolId, timetableVersionId);
+        return new ClearVersionResultDTO(deletedEntries, deletedLocks);
     }
 
     @Transactional(readOnly = true)

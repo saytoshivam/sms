@@ -71,6 +71,24 @@ public class TimetableGridV2Controller {
         return timetableGridV2Service.ensureDraftVersion();
     }
 
+    @PostMapping("/versions/workspace")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD','TEACHER','CLASS_TEACHER')")
+    public TimetableVersionViewDTO workspaceVersion() {
+        return timetableGridV2Service.currentWorkspaceVersion();
+    }
+
+    @GetMapping("/versions")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
+    public List<TimetableVersionViewDTO> listVersions() {
+        return timetableGridV2Service.listVersions();
+    }
+
+    @PostMapping("/versions/{timetableVersionId}/clear")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public TimetableGridV2Service.ClearVersionResultDTO clearVersion(@PathVariable Integer timetableVersionId) {
+        return timetableGridV2Service.clearVersion(timetableVersionId);
+    }
+
     @GetMapping("/entries")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD','TEACHER','CLASS_TEACHER')")
     public List<TimetableEntryViewDTO> listEntries(

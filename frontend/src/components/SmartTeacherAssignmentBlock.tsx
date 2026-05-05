@@ -1,8 +1,16 @@
-import { useCallback, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SelectKeeper } from './SelectKeeper';
 import { toast } from '../lib/toast';
-import { buildEffectiveAllocRows, homeroomMapFromDraft, type ClassSubjectConfigRow, type SectionSubjectOverrideRow } from '../lib/academicStructureUtils';
+import {
+  buildEffectiveAllocRows,
+  homeroomMapFromDraft,
+  otherClassGroupIdsSharingHomeroomRoom,
+  sectionHasAssignedRoomDraft,
+  type ClassSubjectConfigRow,
+  type SectionSubjectOverrideRow,
+} from '../lib/academicStructureUtils';
 import {
   type AssignmentSource,
   type AssignmentSlotMeta,
@@ -17,6 +25,125 @@ import {
   computeTeacherDemandSummary,
   type TeacherDemandStatus,
 } from '../lib/teacherDemandAnalysis';
+import { parseSubjectVenueRequirement } from '../lib/subjectVenueRequirement';
+import {
+  formatCompatibleRoomTypesList,
+  isRoomTypeCompatible,
+  parseRoomVenueType,
+  schoolHasAnyCompatibleRoom,
+} from '../lib/roomVenueCompatibility';
+import { sectionMissingClassTeacher } from '../lib/classTeacherAutoAssign';
+import {
+  AssignmentSourceBadge,
+  ProvenanceBadgeGroup,
+  SectionBulkLockBadge,
+} from './AssignmentProvenanceBadges';
+
+const toolbarOutlineBtnSx: Record<string, string | number> = {
+  border: '1px solid rgba(15,23,42,0.16)',
+  background: '#fff',
+  color: '#475569',
+  fontSize: 12,
+  fontWeight: 700,
+  padding: '6px 10px',
+  borderRadius: 8,
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+};
+
+const toolbarMenuPanelSx: Record<string, string | number> = {
+  position: 'absolute',
+  top: '100%',
+  left: 0,
+  marginTop: 6,
+  minWidth: 288,
+  maxWidth: 380,
+  zIndex: 25,
+  background: '#fff',
+  border: '1px solid rgba(15,23,42,0.1)',
+  borderRadius: 10,
+  boxShadow: '0 10px 40px rgba(15,23,42,0.12)',
+  padding: '8px 0',
+};
+
+const menuSectionLabelSx: Record<string, string | number> = {
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: '#94a3b8',
+  padding: '6px 12px 4px',
+};
+
+const menuItemBtnSx: Record<string, string | number> = {
+  display: 'block',
+  width: '100%',
+  textAlign: 'left',
+  border: 'none',
+  background: 'transparent',
+  padding: '8px 12px',
+  fontSize: 13,
+  fontWeight: 600,
+  color: '#334155',
+  cursor: 'pointer',
+};
+
+const menuItemDangerSx: Record<string, string | number> = {
+  ...menuItemBtnSx,
+  color: '#b91c1c',
+  fontWeight: 700,
+};
+
+const menuDividerSx: Record<string, string | number> = {
+  height: 1,
+  margin: '6px 0',
+  background: 'rgba(15,23,42,0.06)',
+  border: 'none',
+};
+
+function ToolbarDropdown({
+  label,
+  disabled,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  children: (close: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  const close = () => setOpen(false);
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        style={{
+          ...toolbarOutlineBtnSx,
+          opacity: disabled ? 0.45 : 1,
+          pointerEvents: disabled ? 'none' : 'auto',
+        }}
+      >
+        {label}{' '}
+        <span style={{ fontSize: 10, opacity: 0.65 }} aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && !disabled ? <div style={toolbarMenuPanelSx}>{children(close)}</div> : null}
+    </div>
+  );
+}
 
 type DemandSortKey = 'subject' | 'required' | 'qualified' | 'capacity' | 'teachersNeeded' | 'status';
 
@@ -25,15 +152,6 @@ const DEMAND_STATUS_RANK: Record<TeacherDemandStatus, number> = {
   WARN: 1,
   OK: 2,
 };
-
-/** Used only for “needs attention” when a lab-like subject still resolves to homeroom only. */
-function preferredTeachingRoomCategory(subjectName: string, subjectCode: string): string | null {
-  const s = `${subjectName} ${subjectCode}`.toLowerCase();
-  if (s.includes('physics') || s.includes('chemistry') || s.includes('biology') || s.includes('science')) return 'LAB';
-  if (s.includes('computer') || s.includes('informatics') || s.includes('it ') || s.includes('csc') || s.includes('ip ')) return 'COMPUTER';
-  if (s.includes('music')) return 'MUSIC';
-  return null;
-}
 
 type StaffRow = {
   id: number;
@@ -47,7 +165,21 @@ type StaffRow = {
 };
 
 type ClassG = { classGroupId: number; code: string; displayName: string; gradeLevel: number | null; section: string | null };
-type Sub = { id: number; name: string; code: string; weeklyFrequency: number | null };
+
+function formatClassGroupShortLabel(cg: ClassG): string {
+  if (cg.gradeLevel != null && String(cg.section ?? cg.code ?? '').trim()) {
+    return `Class ${cg.gradeLevel} ${cg.section ?? cg.code}`;
+  }
+  return cg.displayName || cg.code || `Section ${cg.classGroupId}`;
+}
+type Sub = {
+  id: number;
+  name: string;
+  code: string;
+  weeklyFrequency: number | null;
+  allocationVenueRequirement?: string | null;
+  specializedVenueType?: string | null;
+};
 
 /** Passed from Academic module shell — weekly hint, progress, section capacity warnings. */
 export type SmartAssignmentOverviewContext = {
@@ -73,21 +205,27 @@ type Props = {
   classGroups: ClassG[];
   subjects: Sub[];
   staff: StaffRow[];
-  roomOptions: { value: string; label: string }[];
+  roomOptions: { value: string; label: string; roomType?: string | null }[];
   classSubjectConfigs: ClassSubjectConfigRow[];
   setClassSubjectConfigs: React.Dispatch<React.SetStateAction<ClassSubjectConfigRow[]>>;
   sectionSubjectOverrides: SectionSubjectOverrideRow[];
   setSectionSubjectOverrides: React.Dispatch<React.SetStateAction<SectionSubjectOverrideRow[]>>;
   assignmentMeta: Record<string, AssignmentSlotMeta>;
   setAssignmentMeta: React.Dispatch<React.SetStateAction<Record<string, AssignmentSlotMeta>>>;
-  subjectsCatalogForLabels: { id: number; name: string; code: string }[];
+  subjectsCatalogForLabels: Sub[];
   filters?: { grade: string; subject: string; teacher: string };
   showBulkActions?: boolean;
   /** Single bulk homeroom automation (uses floor/building/capacity-aware placement). */
   autoAssignHomerooms: () => void;
   /** Greedy assignment of homeroom (class) teachers from effective subject-teaching allocations. */
   autoAssignClassTeachers: () => void;
-  /** Clears homerooms assigned by automation only. */
+  /** Clears section homeroom draft only. */
+  clearHomeroomDraft?: () => void;
+  /** Clears class teachers assigned via Auto assign class teachers only. */
+  clearAutoAssignedClassTeachers?: () => void;
+  /** Clears every section's class teacher (manual and auto). */
+  clearAllClassTeacherAssignments?: () => void;
+  /** Clears homeroom draft + auto class teachers (combined). */
   clearAutoHomeroomAssignments?: () => void;
   /**
    * Draft homerooms keyed by classGroupId → room id string (same persistence as overview homeroom column).
@@ -95,6 +233,17 @@ type Props = {
   defaultRoomByClassId: Record<number, string>;
   /** Tracks whether each section homeroom was last set automatically vs manually (controls bulk overwrite). */
   homeroomSourceByClassId?: Record<number, 'auto' | 'manual' | ''>;
+  homeroomLockedByClassId: Record<number, boolean>;
+  patchHomeroomLock: (classGroupId: number, locked: boolean) => void;
+  patchSectionHomeroom: (classGroupId: number, value: string) => void;
+  /** Same option list as Overview homeroom picker (building + room label). */
+  homeroomSelectOptions: { value: string; label: string }[];
+  /** Section homeroom teacher (class teacher) — same draft as Overview. */
+  classTeacherByClassId: Record<number, string>;
+  classTeacherSourceByClassId?: Record<number, 'auto' | 'manual' | ''>;
+  classTeacherLockedByClassId: Record<number, boolean>;
+  patchSectionClassTeacher: (classGroupId: number, staffIdValue: string) => void;
+  patchClassTeacherLock: (classGroupId: number, locked: boolean) => void;
   /**
    * When a teacher doesn't have `maxWeeklyLectureLoad` set, this is used as the fallback
    * teacher capacity for load checks / KPI (instead of hardcoded 32).
@@ -115,14 +264,26 @@ export function SmartTeacherAssignmentBlock({
   setSectionSubjectOverrides,
   assignmentMeta,
   setAssignmentMeta,
-  subjectsCatalogForLabels: _subjectsCatalogForLabels,
+  subjectsCatalogForLabels,
   filters,
   showBulkActions = false,
   autoAssignHomerooms,
   autoAssignClassTeachers,
+  clearHomeroomDraft,
+  clearAutoAssignedClassTeachers,
+  clearAllClassTeacherAssignments,
   clearAutoHomeroomAssignments,
   defaultRoomByClassId,
   homeroomSourceByClassId = {},
+  homeroomLockedByClassId,
+  patchHomeroomLock,
+  patchSectionHomeroom,
+  homeroomSelectOptions,
+  classTeacherByClassId,
+  classTeacherSourceByClassId = {},
+  classTeacherLockedByClassId,
+  patchSectionClassTeacher,
+  patchClassTeacherLock,
   slotsPerWeek,
   overviewContext = null,
   filterUi = null,
@@ -131,11 +292,14 @@ export function SmartTeacherAssignmentBlock({
   const [bulkDrawerOpen, setBulkDrawerOpen] = useState(false);
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [bulkTid, setBulkTid] = useState<string>('');
-  const [bulkRoomId, setBulkRoomId] = useState<string>('');
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
   const [onlyLocked, setOnlyLocked] = useState(false);
   const [onlyOverloaded, setOnlyOverloaded] = useState(false);
   const [onlyConflicts, setOnlyConflicts] = useState(false);
+  const [onlyNeedsAttention, setOnlyNeedsAttention] = useState(false);
+  const [onlyManualOverrides, setOnlyManualOverrides] = useState(false);
+  /** Single expanded assignment row slot key per section (classGroupId). */
+  const [expandedSlotByClassId, setExpandedSlotByClassId] = useState<Record<number, string>>({});
   const [sectionSearch, setSectionSearch] = useState('');
   const [demandSort, setDemandSort] = useState<{ key: DemandSortKey; dir: 'asc' | 'desc' }>({
     key: 'subject',
@@ -200,6 +364,11 @@ export function SmartTeacherAssignmentBlock({
 
   const homeroomMap = useMemo(() => homeroomMapFromDraft(classGroups, defaultRoomByClassId), [classGroups, defaultRoomByClassId]);
 
+  const sectionsMissingRoomCount = useMemo(
+    () => classGroups.filter((cg) => !sectionHasAssignedRoomDraft(cg.classGroupId, defaultRoomByClassId)).length,
+    [classGroups, defaultRoomByClassId],
+  );
+
   const effective = useMemo(
     () => buildEffectiveAllocRows(cgs, classSubjectConfigs, sectionSubjectOverrides, homeroomMap),
     [cgs, classSubjectConfigs, sectionSubjectOverrides, homeroomMap],
@@ -214,6 +383,15 @@ export function SmartTeacherAssignmentBlock({
       })),
     [staff],
   );
+
+  const classTeacherStaffOptions = useMemo(() => {
+    const opts = staff
+      .filter((s) => (s.roleNames ?? []).includes('TEACHER'))
+      .slice()
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, undefined, { sensitivity: 'base' }))
+      .map((s) => ({ value: String(s.id), label: s.fullName || s.email || `Staff ${s.id}` }));
+    return [{ value: '', label: 'No class teacher' }, ...opts];
+  }, [staff]);
 
   const loadRows = useMemo(() => {
     const base = buildTeacherLoadRows(
@@ -237,7 +415,15 @@ export function SmartTeacherAssignmentBlock({
     return m;
   }, [subjects]);
 
-  const flatRows = useMemo(() => {
+  const schedulableRoomTypeValues = useMemo(
+    () =>
+      roomOptions
+        .map((o) => (o.value ? o.roomType : null))
+        .filter((x): x is string => x != null && String(x).trim().length > 0),
+    [roomOptions],
+  );
+
+  const scopedGridRows = useMemo(() => {
     const out: {
       classGroupId: number;
       subId: number;
@@ -261,14 +447,12 @@ export function SmartTeacherAssignmentBlock({
         const matchesEligibleUnassigned = a.staffId == null && Number.isFinite(tid) && teacherCanTeach(tid, a.subjectId);
         if (!matchesAssigned && !matchesEligibleUnassigned) continue;
       }
-      const s = subjects.find((x) => x.id === a.subjectId);
-      // If the subject catalog is empty or doesn't contain this subjectId anymore (e.g. after bulk delete),
-      // hide the row instead of showing "Subject 11".
-      if (!s) continue;
+      const s = subjects.find((x) => x.id === a.subjectId) ?? subjectsCatalogForLabels.find((x) => x.id === a.subjectId);
+      const subName = s?.name?.trim() ? s.name : `Subject ${a.subjectId}`;
       out.push({
         classGroupId: a.classGroupId,
         subId: a.subjectId,
-        subName: s.name,
+        subName,
         periods: a.weeklyFrequency,
         staffId: a.staffId,
         roomId: a.roomId ?? null,
@@ -279,8 +463,7 @@ export function SmartTeacherAssignmentBlock({
     return out.filter((r) => {
       const m = assignmentMeta[r.k];
       const teacherLocked = m?.locked ?? false;
-      const roomLockedRow = !!(m?.roomLocked ?? false);
-      const anyLocked = teacherLocked || roomLockedRow;
+      const anyLocked = teacherLocked;
       const isUnassigned = r.staffId == null;
       if (onlyUnassigned && !isUnassigned) return false;
       if (onlyLocked && !anyLocked) return false;
@@ -297,6 +480,11 @@ export function SmartTeacherAssignmentBlock({
         const tl = r.staffId != null ? teacherLoadById.get(Number(r.staffId)) : null;
         if (!tl || tl.status !== 'over') return false;
       }
+      if (onlyManualOverrides) {
+        const mm = assignmentMeta[r.k];
+        const manualSurface = mm?.source === 'manual' || (mm?.locked ?? false);
+        if (!manualSurface) return false;
+      }
       if (q) {
         const sec = classGroups.find((c) => c.classGroupId === r.classGroupId);
         const label = `${sec?.displayName ?? ''} ${sec?.code ?? ''} ${sec?.section ?? ''}`.toLowerCase();
@@ -311,14 +499,126 @@ export function SmartTeacherAssignmentBlock({
     subjFilter,
     teacherFilter,
     subjects,
+    subjectsCatalogForLabels,
     teacherCanTeach,
     assignmentMeta,
     onlyUnassigned,
     onlyLocked,
     onlyConflicts,
     onlyOverloaded,
+    onlyManualOverrides,
     sectionSearch,
     teacherLoadById,
+  ]);
+
+  const needsAttention = useMemo(() => {
+    const needs: (typeof scopedGridRows)[number][] = [];
+    const healthy: (typeof scopedGridRows)[number][] = [];
+    for (const r of scopedGridRows) {
+      const m = assignmentMeta[r.k];
+      const locked = m?.locked ?? false;
+      const src = m?.source ?? null;
+      const teacherOver = r.staffId != null ? teacherLoadById.get(Number(r.staffId))?.status === 'over' : false;
+      const subRow =
+        subjects.find((x) => Number(x.id) === Number(r.subId)) ??
+        subjectsCatalogForLabels.find((x) => Number(x.id) === Number(r.subId));
+      const req = parseSubjectVenueRequirement(subRow?.allocationVenueRequirement);
+      const spec = parseRoomVenueType(subRow?.specializedVenueType ?? undefined);
+      const effRoomType =
+        r.roomId != null ? roomOptions.find((o) => o.value === String(r.roomId))?.roomType ?? null : null;
+      const noSchoolVenue =
+        req !== 'FLEXIBLE' &&
+        (r.periods ?? 0) > 0 &&
+        !schoolHasAnyCompatibleRoom(schedulableRoomTypeValues, req, spec);
+      const venueMismatch =
+        req !== 'FLEXIBLE' &&
+        (r.periods ?? 0) > 0 &&
+        !noSchoolVenue &&
+        (effRoomType == null || !isRoomTypeCompatible(req, spec, effRoomType));
+      const missingTeacher = r.staffId == null && (r.periods ?? 0) > 0;
+      const conflict =
+        src === 'conflict' || m?.conflictReason === 'NO_ELIGIBLE_TEACHER' || m?.conflictReason === 'UNKNOWN';
+
+      const isNeeds =
+        missingTeacher ||
+        teacherOver ||
+        noSchoolVenue ||
+        venueMismatch ||
+        conflict ||
+        (locked && (missingTeacher || teacherOver || noSchoolVenue || venueMismatch || conflict));
+
+      if (isNeeds) needs.push(r);
+      else healthy.push(r);
+    }
+    return { needs, healthy };
+  }, [
+    scopedGridRows,
+    assignmentMeta,
+    teacherLoadById,
+    homeroomMap,
+    subjects,
+    subjectsCatalogForLabels,
+    roomOptions,
+    schedulableRoomTypeValues,
+  ]);
+
+  const needsAttentionKeySet = useMemo(() => new Set(needsAttention.needs.map((r) => r.k)), [needsAttention.needs]);
+
+  const flatRows = useMemo(() => {
+    if (!onlyNeedsAttention) return scopedGridRows;
+    return scopedGridRows.filter((r) => needsAttentionKeySet.has(r.k));
+  }, [scopedGridRows, onlyNeedsAttention, needsAttentionKeySet]);
+
+  /** Partition AFTER all quick/list filters — drives Needs / Healthy grids and counts. */
+  const displayAttention = useMemo(() => {
+    const needs: (typeof flatRows)[number][] = [];
+    const healthy: (typeof flatRows)[number][] = [];
+    for (const r of flatRows) {
+      const m = assignmentMeta[r.k];
+      const locked = m?.locked ?? false;
+      const src = m?.source ?? null;
+      const teacherOver = r.staffId != null ? teacherLoadById.get(Number(r.staffId))?.status === 'over' : false;
+      const subRow =
+        subjects.find((x) => Number(x.id) === Number(r.subId)) ??
+        subjectsCatalogForLabels.find((x) => Number(x.id) === Number(r.subId));
+      const req = parseSubjectVenueRequirement(subRow?.allocationVenueRequirement);
+      const spec = parseRoomVenueType(subRow?.specializedVenueType ?? undefined);
+      const effRoomType =
+        r.roomId != null ? roomOptions.find((o) => o.value === String(r.roomId))?.roomType ?? null : null;
+      const noSchoolVenue =
+        req !== 'FLEXIBLE' &&
+        (r.periods ?? 0) > 0 &&
+        !schoolHasAnyCompatibleRoom(schedulableRoomTypeValues, req, spec);
+      const venueMismatch =
+        req !== 'FLEXIBLE' &&
+        (r.periods ?? 0) > 0 &&
+        !noSchoolVenue &&
+        (effRoomType == null || !isRoomTypeCompatible(req, spec, effRoomType));
+      const missingTeacher = r.staffId == null && (r.periods ?? 0) > 0;
+      const conflictInner =
+        src === 'conflict' || m?.conflictReason === 'NO_ELIGIBLE_TEACHER' || m?.conflictReason === 'UNKNOWN';
+
+      const isNeeds =
+        missingTeacher ||
+        teacherOver ||
+        noSchoolVenue ||
+        venueMismatch ||
+        conflictInner ||
+        (locked && (missingTeacher || teacherOver || noSchoolVenue || venueMismatch || conflictInner));
+
+      if (isNeeds) needs.push(r);
+      else healthy.push(r);
+    }
+    return { needs, healthy };
+  }, [
+    flatRows,
+    assignmentMeta,
+    teacherLoadById,
+    homeroomMap,
+    subjects,
+    subjectsCatalogForLabels,
+    roomOptions,
+    schedulableRoomTypeValues,
   ]);
 
   const kpis = useMemo(() => {
@@ -408,48 +708,6 @@ export function SmartTeacherAssignmentBlock({
     return rows;
   }, [teacherDemand.rows, demandSort]);
 
-  const preferredRoomTypeBySubjectId = useMemo(() => {
-    const m = new Map<number, string | null>();
-    for (const s of subjects) {
-      m.set(Number(s.id), preferredTeachingRoomCategory(s.name, s.code));
-    }
-    return m;
-  }, [subjects]);
-
-  const needsAttention = useMemo(() => {
-    const needs: typeof flatRows = [];
-    const healthy: typeof flatRows = [];
-    for (const r of flatRows) {
-      const m = assignmentMeta[r.k];
-      const locked = m?.locked ?? false;
-      const src = m?.source ?? null;
-      const teacherOver = r.staffId != null ? teacherLoadById.get(Number(r.staffId))?.status === 'over' : false;
-
-      const pref = preferredRoomTypeBySubjectId.get(Number(r.subId)) ?? null;
-      const homeroomId = homeroomMap.get(r.classGroupId) ?? null;
-      const usesHomeroomOnly =
-        homeroomId == null ? r.roomId == null : r.roomId === homeroomId || r.roomId == null;
-      const noRoomForPreferred = pref != null && usesHomeroomOnly;
-
-      // Only treat as "missing teacher" when this slot actually has periods.
-      // period=0 means the subject is disabled for this section.
-      const missingTeacher = r.staffId == null && (r.periods ?? 0) > 0;
-      const conflict =
-        src === 'conflict' || m?.conflictReason === 'NO_ELIGIBLE_TEACHER' || m?.conflictReason === 'UNKNOWN';
-
-      const isNeeds =
-        missingTeacher ||
-        teacherOver ||
-        noRoomForPreferred ||
-        conflict ||
-        (locked && (missingTeacher || teacherOver || noRoomForPreferred || conflict));
-
-      if (isNeeds) needs.push(r);
-      else healthy.push(r);
-    }
-    return { needs, healthy };
-  }, [flatRows, assignmentMeta, teacherLoadById, preferredRoomTypeBySubjectId, homeroomMap]);
-
   const missingTeacherReport = useMemo(() => {
     const byKey = new Map<
       string,
@@ -462,7 +720,7 @@ export function SmartTeacherAssignmentBlock({
         reasons: Set<NonNullable<AssignmentSlotMeta['conflictReason']>>;
       }
     >();
-    for (const r of needsAttention.needs) {
+    for (const r of displayAttention.needs) {
       if (r.staffId != null) continue;
       if ((r.periods ?? 0) <= 0) continue;
       const cg = classGroups.find((c) => Number(c.classGroupId) === Number(r.classGroupId));
@@ -494,7 +752,7 @@ export function SmartTeacherAssignmentBlock({
       return `${a.subjectName} ${a.subjectCode}`.localeCompare(`${b.subjectName} ${b.subjectCode}`);
     });
     return rows;
-  }, [needsAttention.needs, classGroups, subjectCodeById, assignmentMeta]);
+  }, [displayAttention.needs, classGroups, subjectCodeById, assignmentMeta]);
 
   const groupRows = useCallback(
     (rows: typeof flatRows) => {
@@ -520,16 +778,89 @@ export function SmartTeacherAssignmentBlock({
     [classGroups],
   );
 
-  const groupedNeeds = useMemo(() => groupRows(needsAttention.needs), [groupRows, needsAttention.needs]);
-  const groupedHealthy = useMemo(() => groupRows(needsAttention.healthy), [groupRows, needsAttention.healthy]);
+  const groupedNeeds = useMemo(() => groupRows(displayAttention.needs), [groupRows, displayAttention.needs]);
+  const groupedHealthy = useMemo(() => groupRows(displayAttention.healthy), [groupRows, displayAttention.healthy]);
 
-  // IMPORTANT: avoid page-level horizontal scrolling.
-  // Use flexible columns that can shrink to the viewport (minmax(0, ...)),
-  // and rely on ellipsis within cells rather than fixed min widths.
-  const rowGridCols =
-    'minmax(0, 1.05fr) minmax(184px, 1.95fr) minmax(96px, 0.82fr) minmax(184px, 1.85fr) minmax(72px, 0.52fr) minmax(72px,max-content)';
+  const toggleExpandedRow = useCallback((classGroupId: number, slotKey: string) => {
+    setExpandedSlotByClassId((prev) => {
+      const next = { ...prev };
+      if (next[classGroupId] === slotKey) delete next[classGroupId];
+      else next[classGroupId] = slotKey;
+      return next;
+    });
+  }, []);
 
-  const renderRow = (row: (typeof flatRows)[number]) => {
+  /** Clear slot teacher locks, then rebalance for this subject. */
+  const resetAssignmentSlotTowardAutoPool = useCallback(
+    (row: (typeof flatRows)[number]) => {
+      const k = row.k;
+      const baseMeta = { ...assignmentMeta };
+      delete baseMeta[k];
+      const r = runSmartTeacherAssignment(
+        cgs,
+        staffNorm,
+        subjects,
+        classSubjectConfigs,
+        sectionSubjectOverrides,
+        baseMeta,
+        'rebalance',
+        row.subId,
+        slotsPerWeek ?? null,
+        homeroomMap,
+      );
+      setClassSubjectConfigs(r.classSubjectConfigs);
+      setSectionSubjectOverrides(r.sectionSubjectOverrides);
+      setAssignmentMeta(r.assignmentMeta);
+      toast.info('Slot reset toward auto', 'Unlocked for algorithms · rebalance ran for this subject.');
+    },
+    [
+      assignmentMeta,
+      cgs,
+      staffNorm,
+      subjects,
+      classSubjectConfigs,
+      sectionSubjectOverrides,
+      slotsPerWeek,
+      homeroomMap,
+      setClassSubjectConfigs,
+      setSectionSubjectOverrides,
+      setAssignmentMeta,
+    ],
+  );
+
+  const notifyHomeroomShared = useCallback(
+    (classGroupId: number, roomIdStr: string) => {
+      const rid = roomIdStr && String(roomIdStr).trim() !== '' ? Number(roomIdStr) : NaN;
+      if (!Number.isFinite(rid)) return;
+      const optimisticDraft = { ...defaultRoomByClassId, [classGroupId]: String(rid) };
+      const otherIds = otherClassGroupIdsSharingHomeroomRoom(rid, optimisticDraft, classGroupId);
+      if (otherIds.length === 0) return;
+      const labels = otherIds.map((id) => {
+        const sec = classGroups.find((c) => Number(c.classGroupId) === Number(id));
+        return sec ? formatClassGroupShortLabel(sec) : `Section ${id}`;
+      });
+      const roomLabel = roomOptions.find((o) => o.value === String(rid))?.label ?? `Room #${rid}`;
+      toast.info(
+        'Homeroom already in use',
+        `${roomLabel} is already the homeroom for ${labels.join(', ')}. Duplicates are allowed but flagged in Overview.`,
+        7000,
+      );
+    },
+    [classGroups, defaultRoomByClassId, roomOptions],
+  );
+
+  const slotControlWrap = (children: ReactNode) => (
+    <div
+      data-smart-assign-control
+      style={{ minWidth: 0 }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>
+  );
+
+  const renderRow = (row: (typeof flatRows)[number], cg: ClassG) => {
     const m = assignmentMeta[row.k];
     const src: AssignmentSource | '—' = m?.source ?? '—';
     const teacherLocked = m?.locked ?? false;
@@ -559,240 +890,317 @@ export function SmartTeacherAssignmentBlock({
             ? 'Teacher overloaded'
             : 'Needs review';
 
-    const roomValue = row.roomId != null ? String(row.roomId) : '';
     const hmId = homeroomMap.get(row.classGroupId);
-    const rowUsesHomeroom =
-      hmId != null && row.roomId != null && Number(row.roomId) === Number(hmId);
-    const roomSrcMeta = m?.roomSource;
-    const roomBadgeLabel =
-      roomSrcMeta === 'manual'
-        ? 'MANUAL'
-        : roomSrcMeta === 'auto'
-          ? 'AUTO'
-          : rowUsesHomeroom && homeroomSourceByClassId[row.classGroupId] === 'manual'
-            ? 'MANUAL'
-            : rowUsesHomeroom && homeroomSourceByClassId[row.classGroupId] === 'auto'
-              ? 'AUTO'
-              : '—';
-    const roomLocked = !!m?.roomLocked;
+    const hasSectionHomeroom = hmId != null;
+
+    const expanded = expandedSlotByClassId[cg.classGroupId] === row.k;
+
+    const subMeta =
+      subjects.find((x) => Number(x.id) === Number(row.subId)) ??
+      subjectsCatalogForLabels.find((x) => Number(x.id) === Number(row.subId));
+    const venueReq = parseSubjectVenueRequirement(subMeta?.allocationVenueRequirement);
+    const venueSpec = parseRoomVenueType(subMeta?.specializedVenueType ?? undefined);
+    const effRoomType =
+      row.roomId != null ? roomOptions.find((o) => o.value === String(row.roomId))?.roomType ?? null : null;
+    const noSchoolVenue =
+      venueReq !== 'FLEXIBLE' &&
+      (row.periods ?? 0) > 0 &&
+      !schoolHasAnyCompatibleRoom(schedulableRoomTypeValues, venueReq, venueSpec);
+    const venueMismatch =
+      venueReq !== 'FLEXIBLE' &&
+      (row.periods ?? 0) > 0 &&
+      !noSchoolVenue &&
+      (effRoomType == null || !isRoomTypeCompatible(venueReq, venueSpec, effRoomType));
+    const missingTeacher = row.staffId == null && (row.periods ?? 0) > 0;
+
+    let primarySummary = '';
+    let primaryWorst = false;
+    if ((row.periods ?? 0) <= 0) primarySummary = 'Off timetable';
+    else if (!hasSectionHomeroom && (row.periods ?? 0) > 0) {
+      primarySummary = 'No homeroom';
+      primaryWorst = false;
+    } else if (src === 'conflict' || m?.conflictReason === 'NO_ELIGIBLE_TEACHER' || m?.conflictReason === 'UNKNOWN') {
+      primarySummary = conflictReasonLabel ?? 'Needs review';
+      primaryWorst = true;
+    } else if (missingTeacher) {
+      primarySummary = 'Missing teacher';
+      primaryWorst = true;
+    } else if (tl?.status === 'over') {
+      primarySummary = `Overloaded +${Math.max(0, load - max)}`;
+      primaryWorst = true;
+    } else if (m?.conflictReason === 'CAPACITY_OVERFLOW') {
+      primarySummary = 'Capacity constrained';
+      primaryWorst = true;
+    } else if (noSchoolVenue) {
+      primarySummary = `No compatible room for ${venueReq}`;
+      primaryWorst = true;
+    } else if (venueMismatch) {
+      primarySummary = `Required venue: ${formatCompatibleRoomTypesList(venueReq)}`;
+      primaryWorst = true;
+    } else primarySummary = 'OK';
+
+    const teacherRec = row.staffId != null ? staffById.get(Number(row.staffId)) : null;
+    const reasoningPieces: string[] = [];
+    if (src === 'auto' || src === 'rebalanced') {
+      const gTxt = cg.gradeLevel != null ? String(cg.gradeLevel) : 'this grade';
+      reasoningPieces.push(`Assigned toward same-grade cohesion and workload balance across Class ${gTxt}.`);
+      if (teacherRec && (teacherRec.preferredClassGroupIds ?? []).includes(row.classGroupId)) {
+        reasoningPieces.push(`Teacher lists this section in preferred classrooms.`);
+      }
+    }
+    if (src === 'manual') reasoningPieces.push('Teacher explicitly chosen (manual edit); locks protect from bulk rebalance.');
+    if (teacherLocked) reasoningPieces.push('Teacher lock is ON — algorithms keep this assignment unless unlocked.');
+    if (missingTeacher || (src === 'conflict' && conflictReasonLabel)) {
+      reasoningPieces.push(conflictReasonLabel ?? 'Eligible teacher not found yet — verify staff tagging or workloads.');
+    }
+    if (!hasSectionHomeroom && (row.periods ?? 0) > 0) {
+      reasoningPieces.push('Set the section homeroom in the section header above, or use Overview / Auto assign homeroom.');
+    }
+    if (noSchoolVenue) {
+      reasoningPieces.push(
+        `No compatible room currently exists for subject type ${venueReq}. Add a schedulable room with one of: ${formatCompatibleRoomTypesList(venueReq)}.`,
+      );
+    } else if (venueMismatch) {
+      reasoningPieces.push(
+        `Homeroom room type may not match this subject’s venue (${venueReq}). Use the timetable editor for period-specific labs.`,
+      );
+    }
+    if (hasSectionHomeroom && hmId != null) {
+      const shareIds = otherClassGroupIdsSharingHomeroomRoom(Number(hmId), defaultRoomByClassId, row.classGroupId);
+      if (shareIds.length > 0) {
+        const labels = shareIds.map((id) => {
+          const sec = classGroups.find((c) => Number(c.classGroupId) === Number(id));
+          return sec ? formatClassGroupShortLabel(sec) : `Section ${id}`;
+        });
+        reasoningPieces.push(
+          `This room is already the Overview homeroom for ${labels.join(', ')} — same duplicate-section-room case flagged in Overview.`,
+        );
+      }
+    }
+    if (!reasoningPieces.length) reasoningPieces.push('No extra notes — inspect demand summary above for shortages.');
+
+    const shortSectionTitle =
+      cg.gradeLevel != null && (cg.section || cg.code)?.trim?.()
+        ? `Class ${cg.gradeLevel} · ${cg.section ?? cg.code}`
+        : cg.displayName || cg.code || `Section ${cg.classGroupId}`;
 
     return (
       <div
         key={row.k}
         style={{
-          border: '1px solid rgba(15,23,42,0.06)',
           borderRadius: 10,
-          background: 'rgba(255,255,255,0.92)',
-          padding: 6,
+          background: expanded ? 'rgba(255,255,255,0.98)' : 'rgba(255,255,255,0.9)',
+          border: '1px solid rgba(15,23,42,0.06)',
+          marginBottom: 2,
+          overflow: 'hidden',
         }}
       >
+        {/* Collapsed strip: tap expands; controls stop propagation */}
         <div
+          role="button"
+          aria-expanded={expanded}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              toggleExpandedRow(cg.classGroupId, row.k);
+            }
+          }}
+          onClick={() => toggleExpandedRow(cg.classGroupId, row.k)}
           style={{
             display: 'grid',
-            gridTemplateColumns: rowGridCols,
-            gap: 6,
-            alignItems: 'center',
+            gridTemplateColumns: 'minmax(0, 1.15fr) minmax(120px, 1fr) minmax(160px, 1.25fr) 22px',
+            gap: 10,
+            alignItems: 'start',
+            padding: '7px 10px',
+            cursor: 'pointer',
+            borderBottom: expanded ? '1px solid rgba(15,23,42,0.06)' : 'none',
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 900, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {row.subName}
-            </div>
-            <div className="muted" style={{ fontSize: 11, fontWeight: 750, opacity: 0.85 }}>
-              {row.periods} / wk
+            <div style={{ fontWeight: 900, fontSize: 12.5, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {row.subName} <span className="muted" style={{ fontWeight: 800 }}>({row.periods}/wk)</span>
             </div>
           </div>
-
-          <div style={{ minWidth: 0 }}>
-            <SelectKeeper value={row.staffId != null ? String(row.staffId) : ''} onChange={(v) => setTeacherOnSlot(row.classGroupId, row.subId, v)} options={teachOpts(row.subId)} />
-            <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
-            <span
-              style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '2px 7px',
-                borderRadius: 999,
-                  fontSize: 10,
-                fontWeight: 900,
-                background:
-                  statusLabel === 'AUTO'
-                    ? 'rgba(249,115,22,0.12)'
-                    : statusLabel === 'MANUAL'
-                      ? 'rgba(37,99,235,0.12)'
-                      : statusLabel === 'REBALANCED'
-                        ? 'rgba(22,163,74,0.12)'
-                        : statusLabel === 'CONFLICT'
-                          ? 'rgba(220,38,38,0.10)'
-                          : 'rgba(100,116,139,0.10)',
-                color:
-                  statusLabel === 'AUTO'
-                    ? '#c2410c'
-                    : statusLabel === 'MANUAL'
-                      ? '#1d4ed8'
-                      : statusLabel === 'REBALANCED'
-                        ? '#166534'
-                        : statusLabel === 'CONFLICT'
-                          ? '#b91c1c'
-                          : '#64748b',
-              }}
-                title="Teacher assignment source"
-            >
-                {statusLabel}
-                {teacherLocked ? <span aria-hidden>🔒</span> : null}
-            </span>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !teacherLocked;
-                  setAssignmentMeta((prev) => ({
-                    ...prev,
-                    [row.k]: mergeAssignmentSlotMeta(prev[row.k], {
-                      source: m?.source ?? 'manual',
-                      locked: next,
-                      conflictReason: m?.conflictReason,
-                    }),
-                  }));
-                }}
-                title={
-                  teacherLocked
-                    ? 'Unlock teacher assignment (auto-assign / rebalance may change)'
-                    : 'Lock teacher assignment'
-                }
-                style={{
-                  appearance: 'none',
-                  border: '1px solid rgba(15,23,42,0.12)',
-                  background: teacherLocked ? 'rgba(37,99,235,0.12)' : 'rgba(100,116,139,0.08)',
-                  color: teacherLocked ? '#1d4ed8' : '#475569',
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  fontSize: 10,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {teacherLocked ? 'Teacher locked' : 'Teacher lock'}
-              </button>
-            </div>
+          {slotControlWrap(
+            <SelectKeeper
+              searchable
+              emptyValueLabel="Select…"
+              value={row.staffId != null ? String(row.staffId) : ''}
+              onChange={(v) => setTeacherOnSlot(row.classGroupId, row.subId, v)}
+              options={teachOpts(row.subId)}
+            />,
+          )}
+          <div
+            title={primaryWorst ? `⚠ ${primarySummary}` : primarySummary}
+            style={{
+              fontSize: 11,
+              fontWeight: 850,
+              lineHeight: 1.35,
+              textAlign: 'right',
+              color: primaryWorst ? '#b91c1c' : primarySummary === 'OK' ? '#166534' : '#64748b',
+              minWidth: 0,
+              whiteSpace: 'normal',
+              wordBreak: 'break-word',
+            }}
+          >
+            {primaryWorst ? '⚠ ' : ''}
+            <span>{primarySummary}</span>
           </div>
-
-          <div>
-            {row.staffId != null && tl ? (
-              <div>
-                <div style={{ height: 8, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.min(140, Math.round((load / Math.max(1, max)) * 100))}%`, height: '100%', background: barColor }} />
-                </div>
-                <div className="muted" style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>
-                  {load}/{max}{ratio > 1 ? ` · Overloaded +${Math.max(0, load - max)}` : ''}
-                </div>
-              </div>
-            ) : (
-              <div className="muted" style={{ fontSize: 12, fontWeight: 900 }}>—</div>
-            )}
-          </div>
-
-          <div style={{ minWidth: 0 }}>
-            <SelectKeeper value={roomValue} onChange={(v) => setRoomOnSlot(row.classGroupId, row.subId, v)} options={roomOptions} />
-            <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '2px 7px',
-                  borderRadius: 999,
-                  fontSize: 10,
-                  fontWeight: 900,
-                  background:
-                    roomBadgeLabel === 'AUTO'
-                      ? 'rgba(249,115,22,0.12)'
-                      : roomBadgeLabel === 'MANUAL'
-                        ? 'rgba(37,99,235,0.12)'
-                        : 'rgba(100,116,139,0.10)',
-                  color:
-                    roomBadgeLabel === 'AUTO' ? '#c2410c' : roomBadgeLabel === 'MANUAL' ? '#1d4ed8' : '#64748b',
-                }}
-                title="Room assignment source for this subject slot"
-              >
-                {roomBadgeLabel}
-                {roomLocked ? <span aria-hidden>🔒</span> : null}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  const nextLocked = !roomLocked;
-                  setAssignmentMeta((prev) => ({
-                    ...prev,
-                    [row.k]: mergeAssignmentSlotMeta(prev[row.k], {
-                      source: prev[row.k]?.source ?? 'manual',
-                      locked: prev[row.k]?.locked ?? false,
-                      conflictReason: prev[row.k]?.conflictReason,
-                      roomLocked: nextLocked,
-                      roomSource: nextLocked ? (prev[row.k]?.roomSource ?? 'manual') : prev[row.k]?.roomSource,
-                    }),
-                  }));
-                }}
-                title={roomLocked ? 'Unlock room assignment' : 'Lock room assignment'}
-                style={{
-                  appearance: 'none',
-                  border: '1px solid rgba(15,23,42,0.12)',
-                  background: roomLocked ? 'rgba(249,115,22,0.12)' : 'rgba(100,116,139,0.08)',
-                  color: roomLocked ? '#c2410c' : '#475569',
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  fontSize: 10,
-                  fontWeight: 900,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {roomLocked ? 'Room locked' : 'Room lock'}
-              </button>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
-            {conflictReasonLabel ? (
-              <span
-                style={{
-                  display: 'inline-block',
-                  padding: '2px 7px',
-                  borderRadius: 999,
-                  fontSize: 11,
-                  fontWeight: 900,
-                  background: 'rgba(220,38,38,0.10)',
-                  color: '#b91c1c',
-                  flex: '0 0 auto',
-                  maxWidth: '100%',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {conflictReasonLabel}
-              </span>
-            ) : (
-              <span className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
-                —
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0, overflow: 'hidden' }}>
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                className="btn secondary"
-                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}
-                onClick={() => setTeacherOnSlot(row.classGroupId, row.subId, '')}
-                title="Clear teacher"
-              >
-                Clear
-              </button>
-            </div>
+          <div
+            className="muted"
+            style={{ fontSize: 14, fontWeight: 900, textAlign: 'center', alignSelf: 'center', paddingTop: 2 }}
+            aria-hidden
+          >
+            {expanded ? '▾' : '▸'}
           </div>
         </div>
+
+        {expanded ? (
+          <div
+            data-smart-assign-detail
+            style={{
+              padding: '10px 12px 12px',
+              background: 'rgba(248,250,252,0.65)',
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 10, fontWeight: 850, opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+              {shortSectionTitle} · Assignment detail
+            </div>
+            <div className="stack" style={{ gap: 12 }}>
+              <div className="row" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                <div className="stack" style={{ flex: '1 1 200px', minWidth: 0, gap: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 900, opacity: 0.85 }}>Teacher</div>
+                  {row.staffId != null && tl ? (
+                    <div>
+                      <div style={{ height: 8, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden' }}>
+                        <div
+                          style={{ width: `${Math.min(100, Math.round((load / Math.max(1, max)) * 100))}%`, height: '100%', background: barColor }}
+                        />
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, fontWeight: 850, marginTop: 4 }}>
+                        Load {load}/{max}
+                        {ratio > 1 ? ` · over +${Math.max(0, load - max)}` : ''}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>No teacher yet</div>
+                  )}
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <ProvenanceBadgeGroup>
+                      {src === 'auto' || src === 'manual' ? (
+                        <AssignmentSourceBadge variant={src === 'auto' ? 'auto' : 'manual'} />
+                      ) : (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '4px 11px',
+                            borderRadius: 999,
+                            fontSize: 11,
+                            fontWeight: 800,
+                            letterSpacing: '0.04em',
+                            background:
+                              statusLabel === 'REBALANCED'
+                                ? 'rgba(22,163,74,0.12)'
+                                : statusLabel === 'CONFLICT'
+                                  ? 'rgba(220,38,38,0.10)'
+                                  : 'rgba(100,116,139,0.10)',
+                            color:
+                              statusLabel === 'REBALANCED'
+                                ? '#166534'
+                                : statusLabel === 'CONFLICT'
+                                  ? '#b91c1c'
+                                  : '#64748b',
+                          }}
+                        >
+                          {statusLabel}
+                        </span>
+                      )}
+                      {teacherLocked ? <SectionBulkLockBadge kind="classTeacher" /> : null}
+                    </ProvenanceBadgeGroup>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !teacherLocked;
+                        setAssignmentMeta((prev) => ({
+                          ...prev,
+                          [row.k]: mergeAssignmentSlotMeta(prev[row.k], {
+                            source: m?.source ?? 'manual',
+                            locked: next,
+                            conflictReason: m?.conflictReason,
+                          }),
+                        }));
+                      }}
+                      title={teacherLocked ? 'Unlock teacher assignment' : 'Lock teacher assignment'}
+                      style={{
+                        appearance: 'none',
+                        border: '1px solid rgba(15,23,42,0.12)',
+                        background: teacherLocked ? 'rgba(37,99,235,0.12)' : 'rgba(100,116,139,0.08)',
+                        color: teacherLocked ? '#1d4ed8' : '#475569',
+                        padding: '3px 9px',
+                        borderRadius: 999,
+                        fontSize: 10,
+                        fontWeight: 900,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {teacherLocked ? 'Teacher locked' : 'Teacher lock'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999 }}
+                  onClick={() => setTeacherOnSlot(row.classGroupId, row.subId, '')}
+                >
+                  Clear teacher
+                </button>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999 }}
+                  onClick={() => resetAssignmentSlotTowardAutoPool(row)}
+                  disabled={teacherLocked && row.staffId != null}
+                  title={
+                    teacherLocked && row.staffId != null
+                      ? 'Unlock teacher lock first (or keep lock and use Rebalance loads from the toolbar).'
+                      : 'Unlock slot meta and run a subject-scoped rebalance.'
+                  }
+                >
+                  Reset to auto
+                </button>
+              </div>
+
+              <div
+                className="stack"
+                style={{
+                  gap: 6,
+                  borderTop: '1px dashed rgba(15,23,42,0.12)',
+                  paddingTop: 10,
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 900, opacity: 0.85 }}>Assignment notes</div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.45, color: '#475569' }}>
+                  {reasoningPieces.map((t, i) => (
+                    <li key={i}>{t}</li>
+                  ))}
+                </ul>
+                {conflictReasonLabel && src === 'conflict' ? (
+                  <div style={{ fontSize: 11, fontWeight: 850, color: '#b91c1c' }}>Alert: {conflictReasonLabel}</div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -801,6 +1209,34 @@ export function SmartTeacherAssignmentBlock({
     groups: { grade: number; sections: Array<{ cg: ClassG; rows: typeof flatRows }>; totalRows: number }[],
     defaultOpen: boolean,
   ) => {
+    const statBadge = (label: string, tone: 'neutral' | 'bad' | 'good' | 'accent') => {
+      const colors =
+        tone === 'bad'
+          ? { bg: 'rgba(220,38,38,0.10)', fg: '#b91c1c' }
+          : tone === 'good'
+            ? { bg: 'rgba(22,163,74,0.10)', fg: '#166534' }
+            : tone === 'accent'
+              ? { bg: 'rgba(37,99,235,0.10)', fg: '#1d4ed8' }
+              : { bg: 'rgba(100,116,139,0.10)', fg: '#475569' };
+      return (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '3px 8px',
+            borderRadius: 999,
+            fontSize: 10,
+            fontWeight: 900,
+            background: colors.bg,
+            color: colors.fg,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {label}
+        </span>
+      );
+    };
+
     return (
       <div className="stack" style={{ gap: 8 }}>
         {groups.map((g) => (
@@ -819,49 +1255,167 @@ export function SmartTeacherAssignmentBlock({
               </div>
             </summary>
             <div className="stack" style={{ gap: 8, padding: '0 9px 9px' }}>
-              {g.sections.map(({ cg, rows }) => (
-                <details
-                  key={cg.classGroupId}
-                  open={defaultOpen}
-                  style={{ border: '1px solid rgba(15,23,42,0.06)', borderRadius: 10, background: 'rgba(255,255,255,0.95)' }}
-                >
-                  <summary
-                    className="row"
-                    style={{ cursor: 'pointer', padding: '7px 9px', listStyle: 'none', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}
+              {g.sections.map(({ cg, rows }) => {
+                const active = rows.filter((r) => (r.periods ?? 0) > 0);
+                const missing = active.filter((r) => r.staffId == null).length;
+                const overloadedSlots = active.filter((r) => {
+                  if (r.staffId == null) return false;
+                  return teacherLoadById.get(Number(r.staffId))?.status === 'over';
+                }).length;
+                const hmStr = defaultRoomByClassId[cg.classGroupId];
+                const hasSectionHomeroom = hmStr != null && String(hmStr).trim() !== '';
+                const hmLocked = homeroomLockedByClassId[cg.classGroupId] === true;
+                const hmSrc = homeroomSourceByClassId[cg.classGroupId] ?? '';
+                const ctLocked = classTeacherLockedByClassId[cg.classGroupId] === true;
+                const shortTitle =
+                  cg.gradeLevel != null && (cg.section || cg.code)?.trim?.()
+                    ? `Class ${cg.gradeLevel}${cg.section ? ` ${String(cg.section).replace(/^\s+/, '')}` : ''}`
+                    : cg.displayName || cg.code;
+
+                return (
+                  <details
+                    key={cg.classGroupId}
+                    open={defaultOpen}
+                    style={{ border: '1px solid rgba(15,23,42,0.06)', borderRadius: 10, background: 'rgba(255,255,255,0.95)' }}
                   >
-                    <div style={{ fontWeight: 850, fontSize: 12 }}>{cg.displayName || cg.code}</div>
-                    <div className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
-                      {rows.length} subject{rows.length === 1 ? '' : 's'}
-                    </div>
-                  </summary>
-                  <div style={{ width: '100%', overflowX: 'hidden' }}>
-                    <div
+                    <summary
+                      className="row"
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: rowGridCols,
-                        gap: 6,
-                        padding: '6px 6px 0 6px',
-                        fontSize: 10,
-                        fontWeight: 850,
-                        color: 'var(--color-text-muted)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        opacity: 0.85,
+                        cursor: 'pointer',
+                        padding: '8px 9px',
+                        listStyle: 'none',
+                        gap: 10,
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
                       }}
                     >
-                      <div>Subject</div>
-                      <div>Assigned teacher</div>
-                      <div>Teacher load</div>
-                      <div>Room</div>
-                      <div>Alert</div>
-                      <div style={{ textAlign: 'right' }}>Actions</div>
+                      <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+                        <div style={{ fontWeight: 900, fontSize: 13 }}>{shortTitle}</div>
+                        <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                          {statBadge(`${rows.length} subjects`, 'neutral')}
+                          {statBadge(`${overloadedSlots} overloaded`, overloadedSlots ? 'bad' : 'good')}
+                          {statBadge(`${missing} missing`, missing ? 'bad' : 'good')}
+                          {hasSectionHomeroom ? statBadge('Homeroom set', 'good') : statBadge('No homeroom', 'bad')}
+                        </div>
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          style={{
+                            marginTop: 10,
+                            paddingTop: 10,
+                            borderTop: '1px solid rgba(15,23,42,0.06)',
+                            width: '100%',
+                          }}
+                        >
+                          <div className="stack" style={{ gap: 10 }}>
+                            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <span style={{ fontSize: 11, fontWeight: 900, color: '#475569' }}>Homeroom</span>
+                              <div style={{ minWidth: 140, flex: '1 1 180px', maxWidth: 380 }}>
+                                <SelectKeeper
+                                  searchable
+                                  emptyValueLabel="No homeroom — choose or Auto assign"
+                                  value={hasSectionHomeroom ? String(hmStr).trim() : ''}
+                                  onChange={(v) => {
+                                    patchSectionHomeroom(cg.classGroupId, v);
+                                    notifyHomeroomShared(cg.classGroupId, v);
+                                  }}
+                                  options={homeroomSelectOptions.filter((o) => o.value !== '')}
+                                  disabled={hmLocked}
+                                />
+                              </div>
+                              <ProvenanceBadgeGroup>
+                                {hasSectionHomeroom && (hmSrc === 'auto' || hmSrc === 'manual') ? (
+                                  <AssignmentSourceBadge variant={hmSrc} />
+                                ) : null}
+                                {hmLocked ? <SectionBulkLockBadge kind="homeroom" /> : null}
+                              </ProvenanceBadgeGroup>
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999 }}
+                                onClick={() => patchHomeroomLock(cg.classGroupId, !hmLocked)}
+                                title={hmLocked ? 'Unlock homeroom (edits and bulk auto-assign allowed)' : 'Lock homeroom (skip bulk auto-assign)'}
+                              >
+                                {hmLocked ? 'Unlock' : 'Lock'}
+                              </button>
+                              {!hasSectionHomeroom ? (
+                                <button
+                                  type="button"
+                                  className="btn secondary"
+                                  style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999 }}
+                                  onClick={() => autoAssignHomerooms()}
+                                  disabled={hmLocked}
+                                  title={
+                                    hmLocked
+                                      ? 'Unlock this section first'
+                                      : 'Runs Auto assign homeroom for all unlocked sections school-wide.'
+                                  }
+                                >
+                                  Auto assign
+                                </button>
+                              ) : null}
+                            </div>
+                            <div
+                              className="row"
+                              style={{
+                                gap: 8,
+                                flexWrap: 'wrap',
+                                alignItems: 'center',
+                                minWidth: 0,
+                              }}
+                            >
+                              <span style={{ fontSize: 11, fontWeight: 900, color: '#475569', flexShrink: 0 }}>
+                                Class teacher
+                              </span>
+                              <div style={{ minWidth: 0, flex: '1 1 160px', maxWidth: 380 }}>
+                                <SelectKeeper
+                                  searchable
+                                  value={classTeacherByClassId[cg.classGroupId] ?? ''}
+                                  onChange={(v) => patchSectionClassTeacher(cg.classGroupId, v)}
+                                  options={classTeacherStaffOptions}
+                                  disabled={ctLocked}
+                                />
+                              </div>
+                              <ProvenanceBadgeGroup>
+                                {((classTeacherSourceByClassId[cg.classGroupId] ?? '') === 'auto' ||
+                                  (classTeacherSourceByClassId[cg.classGroupId] ?? '') === 'manual') &&
+                                (classTeacherByClassId[cg.classGroupId] ?? '').trim() !== '' ? (
+                                  <AssignmentSourceBadge
+                                    variant={(classTeacherSourceByClassId[cg.classGroupId] ?? '') === 'auto' ? 'auto' : 'manual'}
+                                  />
+                                ) : null}
+                                {ctLocked ? <SectionBulkLockBadge kind="classTeacher" /> : null}
+                              </ProvenanceBadgeGroup>
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999, flexShrink: 0 }}
+                                onClick={() => patchClassTeacherLock(cg.classGroupId, !ctLocked)}
+                                title={
+                                  ctLocked
+                                    ? 'Unlock class teacher (edits and bulk auto-assign allowed)'
+                                    : 'Lock class teacher (skip bulk Auto assign class teachers)'
+                                }
+                              >
+                                {ctLocked ? 'Unlock' : 'Lock'}
+                              </button>
+                              {sectionMissingClassTeacher(cg.classGroupId, effective, classTeacherByClassId) ? (
+                                <span style={{ fontSize: 11, fontWeight: 800, color: '#b45309', flexShrink: 0 }}>Missing</span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </summary>
+                    <div style={{ width: '100%', overflowX: 'hidden', padding: '4px 6px 8px' }}>
+                      <div className="stack" style={{ gap: 0 }}>
+                        {rows.map((row) => renderRow(row, cg))}
+                      </div>
                     </div>
-                    <div className="stack" style={{ gap: 5, padding: 6 }}>
-                      {rows.map(renderRow)}
-                    </div>
-                  </div>
-                </details>
-              ))}
+                  </details>
+                );
+              })}
             </div>
           </details>
         ))}
@@ -914,7 +1468,10 @@ export function SmartTeacherAssignmentBlock({
       toast.info('Assignment', parts.join(' | '));
     }
     if (r.warnings.length === 0 && mode === 'auto') {
-      toast.success('Smart assign', 'Teachers applied by skill, grade cohesion, and load.');
+      toast.success(
+        'Smart assign',
+        'Teachers applied by skill, grade cohesion, and load. Section rooms are allocated only via Overview or Auto assign homeroom.',
+      );
       try {
         if (typeof sessionStorage !== 'undefined') {
           sessionStorage.setItem('smart-assign-overview-collapsed', '1');
@@ -928,14 +1485,99 @@ export function SmartTeacherAssignmentBlock({
     } else if (r.warnings.length === 0 && mode === 'rebalance') {
       toast.success('Rebalanced', 'Non-locked rows were redistributed where possible.');
     } else if (mode === 'reset') {
-      toast.info('Reset', 'Auto and rebalanced assignments were cleared. Manual / locked kept.');
+      toast.info(
+        'Reset',
+        'Teacher auto/rebalanced assignments cleared where allowed. Locked teacher rows were preserved.',
+      );
     }
   };
 
-  const clearAutomaticAssignments = () => {
+  const clearSubjectTeacherAssignments = () => {
     run('reset', null);
-    clearAutoHomeroomAssignments?.();
   };
+
+  const clearAutoAssignedHomeroomsOnly = useCallback(() => {
+    let n = 0;
+    for (const cg of classGroups) {
+      const id = cg.classGroupId;
+      if ((homeroomSourceByClassId[id] ?? '') === 'auto') {
+        patchSectionHomeroom(id, '');
+        n += 1;
+      }
+    }
+    toast.info('Homeroom', n ? `Cleared ${n} auto-assigned homeroom(s).` : 'No auto-assigned homerooms to clear.');
+  }, [classGroups, homeroomSourceByClassId, patchSectionHomeroom]);
+
+  const wipeAllSubjectTeachers = useCallback(() => {
+    setClassSubjectConfigs((cfg) => cfg.map((r) => ({ ...r, defaultTeacherId: null })));
+    setSectionSubjectOverrides((ov) => ov.map((r) => ({ ...r, teacherId: null })));
+    setAssignmentMeta({});
+    toast.info('Subject teachers', 'All subject teacher assignments cleared.');
+  }, [setClassSubjectConfigs, setSectionSubjectOverrides, setAssignmentMeta]);
+
+  const clearAllAssignmentsDestructive = useCallback(() => {
+    if (
+      !window.confirm(
+        'Clear all assignments? This removes all subject teachers, class teachers, and homerooms in this draft. Save your academic structure to persist.',
+      )
+    )
+      return;
+    setClassSubjectConfigs((cfg) => cfg.map((r) => ({ ...r, defaultTeacherId: null })));
+    setSectionSubjectOverrides((ov) => ov.map((r) => ({ ...r, teacherId: null })));
+    setAssignmentMeta({});
+    clearAllClassTeacherAssignments?.();
+    clearHomeroomDraft?.();
+    toast.info('Assignments', 'All assignments cleared in this draft.');
+  }, [
+    setClassSubjectConfigs,
+    setSectionSubjectOverrides,
+    setAssignmentMeta,
+    clearAllClassTeacherAssignments,
+    clearHomeroomDraft,
+  ]);
+
+  const unlockAllSubjectTeacherLocks = useCallback(() => {
+    setAssignmentMeta((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        const m = next[k];
+        if (m?.locked) next[k] = { ...m, locked: false };
+      }
+      return next;
+    });
+    toast.success('Locks', 'Subject teacher locks cleared.');
+  }, [setAssignmentMeta]);
+
+  const unlockAllClassTeacherLocksOnly = useCallback(() => {
+    for (const cg of classGroups) {
+      patchClassTeacherLock(cg.classGroupId, false);
+    }
+    toast.success('Locks', 'Class teacher locks cleared.');
+  }, [classGroups, patchClassTeacherLock]);
+
+  const unlockAllHomeroomLocksOnly = useCallback(() => {
+    for (const cg of classGroups) {
+      patchHomeroomLock(cg.classGroupId, false);
+    }
+    toast.success('Locks', 'Homeroom locks cleared.');
+  }, [classGroups, patchHomeroomLock]);
+
+  const unlockEverythingConfirmed = useCallback(() => {
+    if (!window.confirm('Unlock everything? This removes all subject teacher locks, class teacher locks, and homeroom locks.')) return;
+    setAssignmentMeta((prev) => {
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        const m = next[k];
+        if (m?.locked) next[k] = { ...m, locked: false };
+      }
+      return next;
+    });
+    for (const cg of classGroups) {
+      patchClassTeacherLock(cg.classGroupId, false);
+      patchHomeroomLock(cg.classGroupId, false);
+    }
+    toast.success('Locks', 'All locks cleared.');
+  }, [classGroups, patchClassTeacherLock, patchHomeroomLock, setAssignmentMeta]);
 
   const setTeacherOnSlot = (classGroupId: number, subjectId: number, newId: string) => {
     const lock = manualOverrideMode;
@@ -954,17 +1596,8 @@ export function SmartTeacherAssignmentBlock({
       setSectionSubjectOverrides(r.ovs);
       setAssignmentMeta((m) => {
         const k = slotKey(classGroupId, subjectId);
-        const prev = m[k];
         const next = { ...m };
         delete next[k];
-        if (prev?.roomSource || prev?.roomLocked) {
-          next[k] = {
-            source: 'manual',
-            locked: false,
-            roomSource: prev.roomSource,
-            roomLocked: prev.roomLocked,
-          };
-        }
         return next;
       });
       toast.info('Cleared for class+subject', 'Removed the default teacher for this subject for the whole class (all sections in this grade).');
@@ -984,37 +1617,6 @@ export function SmartTeacherAssignmentBlock({
           source: 'manual',
           locked: lock,
           conflictReason: prev?.conflictReason,
-        }),
-      };
-    });
-  };
-
-  const setRoomOnSlot = (classGroupId: number, subjectId: number, newId: string) => {
-    const rid = newId && String(newId).trim() !== '' ? Number(newId) : null;
-    if (newId && rid != null && !Number.isFinite(rid)) return;
-
-    setSectionSubjectOverrides((prev) => {
-      const next = prev.slice();
-      const idx = next.findIndex((r) => Number(r.classGroupId) === Number(classGroupId) && Number(r.subjectId) === Number(subjectId));
-      if (idx >= 0) {
-        next[idx] = { ...next[idx], roomId: rid };
-        return next;
-      }
-      next.push({ classGroupId, subjectId, periodsPerWeek: null, teacherId: null, roomId: rid });
-      return next;
-    });
-
-    setAssignmentMeta((m) => {
-      const k = slotKey(classGroupId, subjectId);
-      const prev = m[k];
-      return {
-      ...m,
-        [k]: mergeAssignmentSlotMeta(prev ?? { source: 'manual', locked: false }, {
-          source: prev?.source ?? 'manual',
-          locked: prev?.locked ?? false,
-          conflictReason: prev?.conflictReason,
-          roomSource: 'manual',
-          roomLocked: true,
         }),
       };
     });
@@ -1052,10 +1654,12 @@ export function SmartTeacherAssignmentBlock({
     }
     const q = sectionSearch.trim();
     if (q) bits.push(`Search "${q}"`);
-    if (onlyUnassigned) bits.push('Unassigned only');
-    if (onlyLocked) bits.push('Teacher or room locked');
-    if (onlyOverloaded) bits.push('Overloaded only');
-    if (onlyConflicts) bits.push('Conflicts only');
+    if (onlyUnassigned) bits.push('Missing teacher');
+    if (onlyLocked) bits.push('Locked');
+    if (onlyOverloaded) bits.push('Overloaded');
+    if (onlyConflicts) bits.push('Conflicts');
+    if (onlyNeedsAttention) bits.push('Needs attention');
+    if (onlyManualOverrides) bits.push('Manual overrides');
     return bits.length ? bits.join(' · ') : 'Showing all rows';
   }, [
     filterUi,
@@ -1064,6 +1668,8 @@ export function SmartTeacherAssignmentBlock({
     onlyLocked,
     onlyOverloaded,
     onlyConflicts,
+    onlyNeedsAttention,
+    onlyManualOverrides,
   ]);
 
   const persistOverviewOpen = (open: boolean) => {
@@ -1098,6 +1704,12 @@ export function SmartTeacherAssignmentBlock({
     borderRadius: 8,
     cursor: 'pointer',
   } as const;
+
+  const filterChipSx = (active: boolean) =>
+    ({
+      ...ghostBtnSx,
+      ...(active ? { borderColor: '#2563eb', background: 'rgba(37,99,235,0.08)', color: '#1d4ed8', fontWeight: 800 } : {}),
+    }) as Record<string, string | number>;
 
   return (
     <div className="stack smart-assign-root" style={{ gap: 32 }}>
@@ -1481,55 +2093,345 @@ export function SmartTeacherAssignmentBlock({
         }}
       >
         <div className="stack" style={{ gap: 12 }}>
-          <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => run('auto', null)}
-              disabled={!classSubjectConfigs.length || teacherDemand.hasSevereShortage}
-              title={
-                teacherDemand.hasSevereShortage ? 'Resolve severe shortages in Teacher demand summary (overview).' : undefined
-              }
-            >
-          Auto assign teachers
-        </button>
-        <button
-          type="button"
-          className="btn secondary"
-              onClick={autoAssignClassTeachers}
-          disabled={!classSubjectConfigs.length}
-              title="Pick a class teacher per section from current subject-teacher assignments (before timetable)."
-        >
-              Auto assign class teachers
-            </button>
-            <button type="button" style={ghostBtnSx} onClick={() => run('rebalance', null)} disabled={!classSubjectConfigs.length}>
-          Rebalance loads
-        </button>
-            <button type="button" style={ghostBtnSx} onClick={autoAssignHomerooms} disabled={!classSubjectConfigs.length}>
-            Auto assign homerooms
-          </button>
-            <button type="button" style={ghostBtnSx} onClick={clearAutomaticAssignments} disabled={!classSubjectConfigs.length}>
-              Clear auto assignments
-        </button>
-        {subjFilter ? (
-              <button type="button" style={ghostBtnSx} onClick={() => run('rebalance', Number(subjFilter) || null)}>
-                Rebalance filtered subject
-          </button>
-        ) : null}
+          {sectionsMissingRoomCount > 0 ? (
+            <div className="sms-alert sms-alert--info">
+              <div>
+                <div className="sms-alert__title">Sections without homeroom</div>
+                <div className="sms-alert__msg">
+                  {sectionsMissingRoomCount} section{sectionsMissingRoomCount === 1 ? '' : 's'} still need a default homeroom.
+                  Use <strong>Auto assign homeroom</strong> below, set homeroom in each section header, or use <strong>Overview</strong>.
+                  Subject rows show <strong>No homeroom</strong> until the section has one.
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <div
+            className="row"
+            style={{
+              gap: 12,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => run('auto', null)}
+                disabled={!classSubjectConfigs.length || teacherDemand.hasSevereShortage}
+                title={
+                  teacherDemand.hasSevereShortage
+                    ? 'Resolve severe shortages in Teacher demand summary (overview).'
+                    : 'Assigns subject teachers only. Does not allocate section rooms.'
+                }
+              >
+                Auto assign teachers
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={autoAssignClassTeachers}
+                disabled={!classSubjectConfigs.length}
+                title="Pick a class teacher per section from current subject-teacher assignments (before timetable)."
+              >
+                Auto assign class teachers
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={autoAssignHomerooms}
+                disabled={!classSubjectConfigs.length}
+                title="Assign default homeroom rooms from building/floor/capacity heuristics."
+              >
+                Auto assign homeroom
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => run('rebalance', null)}
+                disabled={!classSubjectConfigs.length}
+                title="Redistribute teachers on non-locked rows."
+              >
+                Rebalance loads
+              </button>
+            </div>
 
-            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap', marginLeft: 'auto' }}>
-              <label className="row" style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', color: '#64748b', alignItems: 'center', whiteSpace: 'nowrap' }}>
-          <input type="checkbox" checked={manualOverrideMode} onChange={(e) => setManualOverrideMode(e.target.checked)} />
-                Manual edit
-        </label>
-              {showBulkActions ? (
-                <button type="button" style={ghostBtnSx} onClick={() => setBulkDrawerOpen(true)}>
-                  Bulk actions
-                </button>
+            <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <ToolbarDropdown label="Reset">
+                {(close) => (
+                  <>
+                    <div style={menuSectionLabelSx}>Auto-assigned only</div>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      disabled={!classSubjectConfigs.length}
+                      title="Clears auto/rebalanced subject teachers; keeps manual and locked rows."
+                      onClick={() => {
+                        clearSubjectTeacherAssignments();
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Clear auto-assigned teachers
+                    </button>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      disabled={classGroups.length === 0 || clearAutoAssignedClassTeachers == null}
+                      onClick={() => {
+                        clearAutoAssignedClassTeachers?.();
+                        toast.info('Class teachers', 'Cleared class teachers from Auto assign class teachers only.');
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Clear auto-assigned class teachers
+                    </button>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      disabled={classGroups.length === 0}
+                      onClick={() => {
+                        clearAutoAssignedHomeroomsOnly();
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Clear auto-assigned homerooms
+                    </button>
+                    <hr style={menuDividerSx} />
+                    <div style={menuSectionLabelSx}>All assignments</div>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      disabled={!classSubjectConfigs.length}
+                      title="Removes every subject teacher from templates and overrides."
+                      onClick={() => {
+                        wipeAllSubjectTeachers();
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Clear subject teachers
+                    </button>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      disabled={classGroups.length === 0 || clearAllClassTeacherAssignments == null}
+                      onClick={() => {
+                        clearAllClassTeacherAssignments?.();
+                        toast.info('Class teachers', 'All class teachers cleared for every section.');
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Clear class teachers
+                    </button>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      disabled={classGroups.length === 0 || clearHomeroomDraft == null}
+                      onClick={() => {
+                        clearHomeroomDraft?.();
+                        toast.info('Homeroom', 'Homeroom draft cleared for all sections.');
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Clear homerooms
+                    </button>
+                    <hr style={menuDividerSx} />
+                    <div style={menuSectionLabelSx}>Destructive</div>
+                    <button
+                      type="button"
+                      style={menuItemDangerSx}
+                      disabled={classGroups.length === 0 && !classSubjectConfigs.length}
+                      onClick={() => {
+                        clearAllAssignmentsDestructive();
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#fef2f2';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Clear all assignments
+                    </button>
+                  </>
+                )}
+              </ToolbarDropdown>
+
+              <ToolbarDropdown label="Locks" disabled={classGroups.length === 0}>
+                {(close) => (
+                  <>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      disabled={!classSubjectConfigs.length}
+                      onClick={() => {
+                        unlockAllSubjectTeacherLocks();
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Unlock subject teachers
+                    </button>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      onClick={() => {
+                        unlockAllClassTeacherLocksOnly();
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Unlock class teachers
+                    </button>
+                    <button
+                      type="button"
+                      style={menuItemBtnSx}
+                      onClick={() => {
+                        unlockAllHomeroomLocksOnly();
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f8fafc';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Unlock homerooms
+                    </button>
+                    <hr style={menuDividerSx} />
+                    <button
+                      type="button"
+                      style={menuItemDangerSx}
+                      onClick={() => {
+                        unlockEverythingConfirmed();
+                        close();
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#fef2f2';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      Unlock everything
+                    </button>
+                  </>
+                )}
+              </ToolbarDropdown>
+
+              {showBulkActions || subjFilter ? (
+                <ToolbarDropdown label="Bulk actions">
+                  {(close) => (
+                    <>
+                      {showBulkActions ? (
+                        <button
+                          type="button"
+                          style={menuItemBtnSx}
+                          onClick={() => {
+                            setBulkDrawerOpen(true);
+                            close();
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#f8fafc';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          Open bulk tools…
+                        </button>
+                      ) : null}
+                      {subjFilter ? (
+                        <button
+                          type="button"
+                          style={menuItemBtnSx}
+                          disabled={!classSubjectConfigs.length}
+                          onClick={() => {
+                            run('rebalance', Number(subjFilter) || null);
+                            close();
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#f8fafc';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          Rebalance filtered subject
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </ToolbarDropdown>
               ) : null}
-              <button type="button" style={ghostBtnSx} onClick={() => setInsightsOpen(true)}>
+
+              <button type="button" style={toolbarOutlineBtnSx} onClick={() => setInsightsOpen(true)}>
                 Insights
               </button>
+
+              <label
+                className="row"
+                style={{
+                  gap: 6,
+                  fontSize: 11,
+                  fontWeight: 750,
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  alignItems: 'center',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <input type="checkbox" checked={manualOverrideMode} onChange={(e) => setManualOverrideMode(e.target.checked)} />
+                Manual edit
+              </label>
             </div>
           </div>
 
@@ -1576,61 +2478,51 @@ export function SmartTeacherAssignmentBlock({
                 border: '1px solid rgba(15,23,42,0.12)',
               }}
             />
-            <details style={{ flex: '0 0 auto' }}>
-              <summary
-                style={{
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  fontWeight: 800,
-                  color: '#64748b',
-                  listStyle: 'none',
-                  padding: '6px 8px',
-                  borderRadius: 8,
-                  border: '1px solid rgba(15,23,42,0.08)',
-                  background: 'rgba(248,250,252,0.9)',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                More filters
-              </summary>
-              <div className="row" style={{ gap: 12, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                <label className="row" style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', alignItems: 'center', opacity: 0.88 }}>
-            <input type="checkbox" checked={onlyUnassigned} onChange={(e) => setOnlyUnassigned(e.target.checked)} />
-            Only unassigned
-          </label>
-                <label
-                  className="row"
-                  style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', alignItems: 'center', opacity: 0.88 }}
-                  title="Teacher-lock or room-lock enabled"
-                >
-            <input type="checkbox" checked={onlyLocked} onChange={(e) => setOnlyLocked(e.target.checked)} />
-            Only locked
-          </label>
-                <label className="row" style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', alignItems: 'center', opacity: 0.88 }}>
-            <input type="checkbox" checked={onlyOverloaded} onChange={(e) => setOnlyOverloaded(e.target.checked)} />
-            Only overloaded
-          </label>
-                <label className="row" style={{ gap: 6, fontSize: 11, fontWeight: 750, cursor: 'pointer', alignItems: 'center', opacity: 0.88 }}>
-            <input type="checkbox" checked={onlyConflicts} onChange={(e) => setOnlyConflicts(e.target.checked)} />
-            Only conflicts
-          </label>
-        </div>
-            </details>
-      </div>
+          </div>
 
-          <div className="stack" style={{ gap: 8 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 950, fontSize: 15 }}>
-                {`Needs attention (${needsAttention.needs.length} row${needsAttention.needs.length === 1 ? '' : 's'})`}
-              </div>
-              <div
-                className="muted"
-                style={{ fontSize: 11, fontWeight: 700, opacity: 0.78, marginTop: 6 }}
-                title="missing teacher · overload · preferred room missing · conflicts · locked conflicts"
-              >
-                {filterSummaryText}
-              </div>
-            </div>
+          <div
+            className="row"
+            style={{
+              gap: 8,
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              paddingBottom: 2,
+              borderTop: '1px dashed rgba(15,23,42,0.08)',
+              marginTop: 8,
+              paddingTop: 8,
+            }}
+            aria-label="Quick filters"
+          >
+            <span className="muted" style={{ fontSize: 11, fontWeight: 850, flex: '0 0 auto' }}>
+              Quick filters
+            </span>
+            <button type="button" style={filterChipSx(onlyNeedsAttention)} onClick={() => setOnlyNeedsAttention((v) => !v)}>
+              Needs attention
+            </button>
+            <button type="button" style={filterChipSx(onlyOverloaded)} onClick={() => setOnlyOverloaded((v) => !v)}>
+              Overloaded
+            </button>
+            <button type="button" style={filterChipSx(onlyUnassigned)} onClick={() => setOnlyUnassigned((v) => !v)}>
+              Missing teacher
+            </button>
+            <button type="button" style={filterChipSx(onlyLocked)} title="Teacher lock" onClick={() => setOnlyLocked((v) => !v)}>
+              Locked
+            </button>
+            <button
+              type="button"
+              style={filterChipSx(onlyManualOverrides)}
+              title="Manual teacher/room sourcing or locks visible on rows"
+              onClick={() => setOnlyManualOverrides((v) => !v)}
+            >
+              Manual overrides
+            </button>
+            <button
+              type="button"
+              style={filterChipSx(onlyConflicts)}
+              onClick={() => setOnlyConflicts((v) => !v)}
+            >
+              Conflicts
+            </button>
           </div>
         </div>
       </div>
@@ -1644,15 +2536,13 @@ export function SmartTeacherAssignmentBlock({
             </div>
           ) : (
           <>
-            <div style={{ padding: '8px 8px 16px', minWidth: 0 }}>
-                {needsAttention.needs.length === 0 ? (
-                <div className="muted" style={{ fontSize: 12, opacity: 0.82 }}>
-                  No issues found in the current filters.
-                </div>
-                ) : (
-                  renderGrouped(groupedNeeds, true)
-                )}
-              </div>
+            <div
+              className="muted"
+              style={{ fontSize: 11, fontWeight: 700, opacity: 0.78, padding: '0 4px' }}
+              title="missing teacher · overload · preferred room missing · conflicts · locked conflicts"
+            >
+              {filterSummaryText}
+            </div>
 
             <details
               style={{
@@ -1662,11 +2552,63 @@ export function SmartTeacherAssignmentBlock({
                 padding: '10px 12px',
               }}
             >
-              <summary style={{ cursor: 'pointer', fontWeight: 800, fontSize: 13, listStyle: 'none' }}>
-                Healthy assignments ({needsAttention.healthy.length} row{needsAttention.healthy.length === 1 ? '' : 's'})
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  fontWeight: 800,
+                  fontSize: 13,
+                  listStyle: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                }}
+              >
+                <span>{`Needs attention (${displayAttention.needs.length} row${displayAttention.needs.length === 1 ? '' : 's'})`}</span>
+                <span className="muted" style={{ fontSize: 11, fontWeight: 750 }}>
+                  Open / close
+                </span>
               </summary>
-              <div style={{ marginTop: 16 }}>
-                {needsAttention.healthy.length === 0 ? (
+              <div style={{ marginTop: 12, padding: '0 2px 8px', minWidth: 0 }}>
+                {displayAttention.needs.length === 0 ? (
+                  <div className="muted" style={{ fontSize: 12, opacity: 0.82 }}>
+                    No issues found in the current filters.
+                  </div>
+                ) : (
+                  renderGrouped(groupedNeeds, true)
+                )}
+              </div>
+            </details>
+
+            <details
+              style={{
+                borderRadius: 12,
+                border: '1px solid rgba(15,23,42,0.06)',
+                background: 'rgba(248,250,252,0.55)',
+                padding: '10px 12px',
+              }}
+            >
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  fontWeight: 800,
+                  fontSize: 13,
+                  listStyle: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                }}
+              >
+                <span>
+                  Healthy assignments ({displayAttention.healthy.length} row{displayAttention.healthy.length === 1 ? '' : 's'})
+                </span>
+                <span className="muted" style={{ fontSize: 11, fontWeight: 750 }}>
+                  Open / close
+                </span>
+              </summary>
+              <div style={{ marginTop: 12, padding: '0 2px 8px', minWidth: 0 }}>
+                {displayAttention.healthy.length === 0 ? (
                   <div className="muted" style={{ fontSize: 12, opacity: 0.82 }}>
                     No healthy rows for current filters.
                   </div>
@@ -1946,88 +2888,8 @@ export function SmartTeacherAssignmentBlock({
           </div>
 
               <div className="stack">
-                <label style={{ fontSize: 12, fontWeight: 900 }}>Room (grade+subject)</label>
-                        <SelectKeeper
-                  value={bulkRoomId}
-                  onChange={setBulkRoomId}
-                  options={[
-                    { value: '', label: '🏠 Homeroom' },
-                    ...roomOptions.filter((r) => r.value !== ''),
-                  ]}
-                />
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={!gradeFilter || !subjFilter}
-                  onClick={() => {
-                    const g = Number(gradeFilter);
-                    const s = Number(subjFilter);
-                    if (!Number.isFinite(g) || !Number.isFinite(s)) return;
-                    const rid = bulkRoomId && bulkRoomId.trim() !== '' ? Number(bulkRoomId) : null;
-                    if (bulkRoomId && bulkRoomId.trim() !== '' && !Number.isFinite(rid)) return;
-                    const inGrade = classGroups.filter((cg) => Number(cg.gradeLevel) === g).map((cg) => cg.classGroupId);
-                    setSectionSubjectOverrides((prev) => {
-                      const next = prev.slice();
-                      const idxByKey = new Map<string, number>();
-                      for (let i = 0; i < next.length; i++) idxByKey.set(`${next[i]!.classGroupId}:${next[i]!.subjectId}`, i);
-                      for (const cid of inGrade) {
-                        const key = `${cid}:${s}`;
-                        const idx = idxByKey.get(key);
-                        if (idx != null) next[idx] = { ...next[idx]!, roomId: rid };
-                        else next.push({ classGroupId: cid, subjectId: s, periodsPerWeek: null, teacherId: null, roomId: rid });
-                      }
-                      return next;
-                    });
-                    setAssignmentMeta((m) => {
-                      const n = { ...m };
-                      for (const cid of inGrade) {
-                        const sk = slotKey(cid, s);
-                        n[sk] = mergeAssignmentSlotMeta(n[sk], {
-                          source: n[sk]?.source ?? 'manual',
-                          locked: n[sk]?.locked ?? false,
-                          conflictReason: n[sk]?.conflictReason,
-                          roomSource: 'manual',
-                          roomLocked: true,
-                        });
-                      }
-                      return n;
-                    });
-                    toast.success('Bulk', `Room applied to all sections in class ${g} for the selected subject.`);
-                  }}
-                >
-                  Apply room
-                </button>
-              </div>
-
-              <div className="stack">
                 <label style={{ fontSize: 12, fontWeight: 900 }}>Lock filtered grade rows</label>
                 <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                        <button
-                          type="button"
-                          className="btn secondary"
-                  disabled={!gradeFilter}
-                  onClick={() => {
-                    const g = Number(gradeFilter);
-                    if (!Number.isFinite(g)) return;
-                    const inGrade = classGroups.filter((cg) => Number(cg.gradeLevel) === g).map((cg) => cg.classGroupId);
-                    setAssignmentMeta((m) => {
-                      const n = { ...m };
-                      for (const row of flatRows) {
-                        if (!inGrade.includes(row.classGroupId)) continue;
-                        const cur = n[row.k];
-                          n[row.k] = mergeAssignmentSlotMeta(cur, {
-                            source: cur?.source ?? 'manual',
-                            locked: true,
-                            conflictReason: cur?.conflictReason,
-                          });
-                      }
-                      return n;
-                    });
-                      toast.success('Bulk', `Teacher-lock applied to visible slots in Class ${g}.`);
-                    }}
-                  >
-                    Lock teachers
-                  </button>
                   <button
                     type="button"
                     className="btn secondary"
@@ -2043,22 +2905,20 @@ export function SmartTeacherAssignmentBlock({
                           const cur = n[row.k];
                           n[row.k] = mergeAssignmentSlotMeta(cur, {
                             source: cur?.source ?? 'manual',
-                            locked: cur?.locked ?? false,
+                            locked: true,
                             conflictReason: cur?.conflictReason,
-                            roomLocked: true,
-                            roomSource: cur?.roomSource ?? 'manual',
                           });
                         }
                         return n;
                       });
-                      toast.success('Bulk', `Room-lock applied to visible slots in Class ${g}.`);
+                      toast.success('Bulk', `Teacher-lock applied to visible slots in Class ${g}.`);
                     }}
                   >
-                    Lock rooms
-                        </button>
+                    Lock teachers
+                  </button>
                 </div>
-        </div>
-      </div>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
@@ -2080,7 +2940,7 @@ export function TeacherLoadDashboard({
   classSubjectConfigs: ClassSubjectConfigRow[];
   sectionSubjectOverrides: SectionSubjectOverrideRow[];
   filters?: { grade: string; subject: string; teacher: string };
-  subjectsCatalogForLabels: { id: number; name: string; code: string }[];
+  subjectsCatalogForLabels: Sub[];
   slotsPerWeek?: number | null;
 }) {
   const cgs = useMemo(

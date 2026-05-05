@@ -15,6 +15,14 @@ type BasicInfoLite = {
   workingDays: string[];
 } | null | undefined;
 
+/** Normalizes API `auto` / `manual` strings for section-level draft state. */
+export function assignmentSourceFromApi(s: string | null | undefined): 'auto' | 'manual' | '' {
+  const u = String(s ?? '').trim().toLowerCase();
+  if (u === 'auto') return 'auto';
+  if (u === 'manual') return 'manual';
+  return '';
+}
+
 export function parseHm(s: string) {
   const p = s.split(':').map((x) => Number(x.trim()));
   if (p.length < 2 || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return null;
@@ -206,6 +214,77 @@ export function homeroomMapFromDraft(
   return m;
 }
 
+export function sectionHasAssignedRoomDraft(
+  classGroupId: number,
+  defaultRoomByClassId: Record<number, string>,
+): boolean {
+  const raw = defaultRoomByClassId[classGroupId];
+  return raw != null && String(raw).trim() !== '';
+}
+
+/**
+ * Class groups (excluding `excludeClassGroupId`) whose Overview draft already assigns this room id as the section homeroom.
+ * Matches the “duplicate assigned room” rule used in the sections overview table.
+ */
+export function otherClassGroupIdsSharingHomeroomRoom(
+  roomId: number,
+  defaultRoomByClassId: Record<number, string>,
+  excludeClassGroupId: number,
+): number[] {
+  const target = String(roomId);
+  const out: number[] = [];
+  for (const [k, raw] of Object.entries(defaultRoomByClassId)) {
+    const cg = Number(k);
+    if (!Number.isFinite(cg) || cg === excludeClassGroupId) continue;
+    const v = raw != null ? String(raw).trim() : '';
+    if (v !== '' && v === target) out.push(cg);
+  }
+  return out;
+}
+
+export function findSectionSubjectOverrideRow(
+  sectionSubjectOverrides: SectionSubjectOverrideRow[],
+  classGroupId: number,
+  subjectId: number,
+): SectionSubjectOverrideRow | undefined {
+  return sectionSubjectOverrides.find(
+    (o) => Number(o.classGroupId) === Number(classGroupId) && Number(o.subjectId) === Number(subjectId),
+  );
+}
+
+export function slotHasExplicitRoomOverride(ov: SectionSubjectOverrideRow | undefined): boolean {
+  return ov != null && ov.roomId != null && Number.isFinite(Number(ov.roomId));
+}
+
+/** Any subject in this section has a saved per-slot room — unlocks subject row room pickers without Overview homeroom. */
+export function sectionHasAnyExplicitRoomOverride(
+  sectionSubjectOverrides: SectionSubjectOverrideRow[],
+  classGroupId: number,
+): boolean {
+  const cg = Number(classGroupId);
+  return sectionSubjectOverrides.some(
+    (o) => Number(o.classGroupId) === cg && o.roomId != null && Number.isFinite(Number(o.roomId)),
+  );
+}
+
+/**
+ * Smart Assignment: show a concrete room after the section has an assigned room, this slot has an explicit override,
+ * or any sibling subject in the section already has a manual room (so remaining subjects can be filled without Overview first).
+ * Avoids implying a subject-level room exists from grade templates before section rooms exist.
+ */
+export function smartAssignSubjectRoomIsVisible(args: {
+  classGroupId: number;
+  subjectId: number;
+  defaultRoomByClassId: Record<number, string>;
+  sectionSubjectOverrides: SectionSubjectOverrideRow[];
+}): boolean {
+  const { classGroupId, subjectId, defaultRoomByClassId, sectionSubjectOverrides } = args;
+  if (sectionHasAssignedRoomDraft(classGroupId, defaultRoomByClassId)) return true;
+  if (slotHasExplicitRoomOverride(findSectionSubjectOverrideRow(sectionSubjectOverrides, classGroupId, subjectId))) return true;
+  if (sectionHasAnyExplicitRoomOverride(sectionSubjectOverrides, classGroupId)) return true;
+  return false;
+}
+
 export function buildEffectiveAllocRows(
   classGroups: { classGroupId: number; gradeLevel: number | null }[],
   classSubjectConfigs: ClassSubjectConfigRow[],
@@ -253,7 +332,8 @@ export function buildEffectiveAllocRows(
         subjectId,
         weeklyFrequency,
         staffId: ov?.teacherId ?? cfg.defaultTeacherId ?? null,
-        roomId: ov?.roomId ?? cfg.defaultRoomId ?? homeroom ?? null,
+        /** Section homeroom + grade template hint only — per-subject room overrides live in timetable editor. */
+        roomId: homeroom ?? cfg.defaultRoomId ?? null,
       });
     }
 
@@ -272,7 +352,7 @@ export function buildEffectiveAllocRows(
         subjectId,
         weeklyFrequency,
         staffId: o.teacherId ?? null,
-        roomId: o.roomId ?? homeroom ?? null,
+        roomId: homeroom ?? null,
       });
     }
   }

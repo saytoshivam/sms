@@ -9,6 +9,7 @@ import { useImpactStore } from '../../lib/impactStore';
 import { RowActionsMenu } from '../RowActionsMenu';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { SmartSelect } from '../SmartSelect';
+import { parseRoomVenueType, ROOM_TYPES, ROOM_TYPE_LABELS } from '../../lib/roomVenueCompatibility';
 
 type RoomOption = {
   id: number;
@@ -43,9 +44,7 @@ export function SavedRoomsCatalogPanel() {
   const [savedRoomsExpandedBuildings, setSavedRoomsExpandedBuildings] = useState<Record<string, boolean>>({});
   const [savedRoomsExpandedFloors, setSavedRoomsExpandedFloors] = useState<Record<string, boolean>>({});
   const [roomDeleteInfoCache, setRoomDeleteInfoCache] = useState<Record<number, DeleteInfo>>({});
-  const [savedRoomsTypeFilter, setSavedRoomsTypeFilter] = useState<
-    'ALL' | 'CLASSROOM' | 'LAB' | 'LIBRARY' | 'SPORTS_ROOM' | 'AUDITORIUM' | 'OTHER'
-  >('ALL');
+  const [savedRoomsTypeFilter, setSavedRoomsTypeFilter] = useState<string>('ALL');
 
   const [roomDeleteModal, setRoomDeleteModal] = useState<{
     open: boolean;
@@ -65,7 +64,7 @@ export function SavedRoomsCatalogPanel() {
     capacity: number | '';
     isSchedulable: boolean;
     busy: boolean;
-  }>({ roomId: null, type: 'CLASSROOM', labType: 'PHYSICS', capacity: '', isSchedulable: true, busy: false });
+  }>({ roomId: null, type: 'STANDARD_CLASSROOM', labType: 'PHYSICS', capacity: '', isSchedulable: true, busy: false });
 
   const roomsSaved = useQuery({
     queryKey: ['rooms-saved-onboarding'],
@@ -103,15 +102,7 @@ export function SavedRoomsCatalogPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomsSaved.data]);
 
-  const typeFilterOptions = [
-    { value: 'ALL', label: 'All types' },
-    { value: 'CLASSROOM', label: '🏫 Classroom' },
-    { value: 'LAB', label: '🧪 Lab' },
-    { value: 'LIBRARY', label: '📚 Library' },
-    { value: 'SPORTS_ROOM', label: '🏟️ Sports' },
-    { value: 'AUDITORIUM', label: '🎭 Auditorium' },
-    { value: 'OTHER', label: 'Other' },
-  ] as const;
+  const typeFilterOptions = [{ value: 'ALL', label: 'All types' }, ...ROOM_TYPES.map((t) => ({ value: t, label: ROOM_TYPE_LABELS[t] }))];
 
   return (
     <>
@@ -122,11 +113,7 @@ export function SavedRoomsCatalogPanel() {
             <div style={{ minWidth: 200 }}>
               <SmartSelect
                 value={savedRoomsTypeFilter}
-                onChange={(v) =>
-                  setSavedRoomsTypeFilter(
-                    ((v || 'ALL') as (typeof typeFilterOptions)[number]['value']) ?? 'ALL',
-                  )
-                }
+                onChange={(v) => setSavedRoomsTypeFilter(v || 'ALL')}
                 options={[...typeFilterOptions]}
                 ariaLabel="Filter by room type"
               />
@@ -154,12 +141,7 @@ export function SavedRoomsCatalogPanel() {
             .slice()
             .filter((r) => {
               if (savedRoomsTypeFilter === 'ALL') return true;
-              const t = String(r.type ?? '').trim().toUpperCase();
-              if (!t) return savedRoomsTypeFilter === 'OTHER';
-              if (savedRoomsTypeFilter === 'OTHER') {
-                return !['CLASSROOM', 'LAB', 'LIBRARY', 'SPORTS_ROOM', 'AUDITORIUM'].includes(t);
-              }
-              return t === savedRoomsTypeFilter;
+              return parseRoomVenueType(r.type) === savedRoomsTypeFilter;
             })
             .sort((a, b) => {
               const ba = String(a.buildingName ?? a.building ?? '').localeCompare(String(b.buildingName ?? b.building ?? ''));
@@ -282,42 +264,26 @@ export function SavedRoomsCatalogPanel() {
                                             </td>
                                             <td className="muted" style={{ fontWeight: 900 }}>
                                               {(() => {
-                                                const t = String(r.type ?? '').trim().toUpperCase();
+                                                const t = parseRoomVenueType(r.type);
                                                 if (!t) return '—';
-                                                const icon =
-                                                  t === 'CLASSROOM'
-                                                    ? '🏫'
-                                                    : t === 'LAB'
-                                                      ? '🧪'
-                                                      : t === 'LIBRARY'
-                                                        ? '📚'
-                                                        : t === 'SPORTS_ROOM'
-                                                          ? '🏟️'
-                                                          : t === 'AUDITORIUM'
-                                                            ? '🎭'
-                                                            : '🏷️';
-                                                const label =
-                                                  t === 'LAB'
-                                                    ? `${String(r.labType ?? '').trim() || 'OTHER'} Lab`
-                                                    : t === 'SPORTS_ROOM'
-                                                      ? 'Sports'
-                                                      : t === 'AUDITORIUM'
-                                                        ? 'Auditorium'
-                                                        : t === 'LIBRARY'
-                                                          ? 'Library'
-                                                          : t === 'CLASSROOM'
-                                                            ? 'Classroom'
-                                                            : t;
+                                                const labSuffix =
+                                                  (t === 'SCIENCE_LAB' || t === 'COMPUTER_LAB') && r.labType
+                                                    ? ` (${r.labType})`
+                                                    : '';
                                                 return (
                                                   <span style={{ whiteSpace: 'nowrap' }}>
-                                                    <span aria-hidden>{icon}</span> {label}
+                                                    {ROOM_TYPE_LABELS[t]}
+                                                    {labSuffix}
                                                   </span>
                                                 );
                                               })()}
                                             </td>
                                             <td>{r.capacity == null ? 'Not set' : r.capacity}</td>
                                             <td>
-                                              {String(r.type ?? '').trim().toUpperCase() === 'LAB' ? (
+                                              {(() => {
+                                                const rt = parseRoomVenueType(r.type);
+                                                return rt === 'SCIENCE_LAB' || rt === 'COMPUTER_LAB';
+                                              })() ? (
                                                 <span style={{ fontWeight: 900, color: '#a16207' }}>Shared</span>
                                               ) : (
                                                 <span className="muted" style={{ fontWeight: 900 }}>
@@ -351,7 +317,7 @@ export function SavedRoomsCatalogPanel() {
                                                     onSelect: () =>
                                                       setRoomEdit({
                                                         roomId: r.id,
-                                                        type: String(r.type ?? 'CLASSROOM'),
+                                                        type: parseRoomVenueType(String(r.type ?? '')) ?? 'STANDARD_CLASSROOM',
                                                         labType: String(r.labType ?? 'PHYSICS'),
                                                         capacity: typeof r.capacity === 'number' ? r.capacity : '',
                                                         isSchedulable: r.isSchedulable !== false,
@@ -458,7 +424,7 @@ export function SavedRoomsCatalogPanel() {
         open={roomEdit.roomId != null}
         title="Edit room"
         description={roomEdit.roomId != null ? 'Update room type, lab type, and capacity.' : undefined}
-        details={['Changes apply immediately. Lab type is only applicable when Type is LAB.']}
+        details={['Changes apply immediately. Lab subtype applies when type is Science lab or Computer lab.']}
         confirmLabel={roomEdit.busy ? 'Saving…' : 'Save changes'}
         cancelLabel="Cancel"
         confirmDisabled={roomEdit.busy}
@@ -471,7 +437,8 @@ export function SavedRoomsCatalogPanel() {
             await api.put(`/api/rooms/${roomEdit.roomId}`, {
               type: roomEdit.type,
               capacity: roomEdit.capacity === '' ? null : Number(roomEdit.capacity),
-              labType: String(roomEdit.type).toUpperCase() === 'LAB' ? roomEdit.labType : null,
+              labType:
+                roomEdit.type === 'SCIENCE_LAB' || roomEdit.type === 'COMPUTER_LAB' ? roomEdit.labType : null,
               isSchedulable: roomEdit.isSchedulable,
             });
             const typeChanged =
@@ -499,19 +466,19 @@ export function SavedRoomsCatalogPanel() {
             <label>Type</label>
             <SmartSelect
               value={roomEdit.type}
-              onChange={(v) => setRoomEdit((p) => ({ ...p, type: v || 'CLASSROOM' }))}
-              options={[
-                { value: 'CLASSROOM', label: '🏫 Classroom' },
-                { value: 'LAB', label: '🧪 Lab' },
-                { value: 'LIBRARY', label: '📚 Library' },
-                { value: 'SPORTS_ROOM', label: '🏟️ Sports' },
-                { value: 'AUDITORIUM', label: '🎭 Auditorium' },
-                { value: 'OTHER', label: 'Other' },
-              ]}
+              onChange={(v) =>
+                setRoomEdit((p) => ({
+                  ...p,
+                  type: v || 'STANDARD_CLASSROOM',
+                  labType:
+                    v === 'SCIENCE_LAB' || v === 'COMPUTER_LAB' ? (p.labType || 'OTHER') : p.labType,
+                }))
+              }
+              options={ROOM_TYPES.map((t) => ({ value: t, label: ROOM_TYPE_LABELS[t] }))}
               ariaLabel="Room type"
             />
           </div>
-          {String(roomEdit.type).toUpperCase() === 'LAB' ? (
+          {roomEdit.type === 'SCIENCE_LAB' || roomEdit.type === 'COMPUTER_LAB' ? (
             <div className="stack">
               <label>Lab type</label>
               <SmartSelect

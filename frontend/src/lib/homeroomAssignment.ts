@@ -75,8 +75,9 @@ export function assignHomeroomsGreedy(args: {
 }): { assignments: Record<number, number>; stats: HomeroomAssignmentStats } {
   const { sections, rooms, assumeHeadcountWhenUnknown } = args;
 
+  const homeroomableTypes = new Set(['STANDARD_CLASSROOM', 'CLASSROOM', 'MULTIPURPOSE']);
   const classrooms = rooms
-    .filter((r) => String(r.type ?? '').toUpperCase() === 'CLASSROOM')
+    .filter((r) => homeroomableTypes.has(String(r.type ?? '').toUpperCase()))
     .filter((r) => r.schedulable !== false)
     .slice()
     .sort((a, b) => {
@@ -224,19 +225,24 @@ export function classGroupsToHomeroomSections(
     code?: string | null;
   }>,
   homeroomSourceByClassId?: Readonly<Record<number, 'auto' | 'manual' | ''>>,
-  /** Sections containing any slot with locked room metadata skip bulk homeroom automation. */
+  /**
+   * Optional legacy hook (unused). Prefer `homeroomLockedByClassId`.
+   */
   slotRoomLockedClassGroupIds?: ReadonlySet<number> | null,
+  /** When true for a section, bulk homeroom automation must not change that section. */
+  homeroomLockedByClassId?: Readonly<Record<number, boolean>> | null,
 ): HomeroomSectionInput[] {
   return classGroups.map((cg) => {
     const sec = String(cg.section ?? '').trim();
     const sortKey = sec || String(cg.code ?? cg.displayName ?? cg.classGroupId);
     const skipManualHomeroom = homeroomSourceByClassId?.[cg.classGroupId] === 'manual';
     const skipLockedSlotRoom = slotRoomLockedClassGroupIds?.has(Number(cg.classGroupId)) === true;
+    const skipLocked = homeroomLockedByClassId?.[cg.classGroupId] === true;
     return {
       classGroupId: cg.classGroupId,
       gradeLevel: cg.gradeLevel,
       sectionSortKey: sortKey,
-      skipHomeroomAuto: skipManualHomeroom || skipLockedSlotRoom,
+      skipHomeroomAuto: skipManualHomeroom || skipLockedSlotRoom || skipLocked,
     };
   });
 }

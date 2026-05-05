@@ -43,8 +43,8 @@ public class Room {
     private String roomNumber;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
-    private RoomType type = RoomType.CLASSROOM;
+    @Column(nullable = false, length = 32)
+    private RoomType type = RoomType.STANDARD_CLASSROOM;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "lab_type", length = 16)

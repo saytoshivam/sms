@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -16,7 +17,12 @@ import { OnboardedStaffCatalogPanel } from '../components/catalog/OnboardedStaff
 import { AcademicStructureSetupStep } from '../components/AcademicStructureSetupStep';
 import Step7TimetableWorkspace from '../components/Step7TimetableWorkspace';
 import type { ClassSubjectConfigRow, SectionSubjectOverrideRow } from '../lib/academicStructureUtils';
-import { buildEffectiveAllocRows, estimateSlotsPerWeek, homeroomMapFromDraft } from '../lib/academicStructureUtils';
+import {
+  assignmentSourceFromApi,
+  buildEffectiveAllocRows,
+  estimateSlotsPerWeek,
+  homeroomMapFromDraft,
+} from '../lib/academicStructureUtils';
 import { runAutoAssignClassTeachers } from '../lib/classTeacherAutoAssign';
 import type { AssignmentSlotMeta } from '../lib/academicStructureSmartAssign';
 import { assignHomeroomsGreedy, classGroupsToHomeroomSections, roomsToHomeroomInputs } from '../lib/homeroomAssignment';
@@ -35,6 +41,12 @@ import {
 } from '../lib/schoolBasicSetup';
 import { SchoolBasicSetupForm } from '../components/setup/SchoolBasicSetupForm';
 import { pageContent, type SpringPage } from '../lib/springPageContent';
+import { parseRoomVenueType, ROOM_TYPES, ROOM_TYPE_LABELS, type RoomVenueType } from '../lib/roomVenueCompatibility';
+import { parseSubjectVenueRequirement } from '../lib/subjectVenueRequirement';
+
+function isSchedulableLabRoomType(t: RoomVenueType): boolean {
+  return t === 'SCIENCE_LAB' || t === 'COMPUTER_LAB';
+}
 
 /** Local-only draft for academic step (server still requires a complete save to continue onboarding). */
 const ACADEMIC_LOCAL_DRAFT_KEY = 'sms-onboarding-academic-structure-v1';
@@ -57,6 +69,8 @@ type SubjectDraft = {
   name: string;
   code: string;
   weeklyFrequency: number;
+  /** Optional CSV column; defaults to STANDARD_CLASSROOM when omitted. */
+  allocationVenueRequirement?: string | null;
 };
 
 type RoomDraft = {
@@ -64,7 +78,7 @@ type RoomDraft = {
   floorNumber?: number | null;
   floorName?: string | null;
   roomNumber: string;
-  type: 'CLASSROOM' | 'LAB' | 'LIBRARY' | 'AUDITORIUM' | 'SPORTS_ROOM' | 'STAFF_ROOM' | 'OFFICE' | 'OTHER';
+  type: RoomVenueType;
   labType?: 'PHYSICS' | 'CHEMISTRY' | 'COMPUTER' | 'OTHER' | null;
   capacity: number | null;
 };
@@ -101,7 +115,11 @@ type ClassDefaultRoomRow = {
   gradeLevel: number | null;
   section: string | null;
   defaultRoomId: number | null;
+  homeroomLocked?: boolean | null;
+  homeroomSource?: string | null;
   classTeacherStaffId?: number | null;
+  classTeacherSource?: string | null;
+  classTeacherLocked?: boolean | null;
 };
 type RoomOption = {
   id: number;
@@ -170,22 +188,34 @@ function parseSubjectsCsv(text: string): SubjectDraft[] {
     let name: string;
     let code: string;
     let weeklyFrequencyRaw: string;
+    let venueRaw: string;
     if (hasHeader) {
       const inName = colIndex(['name', 'subjectname', 'subject']);
       const inCode = colIndex(['code', 'subjectcode']);
       const inWf = colIndex(['weeklyfrequency', 'weekly_frequency', 'frequency', 'freq', 'periodsperweek', 'periods_per_week']);
+      const inVenue = colIndex([
+        'allocationvenuerequirement',
+        'allocation_venue_requirement',
+        'venuerequirement',
+        'venue_requirement',
+        'roomneed',
+        'room_need',
+      ]);
       name = (inName >= 0 ? cols[inName] : cols[0]) ?? '';
       code = (inCode >= 0 ? cols[inCode] : cols[1]) ?? '';
       weeklyFrequencyRaw = (inWf >= 0 ? cols[inWf] : cols[2]) ?? '';
+      venueRaw = inVenue >= 0 ? (cols[inVenue] ?? '') : '';
     } else {
       name = cols[0] ?? '';
       code = cols[1] ?? '';
       weeklyFrequencyRaw = cols[2] ?? '';
+      venueRaw = cols[3] ?? '';
     }
     if (!name || !code) continue;
     const n = weeklyFrequencyRaw ? Number(String(weeklyFrequencyRaw).trim()) : NaN;
     const weeklyFrequency = Number.isFinite(n) && n > 0 ? Math.trunc(n) : 4;
-    out.push({ name, code: code.toUpperCase(), weeklyFrequency });
+    const allocationVenueRequirement = String(venueRaw ?? '').trim() || 'STANDARD_CLASSROOM';
+    out.push({ name, code: code.toUpperCase(), weeklyFrequency, allocationVenueRequirement });
   }
   return out;
 }
@@ -314,44 +344,37 @@ function parseRoomsCsv(text: string): RoomDraft[] {
       const fnRaw = inFloorName >= 0 ? cols[inFloorName] : '';
       floorName = fnRaw ? String(fnRaw).trim() : null;
       roomNumber = (inRoom >= 0 ? cols[inRoom] : cols[2]) ?? '';
-      typeStr = (inType >= 0 ? cols[inType] : cols[3]) ?? 'CLASSROOM';
+      typeStr = (inType >= 0 ? cols[inType] : cols[3]) ?? 'STANDARD_CLASSROOM';
       capRaw = inCap >= 0 ? cols[inCap] : cols[4];
       labTypeStr = inLabType >= 0 ? cols[inLabType] : cols[5];
     } else {
       building = cols[0] ?? '';
       floor = cols[1] ?? '';
       roomNumber = cols[2] ?? '';
-      typeStr = cols[3] ?? 'CLASSROOM';
+      typeStr = cols[3] ?? 'STANDARD_CLASSROOM';
       capRaw = cols[4];
       labTypeStr = cols[5];
     }
 
     if (!building || !roomNumber) continue;
     const typeNorm = String(typeStr).trim().toUpperCase().replace(/\s+/g, '_');
-    const type = ([
-      'CLASSROOM',
-      'LAB',
-      'LIBRARY',
-      'AUDITORIUM',
-      'SPORTS_ROOM',
-      'STAFF_ROOM',
-      'OFFICE',
-      'OTHER',
-    ] as const).includes(typeNorm as any)
-      ? (typeNorm as RoomDraft['type'])
-      : 'OTHER';
+    const type: RoomVenueType = parseRoomVenueType(typeNorm) ?? 'OTHER';
 
     let capacity: number | null = null;
     const cap = Number.parseInt(String(capRaw ?? ''), 10);
     if (Number.isFinite(cap) && cap > 0) capacity = cap;
 
     const labNorm = String(labTypeStr ?? '').trim().toUpperCase();
-    const labType =
-      type === 'LAB'
-        ? (['PHYSICS', 'CHEMISTRY', 'COMPUTER', 'OTHER'] as const).includes(labNorm as any)
-          ? (labNorm as NonNullable<RoomDraft['labType']>)
-          : 'OTHER'
-        : null;
+    let labType: RoomDraft['labType'] = null;
+    if (isSchedulableLabRoomType(type)) {
+      if ((['PHYSICS', 'CHEMISTRY', 'COMPUTER', 'OTHER'] as const).includes(labNorm as any)) {
+        labType = labNorm as NonNullable<RoomDraft['labType']>;
+      } else if (type === 'COMPUTER_LAB') {
+        labType = 'COMPUTER';
+      } else {
+        labType = 'OTHER';
+      }
+    }
 
     // Best-effort parse legacy floor "1 / Ground" into number + name if not explicitly provided
     const floorLegacy = String(floor ?? '').trim();
@@ -413,7 +436,7 @@ export function SchoolOnboardingWizardPage() {
   const [roomFloorNumber, setRoomFloorNumber] = useState<number | ''>('');
   const [roomFloorName, setRoomFloorName] = useState('');
   const [roomNumber, setRoomNumber] = useState('');
-  const [roomType, setRoomType] = useState<RoomDraft['type']>('CLASSROOM');
+  const [roomType, setRoomType] = useState<RoomDraft['type']>('STANDARD_CLASSROOM');
   const [roomLabType, setRoomLabType] = useState<NonNullable<RoomDraft['labType']>>('PHYSICS');
   const [roomCapacity, setRoomCapacity] = useState<number | ''>('');
   const [roomsCsvName, setRoomsCsvName] = useState<string | null>(null);
@@ -427,8 +450,10 @@ export function SchoolOnboardingWizardPage() {
   /** classGroupId → room id string, or '' for no default */
   const [defaultRoomByClassId, setDefaultRoomByClassId] = useState<Record<number, string>>({});
   const [homeroomSourceByClassId, setHomeroomSourceByClassId] = useState<Record<number, 'auto' | 'manual' | ''>>({});
+  const [homeroomLockedByClassId, setHomeroomLockedByClassId] = useState<Record<number, boolean>>({});
   const [classTeacherByClassId, setClassTeacherByClassId] = useState<Record<number, string>>({});
   const [classTeacherSourceByClassId, setClassTeacherSourceByClassId] = useState<Record<number, 'auto' | 'manual' | ''>>({});
+  const [classTeacherLockedByClassId, setClassTeacherLockedByClassId] = useState<Record<number, boolean>>({});
   /** After server + local draft is applied, debounced localStorage sync is safe to run. */
   const [academicLocalAutosaveReady, setAcademicLocalAutosaveReady] = useState(false);
 
@@ -648,7 +673,7 @@ export function SchoolOnboardingWizardPage() {
         value: String(r.id),
         label: `${String(r.buildingName ?? r.building ?? '').trim()} ${r.roomNumber}${r.type ? ` · ${r.type}` : ''}`.trim(),
       }));
-    return [{ value: '', label: 'No default room' }, ...opts];
+    return [{ value: '', label: 'No room assigned' }, ...opts];
   }, [roomsForClassDefaults.data]);
 
   const classDefaultRoomUsage = useMemo(() => {
@@ -673,6 +698,17 @@ export function SchoolOnboardingWizardPage() {
       ...prev,
       [classGroupId]: value.trim() !== '' ? 'manual' : '',
     }));
+    if (value.trim() === '') {
+      setHomeroomLockedByClassId((prev) => ({ ...prev, [classGroupId]: false }));
+    }
+  }, []);
+
+  const patchHomeroomLock = useCallback((classGroupId: number, locked: boolean) => {
+    setHomeroomLockedByClassId((prev) => ({ ...prev, [classGroupId]: locked }));
+  }, []);
+
+  const patchClassTeacherLock = useCallback((classGroupId: number, locked: boolean) => {
+    setClassTeacherLockedByClassId((prev) => ({ ...prev, [classGroupId]: locked }));
   }, []);
 
   const patchSectionClassTeacher = useCallback((classGroupId: number, staffIdValue: string) => {
@@ -682,6 +718,9 @@ export function SchoolOnboardingWizardPage() {
       ...prev,
       [classGroupId]: v !== '' ? 'manual' : '',
     }));
+    if (v === '') {
+      setClassTeacherLockedByClassId((prev) => ({ ...prev, [classGroupId]: false }));
+    }
   }, []);
 
   const autoAssignClassTeachers = useCallback(() => {
@@ -699,6 +738,7 @@ export function SchoolOnboardingWizardPage() {
       effectiveAllocRows: effective,
       classTeacherByClassGroupId: classTeacherByClassId,
       classTeacherSourceByClassGroupId: classTeacherSourceByClassId,
+      classTeacherLockedByClassGroupId: classTeacherLockedByClassId,
       schoolSlotsPerWeek: slotsPw,
     });
     setClassTeacherByClassId(nextTeachers);
@@ -716,51 +756,120 @@ export function SchoolOnboardingWizardPage() {
     defaultRoomByClassId,
     classTeacherByClassId,
     classTeacherSourceByClassId,
+    classTeacherLockedByClassId,
   ]);
 
-  const clearAutoHomeroomAssignments = useCallback(() => {
-    setHomeroomSourceByClassId((srcPrev) => {
-      const autoIds = Object.entries(srcPrev)
-        .filter(([, v]) => v === 'auto')
-        .map(([id]) => Number(id));
-      setDefaultRoomByClassId((drPrev) => {
-        const next = { ...drPrev };
-        for (const id of autoIds) next[id] = '';
-        return next;
+  const clearHomeroomDraft = useCallback(() => {
+    const cgs = academicStructureQuery.data?.classGroups ?? [];
+    setDefaultRoomByClassId((prev) => {
+      const next = { ...prev };
+      const ids = new Set(cgs.map((cg) => cg.classGroupId));
+      if (ids.size === 0) {
+        for (const k of Object.keys(next)) next[Number(k)] = '';
+      } else {
+        for (const id of ids) next[id] = '';
+      }
+      return next;
+    });
+    setHomeroomSourceByClassId({});
+    setHomeroomLockedByClassId({});
+  }, [academicStructureQuery.data?.classGroups]);
+
+  const clearAutoAssignedClassTeachers = useCallback(() => {
+    const cgs = academicStructureQuery.data?.classGroups ?? [];
+    let idsToClear: number[] = [];
+    flushSync(() => {
+      setClassTeacherSourceByClassId((srcPrev) => {
+        const nextSrc = { ...srcPrev };
+        idsToClear = [];
+        for (const cg of cgs) {
+          const id = Number(cg.classGroupId);
+          if (!Number.isFinite(id)) continue;
+          const src =
+            srcPrev[id] ??
+            (srcPrev as Record<string, 'auto' | 'manual' | '' | undefined>)[String(id)] ??
+            '';
+          if (src === 'auto') {
+            nextSrc[id] = '';
+            idsToClear.push(id);
+          }
+        }
+        return nextSrc;
       });
+    });
+    if (idsToClear.length === 0) return;
+    setClassTeacherByClassId((ctPrev) => {
+      const nextCt = { ...ctPrev };
+      for (const cid of idsToClear) nextCt[cid] = '';
+      return nextCt;
+    });
+  }, [academicStructureQuery.data?.classGroups]);
+
+  const clearAllClassTeacherAssignments = useCallback(() => {
+    const cgs = academicStructureQuery.data?.classGroups ?? [];
+    setClassTeacherByClassId((ctPrev) => {
+      const nextCt = { ...ctPrev };
+      for (const cg of cgs) {
+        const id = Number(cg.classGroupId);
+        if (Number.isFinite(id)) nextCt[id] = '';
+      }
+      return nextCt;
+    });
+    setClassTeacherSourceByClassId((srcPrev) => {
       const nextSrc = { ...srcPrev };
-      for (const id of autoIds) delete nextSrc[id];
+      for (const cg of cgs) {
+        const id = Number(cg.classGroupId);
+        if (Number.isFinite(id)) nextSrc[id] = '';
+      }
       return nextSrc;
     });
+    setClassTeacherLockedByClassId((prev) => {
+      const next = { ...prev };
+      for (const cg of cgs) {
+        const id = Number(cg.classGroupId);
+        if (Number.isFinite(id)) next[id] = false;
+      }
+      return next;
+    });
+  }, [academicStructureQuery.data?.classGroups]);
+
+  const clearAutoHomeroomAssignments = useCallback(() => {
+    clearHomeroomDraft();
+    clearAutoAssignedClassTeachers();
+    setSectionSubjectOverrides((prev) =>
+      prev.map((o) => {
+        const meta = assignmentSlotMeta[`${o.classGroupId}:${o.subjectId}`];
+        if (meta?.roomLocked) return o;
+        return { ...o, roomId: null };
+      }),
+    );
     setAssignmentSlotMeta((prev) => {
       const out = { ...prev };
       for (const [key, meta] of Object.entries(out)) {
-        if (meta?.roomSource === 'auto' && !meta.roomLocked) {
-          const { roomSource: _rs, ...rest } = meta;
-          out[key] = rest as AssignmentSlotMeta;
-        }
+        if (!meta) continue;
+        if (meta.roomLocked) continue;
+        const { roomSource: _rs, ...rest } = meta;
+        out[key] = rest as AssignmentSlotMeta;
       }
       return out;
     });
-    toast.info('Homerooms', 'Cleared auto-assigned homerooms. Manual homerooms and locked row rooms were kept.');
-  }, []);
+  }, [clearHomeroomDraft, clearAutoAssignedClassTeachers, assignmentSlotMeta]);
 
   const autoAssignDefaultRooms = useCallback(() => {
     const cgRows = academicStructureQuery.data?.classGroups ?? [];
     const roomRows = pageContent(roomsForClassDefaults.data);
     if (cgRows.length === 0 || roomRows.length === 0) {
-      toast.info('Homerooms', 'Add class sections and rooms first.');
+      toast.info('Section rooms', 'Add class sections and rooms first.');
       return;
     }
 
     const roomInputs = roomsToHomeroomInputs(roomRows as unknown as Array<Record<string, unknown>>);
-    const lockedCg = new Set<number>();
-    for (const [k, meta] of Object.entries(assignmentSlotMeta)) {
-      if (!meta?.roomLocked) continue;
-      const cgId = Number(String(k).split(':')[0]);
-      if (Number.isFinite(cgId)) lockedCg.add(cgId);
-    }
-    const sections = classGroupsToHomeroomSections(cgRows as ClassDefaultRoomRow[], homeroomSourceByClassId, lockedCg);
+    const sections = classGroupsToHomeroomSections(
+      cgRows as ClassDefaultRoomRow[],
+      homeroomSourceByClassId,
+      null,
+      homeroomLockedByClassId,
+    );
 
     const { assignments, stats } = assignHomeroomsGreedy({
       sections,
@@ -784,10 +893,10 @@ export function SchoolOnboardingWizardPage() {
     });
 
     toast.success(
-      'Homeroom assignment completed',
+      'Section rooms assigned',
       `Assigned: ${stats.assigned} · Consecutive clusters: ${stats.consecutiveClusters} · Lower-floor optimized: ${stats.lowerFloorOptimized} · Skipped locked sections: ${stats.skippedLockedSections} · Conflicts: ${stats.conflicts}`,
     );
-  }, [academicStructureQuery.data?.classGroups, roomsForClassDefaults.data, assignmentSlotMeta, homeroomSourceByClassId]);
+  }, [academicStructureQuery.data?.classGroups, roomsForClassDefaults.data, homeroomSourceByClassId, homeroomLockedByClassId]);
 
   // Hydrate draft when server data loads
   useEffect(() => {
@@ -921,6 +1030,7 @@ export function SchoolOnboardingWizardPage() {
             name: s.name,
             code: normalizeSubjectCode(s.code),
             weeklyFrequency: Math.trunc(Number(s.weeklyFrequency)),
+            allocationVenueRequirement: parseSubjectVenueRequirement(s.allocationVenueRequirement),
           })),
         )
       ).data;
@@ -958,7 +1068,7 @@ export function SchoolOnboardingWizardPage() {
             roomNumber: r.roomNumber,
             type: r.type,
             capacity: r.capacity,
-            labType: r.type === 'LAB' ? (r.labType ?? 'OTHER') : null,
+            labType: isSchedulableLabRoomType(r.type) ? (r.labType ?? 'OTHER') : null,
           })),
         )
       ).data;
@@ -992,7 +1102,15 @@ export function SchoolOnboardingWizardPage() {
       const defaultRooms = cgs.map((r) => {
         const raw = defaultRoomByClassId[r.classGroupId];
         const rid = raw && String(raw).trim() !== '' ? Number(raw) : NaN;
-        return { classGroupId: r.classGroupId, roomId: Number.isFinite(rid) ? rid : null };
+        const hmSrc = homeroomSourceByClassId[r.classGroupId];
+        const homeroomSource =
+          Number.isFinite(rid) && (hmSrc === 'auto' || hmSrc === 'manual') ? hmSrc : null;
+        return {
+          classGroupId: r.classGroupId,
+          roomId: Number.isFinite(rid) ? rid : null,
+          homeroomLocked: homeroomLockedByClassId[r.classGroupId] === true,
+          homeroomSource,
+        };
       });
       const assignmentSlotMetaList = Object.entries(assignmentSlotMeta).map(([k, v]) => {
         const [a, b] = k.split(':');
@@ -1008,7 +1126,15 @@ export function SchoolOnboardingWizardPage() {
       const classTeachers = cgs.map((r) => {
         const raw = classTeacherByClassId[r.classGroupId];
         const sid = raw && String(raw).trim() !== '' ? Number(raw) : NaN;
-        return { classGroupId: r.classGroupId, staffId: Number.isFinite(sid) ? sid : null };
+        const ctSrc = classTeacherSourceByClassId[r.classGroupId];
+        const classTeacherSource =
+          Number.isFinite(sid) && (ctSrc === 'auto' || ctSrc === 'manual') ? ctSrc : null;
+        return {
+          classGroupId: r.classGroupId,
+          staffId: Number.isFinite(sid) ? sid : null,
+          classTeacherLocked: Number.isFinite(sid) ? classTeacherLockedByClassId[r.classGroupId] === true : false,
+          classTeacherSource,
+        };
       });
       await api.put('/api/v1/onboarding/academic-structure', {
         classSubjectConfigs,
@@ -1135,7 +1261,18 @@ export function SchoolOnboardingWizardPage() {
       if (Object.keys(prev).length > 0) return prev;
       const next: Record<number, 'auto' | 'manual' | ''> = {};
       for (const r of d.classGroups) {
-        next[r.classGroupId] = r.defaultRoomId != null ? 'manual' : '';
+        const row = r as ClassDefaultRoomRow;
+        const persisted = assignmentSourceFromApi(row.homeroomSource);
+        if (persisted) next[r.classGroupId] = persisted;
+        else next[r.classGroupId] = r.defaultRoomId != null ? 'manual' : '';
+      }
+      return next;
+    });
+    setHomeroomLockedByClassId((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const next: Record<number, boolean> = {};
+      for (const r of d.classGroups) {
+        next[r.classGroupId] = !!(r as ClassDefaultRoomRow).homeroomLocked;
       }
       return next;
     });
@@ -1152,8 +1289,17 @@ export function SchoolOnboardingWizardPage() {
       if (Object.keys(prev).length > 0) return prev;
       const next: Record<number, 'auto' | 'manual' | ''> = {};
       for (const r of d.classGroups) {
-        const id = r.classTeacherStaffId;
-        next[r.classGroupId] = id != null && Number.isFinite(Number(id)) ? 'manual' : '';
+        const row = r as ClassDefaultRoomRow;
+        next[r.classGroupId] = assignmentSourceFromApi(row.classTeacherSource);
+      }
+      return next;
+    });
+    setClassTeacherLockedByClassId((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      const next: Record<number, boolean> = {};
+      for (const r of d.classGroups) {
+        const row = r as ClassDefaultRoomRow;
+        next[r.classGroupId] = !!row.classTeacherLocked;
       }
       return next;
     });
@@ -1167,8 +1313,10 @@ export function SchoolOnboardingWizardPage() {
           defaultRoomByClassId?: Record<number, string>;
           assignmentSlotMeta?: Record<string, AssignmentSlotMeta>;
           homeroomSourceByClassId?: Record<number, 'auto' | 'manual' | ''>;
+          homeroomLockedByClassId?: Record<number, boolean>;
           classTeacherByClassId?: Record<number, string>;
           classTeacherSourceByClassId?: Record<number, 'auto' | 'manual' | ''>;
+          classTeacherLockedByClassId?: Record<number, boolean>;
         };
         if (Array.isArray(local.academicAllocRows) && local.academicAllocRows.length > 0) {
           setAcademicAllocRows(local.academicAllocRows.map((x) => ({ ...x, staffId: x.staffId ?? null })));
@@ -1185,11 +1333,17 @@ export function SchoolOnboardingWizardPage() {
         if (local.homeroomSourceByClassId && typeof local.homeroomSourceByClassId === 'object') {
           setHomeroomSourceByClassId((prev) => ({ ...prev, ...local.homeroomSourceByClassId }));
         }
+        if (local.homeroomLockedByClassId && typeof local.homeroomLockedByClassId === 'object') {
+          setHomeroomLockedByClassId((prev) => ({ ...prev, ...local.homeroomLockedByClassId }));
+        }
         if (local.classTeacherByClassId && typeof local.classTeacherByClassId === 'object') {
           setClassTeacherByClassId((prev) => ({ ...prev, ...local.classTeacherByClassId }));
         }
         if (local.classTeacherSourceByClassId && typeof local.classTeacherSourceByClassId === 'object') {
           setClassTeacherSourceByClassId((prev) => ({ ...prev, ...local.classTeacherSourceByClassId }));
+        }
+        if (local.classTeacherLockedByClassId && typeof local.classTeacherLockedByClassId === 'object') {
+          setClassTeacherLockedByClassId((prev) => ({ ...prev, ...local.classTeacherLockedByClassId }));
         }
         if (local.assignmentSlotMeta && typeof local.assignmentSlotMeta === 'object') {
           setAssignmentSlotMeta((prev) => ({ ...prev, ...local.assignmentSlotMeta }));
@@ -1219,8 +1373,10 @@ export function SchoolOnboardingWizardPage() {
             defaultRoomByClassId,
             assignmentSlotMeta,
             homeroomSourceByClassId,
+            homeroomLockedByClassId,
             classTeacherByClassId,
             classTeacherSourceByClassId,
+            classTeacherLockedByClassId,
           }),
         );
       } catch {
@@ -1228,7 +1384,20 @@ export function SchoolOnboardingWizardPage() {
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [academicLocalAutosaveReady, activeStepIndex, academicAllocRows, classSubjectConfigs, sectionSubjectOverrides, defaultRoomByClassId, assignmentSlotMeta, homeroomSourceByClassId, classTeacherByClassId, classTeacherSourceByClassId]);
+  }, [
+    academicLocalAutosaveReady,
+    activeStepIndex,
+    academicAllocRows,
+    classSubjectConfigs,
+    sectionSubjectOverrides,
+    defaultRoomByClassId,
+    assignmentSlotMeta,
+    homeroomSourceByClassId,
+    homeroomLockedByClassId,
+    classTeacherByClassId,
+    classTeacherSourceByClassId,
+    classTeacherLockedByClassId,
+  ]);
 
   const roleCatalog = useMemo(
     () => [
@@ -1913,7 +2082,11 @@ export function SchoolOnboardingWizardPage() {
             onClick={() =>
               downloadTemplate(
                 'subjects-template.csv',
-                ['name,code,weeklyFrequency', 'Mathematics,MTH,4', 'English,ENG,5'].join('\n') + '\n',
+                [
+                  'name,code,weeklyFrequency,allocationVenueRequirement',
+                  'Mathematics,MTH,4,STANDARD_CLASSROOM',
+                  'Physics,PHY,5,LAB_REQUIRED',
+                ].join('\n') + '\n',
               )
             }
           >
@@ -2185,8 +2358,8 @@ export function SchoolOnboardingWizardPage() {
                 'rooms-template.csv',
                 [
                   'building,floorNumber,floorName,room,type,capacity,labType',
-                  'Block A,1,Ground,101,CLASSROOM,40,',
-                  'Block B,0,Lab Wing,LAB-1,LAB,30,PHYSICS',
+                  'Block A,1,Ground,101,STANDARD_CLASSROOM,40,',
+                  'Block B,0,Lab Wing,LAB-1,SCIENCE_LAB,30,PHYSICS',
                 ].join(
                   '\n',
                 ) + '\n',
@@ -2226,18 +2399,11 @@ export function SchoolOnboardingWizardPage() {
             <label>Type</label>
             <SelectKeeper
               value={roomType}
-              onChange={(v) => setRoomType((v || 'CLASSROOM') as RoomDraft['type'])}
-              options={[
-                { value: 'CLASSROOM', label: 'Classroom' },
-                { value: 'LAB', label: 'Lab' },
-                { value: 'SPORTS_ROOM', label: 'Sports' },
-                { value: 'AUDITORIUM', label: 'Auditorium' },
-                { value: 'LIBRARY', label: 'Library' },
-                { value: 'OTHER', label: 'Other' },
-              ]}
+              onChange={(v) => setRoomType((v || 'STANDARD_CLASSROOM') as RoomDraft['type'])}
+              options={ROOM_TYPES.map((t) => ({ value: t, label: ROOM_TYPE_LABELS[t] }))}
             />
           </div>
-          {roomType === 'LAB' ? (
+          {isSchedulableLabRoomType(roomType) ? (
             <div className="stack" style={{ flex: '1 1 200px' }}>
               <label>Lab type</label>
               <SelectKeeper
@@ -2296,7 +2462,7 @@ export function SchoolOnboardingWizardPage() {
               const floorNumber = roomFloorNumber === '' ? null : roomFloorNumber;
               const floorName = roomFloorName.trim() || null;
               const type = roomType;
-              const labType = type === 'LAB' ? roomLabType : null;
+              const labType = isSchedulableLabRoomType(type) ? roomLabType : null;
               const capacity = roomCapacity === '' ? null : roomCapacity;
 
               const next: RoomDraft[] = [];
@@ -2346,7 +2512,7 @@ export function SchoolOnboardingWizardPage() {
                 floorName: roomFloorName.trim() || null,
                 roomNumber: roomNumber.trim(),
                 type: roomType,
-                labType: roomType === 'LAB' ? roomLabType : null,
+                labType: isSchedulableLabRoomType(roomType) ? roomLabType : null,
                 capacity: roomCapacity === '' ? null : roomCapacity,
               };
               const floorLabel = (r: RoomDraft) => {
@@ -2425,7 +2591,11 @@ export function SchoolOnboardingWizardPage() {
             setRooms((p) =>
               p.map((x, i) => {
                 if (!roomsSelectedKeys[String(i)]) return x;
-                return { ...x, type, labType: type === 'LAB' ? (labType ?? 'OTHER') : null };
+                return {
+                  ...x,
+                  type,
+                  labType: isSchedulableLabRoomType(type) ? (labType ?? 'OTHER') : null,
+                };
               }),
             );
           };
@@ -2471,7 +2641,7 @@ export function SchoolOnboardingWizardPage() {
                   type="button"
                   className="btn secondary"
                   disabled={selectedIdxs.length === 0}
-                  onClick={() => applyBulkType(roomType, roomType === 'LAB' ? roomLabType : null)}
+                  onClick={() => applyBulkType(roomType, isSchedulableLabRoomType(roomType) ? roomLabType : null)}
                 >
                   Set type for selected
                 </button>
@@ -2508,26 +2678,19 @@ export function SchoolOnboardingWizardPage() {
                               <SelectKeeper
                                 value={r.type}
                                 onChange={(v) => {
-                                  const type = (v || 'CLASSROOM') as RoomDraft['type'];
+                                  const type = (v || 'STANDARD_CLASSROOM') as RoomDraft['type'];
                                   setRooms((p) =>
                                     p.map((x, i) =>
-                                      i === idx ? { ...x, type, labType: type === 'LAB' ? (x.labType ?? 'OTHER') : null } : x,
+                                      i === idx
+                                        ? { ...x, type, labType: isSchedulableLabRoomType(type) ? (x.labType ?? 'OTHER') : null }
+                                        : x,
                                     ),
                                   );
                                 }}
-                                options={[
-                                  { value: 'CLASSROOM', label: 'Classroom' },
-                                  { value: 'LAB', label: 'Lab' },
-                                  { value: 'LIBRARY', label: 'Library' },
-                                  { value: 'AUDITORIUM', label: 'Auditorium' },
-                                  { value: 'SPORTS_ROOM', label: 'Sports room' },
-                                  { value: 'STAFF_ROOM', label: 'Staff room' },
-                                  { value: 'OFFICE', label: 'Office' },
-                                  { value: 'OTHER', label: 'Other' },
-                                ]}
+                                options={ROOM_TYPES.map((t) => ({ value: t, label: ROOM_TYPE_LABELS[t] }))}
                               />
                             </div>
-                            {r.type === 'LAB' ? (
+                            {isSchedulableLabRoomType(r.type) ? (
                               <div style={{ width: 190 }}>
                                 <SelectKeeper
                                   value={r.labType ?? 'OTHER'}
@@ -2644,12 +2807,20 @@ export function SchoolOnboardingWizardPage() {
           assignmentMeta={assignmentSlotMeta}
           setAssignmentMeta={setAssignmentSlotMeta}
           saveSuccess={academicSaveSuccess}
+          clearHomeroomDraft={clearHomeroomDraft}
+          clearAutoAssignedClassTeachers={clearAutoAssignedClassTeachers}
+          clearAllClassTeacherAssignments={clearAllClassTeacherAssignments}
           clearAutoHomeroomAssignments={clearAutoHomeroomAssignments}
           patchSectionHomeroom={patchSectionHomeroom}
           homeroomSourceByClassId={homeroomSourceByClassId}
+          homeroomLockedByClassId={homeroomLockedByClassId}
+          patchHomeroomLock={patchHomeroomLock}
+          homeroomSelectOptions={classDefaultRoomSelectOptions}
           classTeacherByClassId={classTeacherByClassId}
           classTeacherSourceByClassId={classTeacherSourceByClassId}
+          classTeacherLockedByClassId={classTeacherLockedByClassId}
           patchSectionClassTeacher={patchSectionClassTeacher}
+          patchClassTeacherLock={patchClassTeacherLock}
           autoAssignClassTeachers={autoAssignClassTeachers}
         />
       ) : null}
@@ -3768,6 +3939,7 @@ export function SchoolOnboardingWizardPage() {
 
       {activeStepIndex === idxOf.TIMETABLE ? (
         <Step7TimetableWorkspace
+          autoGenerateSlotsFromOnboardingOnMount
           onAutoGenerateDraft={() => autoGenTimetable.mutateAsync()}
           autoGeneratePending={autoGenTimetable.isPending}
           autoGenerateErrorText={autoGenTimetable.isError ? formatApiError(autoGenTimetable.error) : null}

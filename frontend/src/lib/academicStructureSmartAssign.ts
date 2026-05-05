@@ -15,10 +15,6 @@ export type AssignmentSlotMeta = {
   locked: boolean;
   /** Present when source='conflict'. */
   conflictReason?: 'NO_ELIGIBLE_TEACHER' | 'CAPACITY_OVERFLOW' | 'UNKNOWN';
-  /** Room assignment provenance for Smart Assignment UX / bulk homeroom automation. */
-  roomSource?: 'auto' | 'manual';
-  /** When true, bulk homeroom automation does not reset this slot's room metadata (manual commitment). */
-  roomLocked?: boolean;
 };
 
 export function slotKey(classGroupId: number, subjectId: number) {
@@ -184,12 +180,12 @@ function cloneMeta(m: Record<string, AssignmentSlotMeta>): Record<string, Assign
   return o;
 }
 
-/** Merge teacher-assignment meta updates without dropping room provenance fields. */
+/** Merge teacher-assignment meta updates (teacher lock / source / conflict). */
 export function mergeAssignmentSlotMeta(prev: AssignmentSlotMeta | undefined, next: AssignmentSlotMeta): AssignmentSlotMeta {
   return {
-    ...next,
-    roomSource: next.roomSource ?? prev?.roomSource,
-    roomLocked: next.roomLocked ?? prev?.roomLocked,
+    source: next.source ?? prev?.source ?? 'auto',
+    locked: next.locked ?? prev?.locked ?? false,
+    conflictReason: next.conflictReason ?? prev?.conflictReason,
   };
 }
 
@@ -252,7 +248,7 @@ export function patchSectionSubjectOverrideTeacher(
         subjectId,
         periodsPerWeek: prev?.periodsPerWeek ?? null,
         teacherId,
-        roomId: prev?.roomId ?? null,
+        roomId: null,
       },
     ],
   };
@@ -292,7 +288,7 @@ export function applySectionTeacher(
         subjectId,
         periodsPerWeek: prev?.periodsPerWeek ?? null,
         teacherId,
-        roomId: prev?.roomId ?? null,
+        roomId: null,
       },
     ],
   };
@@ -405,15 +401,11 @@ export function runSmartTeacherAssignment(
         const k = slotKey(c.classGroupId, c.subjectId);
         const mk = meta[k];
         const lk = mk?.locked ?? false;
-        const rs = mk?.roomSource;
-        const rl = mk?.roomLocked;
         delete meta[k];
-        if (lk || rs || rl) {
+        if (lk) {
           meta[k] = mergeAssignmentSlotMeta(undefined, {
             source: 'manual',
             locked: lk,
-            roomSource: rs,
-            roomLocked: rl,
           });
         }
       }

@@ -15,6 +15,13 @@ public record OnboardingSubjectCreateDTO(
          * Structure. These fields are accepted for backwards compatibility but are not required.</p>
          */
         @Nullable String type,
-        @NotNull @Positive Integer weeklyFrequency
+        @NotNull @Positive Integer weeklyFrequency,
+        /**
+         * Optional; values like STANDARD_CLASSROOM, LAB_REQUIRED, ACTIVITY_SPACE, SPORTS_AREA, SPECIALIZED_ROOM, FLEXIBLE.
+         * Blank or omitted defaults to STANDARD_CLASSROOM on the server.
+         */
+        @Nullable String allocationVenueRequirement,
+        /** Optional; {@link com.myhaimi.sms.entity.RoomType} name when requirement is SPECIALIZED_ROOM. */
+        @Nullable String specializedVenueType
 ) {}
 

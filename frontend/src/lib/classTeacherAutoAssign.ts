@@ -30,6 +30,8 @@ export function runAutoAssignClassTeachers(args: {
   effectiveAllocRows: AcademicAllocRow[];
   classTeacherByClassGroupId: Readonly<Record<number, string | undefined>>;
   classTeacherSourceByClassGroupId: Readonly<Record<number, ClassTeacherSource | undefined>>;
+  /** When true, bulk automation does not change that section's class teacher. */
+  classTeacherLockedByClassGroupId?: Readonly<Record<number, boolean>> | null;
   /** Passed for forward-compat with school rhythm; scorer currently uses allocations only. */
   schoolSlotsPerWeek?: number | null;
 }): {
@@ -52,9 +54,13 @@ export function runAutoAssignClassTeachers(args: {
     nextSource[k] = args.classTeacherSourceByClassGroupId[k] ?? '';
   }
 
-  const skippedLockedManual = classGroups.filter(
-    (cg) => (args.classTeacherSourceByClassGroupId[cg.classGroupId] ?? '') === 'manual',
-  ).length;
+  const ctLocked = args.classTeacherLockedByClassGroupId ?? null;
+  const skippedBulkLocked = classGroups.filter((cg) => {
+    const id = cg.classGroupId;
+    const manual = (args.classTeacherSourceByClassGroupId[id] ?? '') === 'manual';
+    const locked = ctLocked?.[id] === true;
+    return manual || locked;
+  }).length;
 
   const gradeByCg = new Map<number, number | null>();
   for (const cg of classGroups) gradeByCg.set(cg.classGroupId, cg.gradeLevel);
@@ -107,11 +113,14 @@ export function runAutoAssignClassTeachers(args: {
 
   type Context = { maxPeriods: number; maxSubjects: number; alreadyClassTeacherElsewhere: Set<number> };
 
-  /** Existing manual class teachers constrain uniqueness scoring for auto rows. */
+  /** Existing manual or class-teacher-locked sections constrain uniqueness scoring for auto rows. */
   const lockedStaff = new Set<number>();
   for (const cg of classGroups) {
-    if (nextSource[cg.classGroupId] !== 'manual') continue;
-    const raw = nextTeachers[cg.classGroupId] ?? '';
+    const id = cg.classGroupId;
+    const manual = nextSource[id] === 'manual';
+    const sectionLocked = ctLocked?.[id] === true;
+    if (!manual && !sectionLocked) continue;
+    const raw = nextTeachers[id] ?? '';
     const tid = raw && String(raw).trim() !== '' ? Number(raw) : NaN;
     if (Number.isFinite(tid)) lockedStaff.add(tid);
   }
@@ -126,6 +135,7 @@ export function runAutoAssignClassTeachers(args: {
     if (cg.gradeLevel == null) continue;
     const cgId = cg.classGroupId;
     if (nextSource[cgId] === 'manual') continue;
+    if (ctLocked?.[cgId] === true) continue;
     const scores = bySectionTeacher.get(cgId);
     if (!scores || scores.size === 0) {
       jobs.push({ cgId, scores: new Map() });
@@ -212,7 +222,7 @@ export function runAutoAssignClassTeachers(args: {
       assigned,
       uniqueAssignments,
       sharedAssignments,
-      skippedLocked: skippedLockedManual,
+      skippedLocked: skippedBulkLocked,
       skippedNoEligibleTeacher,
     },
   };

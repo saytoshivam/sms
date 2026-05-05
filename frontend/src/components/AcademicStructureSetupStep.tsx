@@ -15,6 +15,11 @@ import {
 import { sectionMissingClassTeacher } from '../lib/classTeacherAutoAssign';
 import type { AssignmentSlotMeta } from '../lib/academicStructureSmartAssign';
 import { SmartTeacherAssignmentBlock, TeacherLoadDashboard } from './SmartTeacherAssignmentBlock';
+import {
+  AssignmentSourceBadge,
+  ProvenanceBadgeGroup,
+  SectionBulkLockBadge,
+} from './AssignmentProvenanceBadges';
 import { WeeklyCapacitySummary } from './WeeklyCapacitySummary';
 
 export type { AcademicAllocRow };
@@ -128,12 +133,21 @@ type Props = {
   formatError: (e: unknown) => string;
   assignmentMeta: Record<string, AssignmentSlotMeta>;
   setAssignmentMeta: React.Dispatch<React.SetStateAction<Record<string, AssignmentSlotMeta>>>;
+  clearHomeroomDraft: () => void;
+  clearAutoAssignedClassTeachers: () => void;
+  clearAllClassTeacherAssignments: () => void;
   clearAutoHomeroomAssignments: () => void;
   patchSectionHomeroom: (classGroupId: number, value: string) => void;
   homeroomSourceByClassId: Record<number, 'auto' | 'manual' | ''>;
+  homeroomLockedByClassId: Record<number, boolean>;
+  patchHomeroomLock: (classGroupId: number, locked: boolean) => void;
+  /** Room picker options for Smart Assignment homeroom controls (same list as Overview default room). */
+  homeroomSelectOptions: { value: string; label: string }[];
   classTeacherByClassId: Record<number, string>;
   classTeacherSourceByClassId: Record<number, 'auto' | 'manual' | ''>;
+  classTeacherLockedByClassId: Record<number, boolean>;
   patchSectionClassTeacher: (classGroupId: number, staffIdValue: string) => void;
+  patchClassTeacherLock: (classGroupId: number, locked: boolean) => void;
   autoAssignClassTeachers: () => void;
 };
 
@@ -166,12 +180,20 @@ export function AcademicStructureSetupStep({
   formatError,
   assignmentMeta,
   setAssignmentMeta,
+  clearHomeroomDraft,
+  clearAutoAssignedClassTeachers,
+  clearAllClassTeacherAssignments,
   clearAutoHomeroomAssignments,
   patchSectionHomeroom,
   homeroomSourceByClassId,
+  homeroomLockedByClassId,
+  patchHomeroomLock,
+  homeroomSelectOptions,
   classTeacherByClassId,
   classTeacherSourceByClassId,
+  classTeacherLockedByClassId,
   patchSectionClassTeacher,
+  patchClassTeacherLock,
   autoAssignClassTeachers,
   stepTitle: _stepTitle = 'Step 6 — Academic structure',
   initialTab,
@@ -203,10 +225,11 @@ export function AcademicStructureSetupStep({
         return a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true });
       });
     return [
-      { value: '', label: '🏠 Homeroom' },
+      { value: '', label: 'No room assigned' },
       ...list.map((r) => ({
         value: String(r.id),
         label: `${String(r.buildingName ?? r.building ?? '').trim()} ${r.roomNumber}${r.type ? ` · ${r.type}` : ''}`.trim(),
+        roomType: r.type != null ? String(r.type) : null,
       })),
     ];
   }, [rooms]);
@@ -274,7 +297,8 @@ export function AcademicStructureSetupStep({
   useEffect(() => {
     if (!classSubjectConfigs?.length) return;
     setAllocRows((prev) => {
-      const effective = buildEffectiveAllocRows(classGroups, classSubjectConfigs, sectionSubjectOverrides);
+      const hm = homeroomMapFromDraft(classGroups, defaultRoomByClassId);
+      const effective = buildEffectiveAllocRows(classGroups, classSubjectConfigs, sectionSubjectOverrides, hm);
       const gradesWithAnyTemplate = new Set(classSubjectConfigs.map((c) => Number(c.gradeLevel)));
 
       const merged = [...effective];
@@ -295,8 +319,7 @@ export function AcademicStructureSetupStep({
       }
       return merged;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classGroups, classSubjectConfigs, sectionSubjectOverrides]);
+  }, [classGroups, classSubjectConfigs, sectionSubjectOverrides, defaultRoomByClassId]);
 
   // If a subject is deleted from the catalog, drop stale mappings — only when catalog *membership* changes.
   // Do not key off `validSubjectIdSet` (new Set every render while `subjects` is `data ?? []`) — that wiped all templates.
@@ -1554,7 +1577,9 @@ export function AcademicStructureSetupStep({
               style={{ margin: 0, fontSize: 11, opacity: 0.82, lineHeight: 1.45 }}
               title="Auto-assign teachers by subject skill and balanced workload. The same teacher is preferred across sections in a class. Lock keeps a row out of rebalance."
             >
-              Balance workload by skill; prefer one teacher per class across sections. Locked rows skip rebalance.
+              Balance workload by skill; prefer one teacher per class across sections. Locked rows skip rebalance.{' '}
+              <strong>Auto assign teachers</strong> fills teachers only. Each section has one <strong>homeroom</strong> in the section
+              header below; subject rows list teachers and load only.
             </p>
             {!mappingComplete ? (
               <div className="sms-alert sms-alert--warning">
@@ -1566,7 +1591,7 @@ export function AcademicStructureSetupStep({
             ) : null}
             {classDefaultRoomHasConflicts ? (
               <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c' }}>Homeroom conflict: two classes share a room</span>
+                <span style={{ fontSize: 12, fontWeight: 900, color: '#b91c1c' }}>Assigned room conflict: two sections share a room</span>
               </div>
             ) : null}
             <SmartTeacherAssignmentBlock
@@ -1584,10 +1609,22 @@ export function AcademicStructureSetupStep({
               filters={{ grade: smartGradeFilter, subject: smartSubjectFilter, teacher: smartTeacherFilter }}
               showBulkActions
               autoAssignHomerooms={autoAssignDefaultRooms}
+              clearHomeroomDraft={clearHomeroomDraft}
+              clearAutoAssignedClassTeachers={clearAutoAssignedClassTeachers}
+              clearAllClassTeacherAssignments={clearAllClassTeacherAssignments}
               clearAutoHomeroomAssignments={clearAutoHomeroomAssignments}
               autoAssignClassTeachers={autoAssignClassTeachers}
               defaultRoomByClassId={defaultRoomByClassId}
               homeroomSourceByClassId={homeroomSourceByClassId}
+              homeroomLockedByClassId={homeroomLockedByClassId}
+              patchHomeroomLock={patchHomeroomLock}
+              patchSectionHomeroom={patchSectionHomeroom}
+              homeroomSelectOptions={homeroomSelectOptions}
+              classTeacherByClassId={classTeacherByClassId}
+              classTeacherSourceByClassId={classTeacherSourceByClassId}
+              classTeacherLockedByClassId={classTeacherLockedByClassId}
+              patchSectionClassTeacher={patchSectionClassTeacher}
+              patchClassTeacherLock={patchClassTeacherLock}
               slotsPerWeek={slotsPerWeek}
               overviewContext={{
                 slotsPerWeek,
@@ -1620,7 +1657,7 @@ export function AcademicStructureSetupStep({
           <div className="stack card" style={{ gap: 10, padding: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 12 }}>
             <div style={{ fontWeight: 900, fontSize: 15 }}>Sections overview</div>
             <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Homerooms, weekly periods, readiness, and class teachers are managed here. Use Configure section to override one section.
+              Assigned rooms, weekly periods, readiness, and class teachers are managed here. Use Configure section to override one section.
             </p>
             {missingClassTeacherSections.length > 0 ? (
               <div className="sms-alert sms-alert--warning">
@@ -1655,7 +1692,7 @@ export function AcademicStructureSetupStep({
                   <tr>
                     <th>Section</th>
                     <th>Class teacher</th>
-                    <th>Homeroom</th>
+                    <th>Assigned room</th>
                     <th>Subjects on</th>
                     <th>Periods / week</th>
                     <th>Status</th>
@@ -1707,48 +1744,76 @@ export function AcademicStructureSetupStep({
                           </div>
                         </td>
                         <td style={{ minWidth: 220 }}>
-                          <SelectKeeper
-                            id={`ov-ct-${row.classGroupId}`}
-                            value={classTeacherByClassId[row.classGroupId] ?? ''}
-                            onChange={(nv) => patchSectionClassTeacher(row.classGroupId, nv)}
-                            options={classTeacherStaffOptions}
-                          />
+                          <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <div style={{ flex: '1 1 160px', minWidth: 120 }}>
+                              <SelectKeeper
+                                id={`ov-ct-${row.classGroupId}`}
+                                value={classTeacherByClassId[row.classGroupId] ?? ''}
+                                onChange={(nv) => patchSectionClassTeacher(row.classGroupId, nv)}
+                                options={classTeacherStaffOptions}
+                                disabled={classTeacherLockedByClassId[row.classGroupId] === true}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              style={{ fontSize: 11, padding: '4px 10px', borderRadius: 999, flex: '0 0 auto' }}
+                              onClick={() => patchClassTeacherLock(row.classGroupId, !classTeacherLockedByClassId[row.classGroupId])}
+                              title={
+                                classTeacherLockedByClassId[row.classGroupId]
+                                  ? 'Unlock class teacher'
+                                  : 'Lock class teacher (bulk auto-assign skips this section)'
+                              }
+                            >
+                              {classTeacherLockedByClassId[row.classGroupId] ? 'Unlock' : 'Lock'}
+                            </button>
+                          </div>
                           <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                            {((classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto' ||
-                              (classTeacherSourceByClassId[row.classGroupId] ?? '') === 'manual') &&
-                            (classTeacherByClassId[row.classGroupId] ?? '').trim() !== '' ? (
-                              <span
-                                style={{
-                                  display: 'inline-block',
-                                  padding: '2px 7px',
-                                  borderRadius: 6,
-                                  fontSize: 10,
-                                  fontWeight: 900,
-                                  letterSpacing: 0.4,
-                                  background:
-                                    (classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto'
-                                      ? 'rgba(234, 88, 12, 0.18)'
-                                      : 'rgba(100, 116, 139, 0.16)',
-                                  color: (classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto' ? '#9a3412' : '#475569',
-                                }}
-                              >
-                                {(classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto' ? 'AUTO' : 'MANUAL'}
-                              </span>
-                            ) : null}
+                            <ProvenanceBadgeGroup>
+                              {((classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto' ||
+                                (classTeacherSourceByClassId[row.classGroupId] ?? '') === 'manual') &&
+                              (classTeacherByClassId[row.classGroupId] ?? '').trim() !== '' ? (
+                                <AssignmentSourceBadge
+                                  variant={
+                                    (classTeacherSourceByClassId[row.classGroupId] ?? '') === 'auto' ? 'auto' : 'manual'
+                                  }
+                                />
+                              ) : null}
+                              {classTeacherLockedByClassId[row.classGroupId] ? (
+                                <SectionBulkLockBadge kind="classTeacher" />
+                              ) : null}
+                            </ProvenanceBadgeGroup>
                             {sectionMissingClassTeacher(row.classGroupId, effectiveAllocForCt, classTeacherByClassId) ? (
                               <span style={{ fontSize: 11, fontWeight: 800, color: '#b45309' }}>Missing</span>
                             ) : null}
                           </div>
                         </td>
                         <td style={{ minWidth: 260 }}>
-                          <SelectKeeper
-                            id={`ov-room-${row.classGroupId}`}
-                            value={v}
-                            onChange={(nv) => patchSectionHomeroom(row.classGroupId, nv)}
-                            options={classDefaultRoomSelectOptions}
-                          />
+                          <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <div style={{ flex: '1 1 200px', minWidth: 140 }}>
+                              <SelectKeeper
+                                id={`ov-room-${row.classGroupId}`}
+                                value={v}
+                                onChange={(nv) => patchSectionHomeroom(row.classGroupId, nv)}
+                                options={classDefaultRoomSelectOptions}
+                              />
+                            </div>
+                            <ProvenanceBadgeGroup>
+                              {v && ((homeroomSourceByClassId[row.classGroupId] ?? '') === 'auto' ||
+                                (homeroomSourceByClassId[row.classGroupId] ?? '') === 'manual') ? (
+                                <AssignmentSourceBadge
+                                  variant={
+                                    (homeroomSourceByClassId[row.classGroupId] ?? '') === 'auto' ? 'auto' : 'manual'
+                                  }
+                                />
+                              ) : null}
+                              {homeroomLockedByClassId[row.classGroupId] ? (
+                                <SectionBulkLockBadge kind="homeroom" />
+                              ) : null}
+                            </ProvenanceBadgeGroup>
+                          </div>
                           {conflict ? (
-                            <div style={{ color: '#b91c1c', fontSize: 11, fontWeight: 800 }}>Duplicate homeroom</div>
+                            <div style={{ color: '#b91c1c', fontSize: 11, fontWeight: 800 }}>Duplicate assigned room</div>
                           ) : null}
                         </td>
                         <td>
@@ -1906,10 +1971,13 @@ export function AcademicStructureSetupStep({
                         setClassSubjectConfigs((p) =>
                           p.map((c) => (Number(c.gradeLevel) === Number(editingGrade) ? { ...c, defaultRoomId: null } : c)),
                         );
-                        toast.info('Cleared', 'Room set to class default (homeroom) for all template rows.');
+                        toast.info(
+                          'Cleared',
+                          'Template default rooms cleared. Subjects inherit each section’s assigned room once the section has one.',
+                        );
                       }}
                     >
-                      Use homeroom for all
+                      Clear template room defaults
                     </button>
                   </div>
                   <div style={{ overflowX: 'auto' }}>
@@ -2061,7 +2129,7 @@ export function AcademicStructureSetupStep({
                     </div>
                   </div>
                   <div className="stack" style={{ flex: '1 1 280px' }}>
-                    <label style={{ fontSize: 12, fontWeight: 800 }}>Default room (homeroom)</label>
+                    <label style={{ fontSize: 12, fontWeight: 800 }}>Assigned room (section)</label>
                     <SelectKeeper
                       id={`edit-homeroom-${editingClassId}`}
                       value={homeroomVal}
@@ -2210,10 +2278,10 @@ export function AcademicStructureSetupStep({
                   setAllocRows((p) =>
                     p.map((r) => (r.classGroupId === editingClassId ? { ...r, roomId: null } : r)),
                   );
-                  toast.info('Cleared', 'Room override removed — using homeroom where applicable.');
+                  toast.info('Cleared', 'Subject room overrides removed for this section where applicable.');
                 }}
               >
-                Use homeroom for all
+                Clear subject room overrides
               </button>
             </div>
             <div style={{ overflowX: 'auto' }}>

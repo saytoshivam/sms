@@ -36,7 +36,7 @@ export function ConflictsPanel({ freshEntries, onRegenerate, onAutoFix }: Props)
   // Draft version is needed to fetch entries; cheap & idempotent.
   const draft = useQuery({
     queryKey: ['ttv2-draft-version'],
-    queryFn: async () => (await api.post<Version>('/api/v2/timetable/versions/draft')).data,
+    queryFn: async () => (await api.post<Version>('/api/v2/timetable/versions/workspace')).data,
   });
 
   const versionId = draft.data?.id ?? null;

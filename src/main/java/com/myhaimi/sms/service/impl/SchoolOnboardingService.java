@@ -43,6 +43,8 @@ import com.myhaimi.sms.DTO.timetable.v2.AutoFillResultDTO;
 import com.myhaimi.sms.DTO.timetable.v2.TimetableVersionViewDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentCreateDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentsSetupResultDTO;
+import com.myhaimi.sms.academic.RoomTypeParsing;
+import com.myhaimi.sms.academic.SubjectAllocationVenueParsing;
 import com.myhaimi.sms.entity.ClassGroup;
 import com.myhaimi.sms.entity.Building;
 import com.myhaimi.sms.entity.Floor;
@@ -51,6 +53,7 @@ import com.myhaimi.sms.entity.OnboardingStatus;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.entity.AttendanceMode;
 import com.myhaimi.sms.entity.Subject;
+import com.myhaimi.sms.entity.SubjectAllocationVenueRequirement;
 import com.myhaimi.sms.entity.SubjectClassMapping;
 import com.myhaimi.sms.entity.SubjectClassGroup;
 import com.myhaimi.sms.entity.SubjectSectionOverride;
@@ -313,6 +316,25 @@ public class SchoolOnboardingService {
         return new OnboardingClassesSetupResultDTO(createdCodes.size(), createdCodes, skipped);
     }
 
+    private static void applyOnboardingSubjectVenue(Subject s, OnboardingSubjectCreateDTO dto) {
+        var req = SubjectAllocationVenueParsing.parseRequirement(dto.allocationVenueRequirement());
+        s.setAllocationVenueRequirement(req);
+        if (req != SubjectAllocationVenueRequirement.SPECIALIZED_ROOM) {
+            s.setSpecializedVenueType(null);
+            return;
+        }
+        String sv = dto.specializedVenueType() == null ? "" : dto.specializedVenueType().trim();
+        if (sv.isEmpty()) {
+            s.setSpecializedVenueType(null);
+            return;
+        }
+        try {
+            s.setSpecializedVenueType(RoomType.valueOf(sv.toUpperCase()));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid specializedVenueType for subject " + s.getCode() + ": " + sv);
+        }
+    }
+
     @Transactional
     public OnboardingSubjectsSetupResultDTO createSubjects(List<OnboardingSubjectCreateDTO> dtos) {
         Integer schoolId = requireSchoolId();
@@ -362,6 +384,7 @@ public class SchoolOnboardingService {
                 existing.setName(name);
                 existing.setType(type);
                 existing.setWeeklyFrequency(weekly);
+                applyOnboardingSubjectVenue(existing, dto);
                 existing.setUpdatedBy(actor);
                 subjectRepo.save(existing);
                 created += 1;
@@ -384,6 +407,7 @@ public class SchoolOnboardingService {
                 throw new IllegalArgumentException("weeklyFrequency is required and must be positive for subject " + code);
             }
             s.setWeeklyFrequency(weekly);
+            applyOnboardingSubjectVenue(s, dto);
             s.setCreatedBy(actor);
             s.setUpdatedBy(actor);
             subjectRepo.save(s);
@@ -626,17 +650,23 @@ public class SchoolOnboardingService {
             r.setBuildingRef(b);
             r.setFloorRef(f);
             r.setRoomNumber(roomNumber);
-            RoomType type;
-            try {
-                type = RoomType.valueOf((dto.type() == null ? "CLASSROOM" : dto.type().trim().toUpperCase()));
-            } catch (Exception e) {
-                throw new IllegalArgumentException("Invalid room type: " + dto.type());
-            }
-            r.setType(type);
-            if (type == RoomType.LAB && dto.labType() != null && !dto.labType().isBlank()) {
+            LabType labParsed = null;
+            if (dto.labType() != null && !dto.labType().isBlank()) {
                 try {
-                    r.setLabType(LabType.valueOf(dto.labType().trim().toUpperCase()));
+                    labParsed = LabType.valueOf(dto.labType().trim().toUpperCase());
                 } catch (Exception ignored) {
+                    labParsed = LabType.OTHER;
+                }
+            }
+            String typeRaw = dto.type() == null ? "CLASSROOM" : dto.type().trim();
+            RoomType type = RoomTypeParsing.parseRoomType(typeRaw, labParsed);
+            r.setType(type);
+            if (type == RoomType.SCIENCE_LAB || type == RoomType.COMPUTER_LAB) {
+                if (labParsed != null) {
+                    r.setLabType(labParsed);
+                } else if (type == RoomType.COMPUTER_LAB) {
+                    r.setLabType(LabType.COMPUTER);
+                } else {
                     r.setLabType(LabType.OTHER);
                 }
             } else {
@@ -725,9 +755,13 @@ public class SchoolOnboardingService {
             ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(it.classGroupId(), schoolId).orElseThrow();
             if (it.roomId() == null) {
                 cg.setDefaultRoom(null);
+                cg.setHomeroomSource(null);
             } else {
                 Room r = roomRepo.findByIdAndSchool_Id(it.roomId(), schoolId).orElseThrow();
                 cg.setDefaultRoom(r);
+                if (it.homeroomSource() != null) {
+                    cg.setHomeroomSource(normalizeAssignmentSource(it.homeroomSource()));
+                }
             }
             classGroupRepo.save(cg);
         }
@@ -1336,7 +1370,11 @@ public class SchoolOnboardingService {
                         cg.getGradeLevel(),
                         cg.getSection(),
                         cg.getDefaultRoomId(),
-                        cg.getClassTeacherStaffId()))
+                        cg.getClassTeacherStaffId(),
+                        cg.isHomeroomLocked(),
+                        cg.getHomeroomSource(),
+                        cg.getClassTeacherSource(),
+                        cg.isClassTeacherLocked()))
                 .toList();
 
         List<OnboardingAcademicAllocationItemDTO> aRows = subjectAllocationRepo.findBySchool_Id(schoolId).stream()
@@ -1451,7 +1489,7 @@ public class SchoolOnboardingService {
             if (body.sectionSubjectOverrides() != null) {
                 for (OnboardingSectionSubjectOverrideDTO row : body.sectionSubjectOverrides()) {
                     if (row == null) continue;
-                    if (row.periodsPerWeek() == null && row.teacherId() == null && row.roomId() == null) continue;
+                    if (row.periodsPerWeek() == null && row.teacherId() == null) continue;
                     // periodsPerWeek = 0 is allowed and means "disabled for this section" (used by Step 6 mapping UX).
                     if (row.periodsPerWeek() != null && row.periodsPerWeek() < 0) {
                         throw new IllegalArgumentException("periodsPerWeek must be >= 0 when provided");
@@ -1462,14 +1500,12 @@ public class SchoolOnboardingService {
                             .orElseThrow(() -> new IllegalArgumentException("Unknown subject id for this school: " + row.subjectId()));
                     Staff stf = row.teacherId() == null ? null :
                             staffRepo.findByIdAndSchool_Id(row.teacherId(), schoolId).orElseThrow();
-                    Room rm = row.roomId() == null ? null :
-                            roomRepo.findByIdAndSchool_Id(row.roomId(), schoolId).orElseThrow();
                     SubjectSectionOverride o = new SubjectSectionOverride();
                     o.setClassGroup(cg);
                     o.setSubject(sub);
                     o.setPeriodsPerWeek(row.periodsPerWeek());
                     o.setStaff(stf);
-                    o.setRoom(rm);
+                    o.setRoom(null);
                     subjectSectionOverrideRepo.save(o);
                 }
             }
@@ -1488,9 +1524,17 @@ public class SchoolOnboardingService {
                 ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(it.classGroupId(), schoolId).orElseThrow();
                 if (it.roomId() == null) {
                     cg.setDefaultRoom(null);
+                    cg.setHomeroomLocked(false);
+                    cg.setHomeroomSource(null);
                 } else {
                     Room r = roomRepo.findByIdAndSchool_Id(it.roomId(), schoolId).orElseThrow();
                     cg.setDefaultRoom(r);
+                    if (it.homeroomLocked() != null) {
+                        cg.setHomeroomLocked(it.homeroomLocked());
+                    }
+                    if (it.homeroomSource() != null) {
+                        cg.setHomeroomSource(normalizeAssignmentSource(it.homeroomSource()));
+                    }
                 }
                 classGroupRepo.save(cg);
             }
@@ -1502,9 +1546,17 @@ public class SchoolOnboardingService {
                 ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(it.classGroupId(), schoolId).orElseThrow();
                 if (it.staffId() == null) {
                     cg.setClassTeacher(null);
+                    cg.setClassTeacherSource(null);
+                    cg.setClassTeacherLocked(false);
                 } else {
                     Staff st = staffRepo.findByIdAndSchool_Id(it.staffId(), schoolId).orElseThrow();
                     cg.setClassTeacher(st);
+                    if (it.classTeacherLocked() != null) {
+                        cg.setClassTeacherLocked(it.classTeacherLocked());
+                    }
+                    if (it.classTeacherSource() != null) {
+                        cg.setClassTeacherSource(normalizeAssignmentSource(it.classTeacherSource()));
+                    }
                 }
                 classGroupRepo.save(cg);
             }
@@ -1577,7 +1629,15 @@ public class SchoolOnboardingService {
         TimetableVersionViewDTO ver = timetableGridV2Service.ensureDraftVersion();
         java.util.List<ClassGroup> classGroups = classGroupRepo.findAllBySchool_IdAndIsDeletedFalseOrderByGradeLevelAscCodeAsc(schoolId);
         java.util.List<OnboardingTimetableClassAutoFillItemDTO> out = new java.util.ArrayList<>();
+        int totalPlaced = 0;
+        int totalRequired = 0;
         for (ClassGroup cg : classGroups) {
+            java.util.List<SubjectAllocation> allocs =
+                    subjectAllocationRepo.findBySchool_IdAndClassGroup_Id(schoolId, cg.getId());
+            for (SubjectAllocation a : allocs) {
+                int f = a.getWeeklyFrequency() == null ? 0 : a.getWeeklyFrequency();
+                totalRequired += Math.max(0, f);
+            }
             AutoFillResultDTO r;
             try {
                 r = timetableGridV2Service.autoFill(
@@ -1586,10 +1646,12 @@ public class SchoolOnboardingService {
                 String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                 r = new AutoFillResultDTO(0, 0, 0, 0, java.util.List.of("Auto-fill failed: " + msg));
             }
+            totalPlaced += r.placedCount();
             out.add(new OnboardingTimetableClassAutoFillItemDTO(cg.getId(), cg.getCode(), r));
         }
         List<String> demandWarnings = buildTeacherDemandWarnings();
-        return new OnboardingTimetableAutoGenerateViewDTO(ver.id(), ver.status(), ver.version(), out, demandWarnings);
+        return new OnboardingTimetableAutoGenerateViewDTO(
+                ver.id(), ver.status(), ver.version(), out, demandWarnings, totalPlaced, totalRequired);
     }
 
     @Transactional
@@ -1657,12 +1719,7 @@ public class SchoolOnboardingService {
             a.setSubject(sub);
             a.setStaff(stf);
             a.setWeeklyFrequency(row.weeklyFrequency());
-            if (row.roomId() != null) {
-                Room rm = roomRepo.findByIdAndSchool_Id(row.roomId(), schoolId).orElseThrow();
-                a.setRoom(rm);
-            } else {
-                a.setRoom(null);
-            }
+            a.setRoom(cg.getDefaultRoom());
             subjectAllocationRepo.save(a);
         }
     }
@@ -1692,7 +1749,7 @@ public class SchoolOnboardingService {
                 Integer weekly = o != null && o.getPeriodsPerWeek() != null ? o.getPeriodsPerWeek() : c.getDefaultPeriodsPerWeek();
                 if (weekly == null || weekly <= 0) continue;
                 Staff staff = o != null && o.getStaff() != null ? o.getStaff() : c.getStaff();
-                Room room = o != null && o.getRoom() != null ? o.getRoom() : c.getRoom();
+                Room room = cg.getDefaultRoom();
 
                 SubjectAllocation a = new SubjectAllocation();
                 a.setSchool(school);
@@ -1839,6 +1896,24 @@ public class SchoolOnboardingService {
         } catch (Exception e) {
             throw new IllegalStateException("Could not read onboarding basic info");
         }
+    }
+
+    /** Normalizes client payloads to lowercase {@code auto} / {@code manual}; blank becomes null. */
+    private static String normalizeAssignmentSource(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        if (s.isEmpty()) {
+            return null;
+        }
+        if ("auto".equals(s)) {
+            return "auto";
+        }
+        if ("manual".equals(s)) {
+            return "manual";
+        }
+        throw new IllegalArgumentException("Assignment source must be 'auto' or 'manual'");
     }
 
     private void markCompleted(School s, OnboardingStatus step) {

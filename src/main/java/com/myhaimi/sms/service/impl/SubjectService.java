@@ -1,7 +1,10 @@
 package com.myhaimi.sms.service.impl;
 
+import com.myhaimi.sms.academic.SubjectAllocationVenueParsing;
+import com.myhaimi.sms.entity.RoomType;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.entity.Subject;
+import com.myhaimi.sms.entity.SubjectAllocationVenueRequirement;
 import com.myhaimi.sms.DTO.SubjectDeleteInfoDTO;
 import com.myhaimi.sms.DTO.SubjectUpdateDTO;
 import com.myhaimi.sms.repository.ClassGroupRepo;
@@ -79,6 +82,9 @@ public class SubjectService {
         School school = schoolRepo.findById(schoolId).orElseThrow();
         subject.setId(null);
         subject.setSchool(school);
+        if (subject.getAllocationVenueRequirement() == null) {
+            subject.setAllocationVenueRequirement(SubjectAllocationVenueRequirement.STANDARD_CLASSROOM);
+        }
         String actor = actorEmailOrSystem();
         subject.setCreatedBy(actor);
         subject.setUpdatedBy(actor);
@@ -117,6 +123,22 @@ public class SubjectService {
         if (wf != null) {
             if (wf <= 0) throw new IllegalArgumentException("weeklyFrequency must be positive.");
             subj.setWeeklyFrequency(wf);
+        }
+        // Null/blank/invalid in the DTO means standard classroom (never leave venue ambiguous).
+        subj.setAllocationVenueRequirement(SubjectAllocationVenueParsing.parseRequirement(dto.allocationVenueRequirement()));
+        if (subj.getAllocationVenueRequirement() != SubjectAllocationVenueRequirement.SPECIALIZED_ROOM) {
+            subj.setSpecializedVenueType(null);
+        } else if (dto.specializedVenueType() != null) {
+            String sv = dto.specializedVenueType().trim();
+            if (sv.isEmpty()) {
+                subj.setSpecializedVenueType(null);
+            } else {
+                try {
+                    subj.setSpecializedVenueType(RoomType.valueOf(sv.toUpperCase()));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("Invalid specializedVenueType: " + sv);
+                }
+            }
         }
         subj.setUpdatedBy(actorEmailOrSystem());
         return subjectRepo.save(subj);

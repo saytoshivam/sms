@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Step7TimetableWorkspace from '../../components/Step7TimetableWorkspace';
@@ -12,6 +12,8 @@ import { useTimetableLifecycle } from '../../lib/useTimetableLifecycle';
 type BasicInfo = {
   workingDays?: string[];
 };
+
+type Version = { id: number; status: string; version: number };
 
 const TABS = ['workspace', 'conflicts'] as const;
 type TimetableTab = (typeof TABS)[number];
@@ -47,6 +49,45 @@ export function TimetableModulePage() {
   // ---- confirms ----
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmPublish, setConfirmPublish] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  const versions = useQuery({
+    queryKey: ['ttv2-versions'],
+    queryFn: async () => (await api.get<Version[]>('/api/v2/timetable/versions')).data,
+  });
+
+  const latestPublished: Version | null = useMemo(() => {
+    const list = versions.data ?? [];
+    const pubs = list.filter((v) => String(v.status).toUpperCase() === 'PUBLISHED');
+    pubs.sort((a, b) => (b.version ?? 0) - (a.version ?? 0));
+    return pubs[0] ?? null;
+  }, [versions.data]);
+
+  const [viewKey, setViewKey] = useState<'DRAFT' | 'PUBLISHED'>('DRAFT');
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewMenuRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    // If there is no published timetable, keep the UI on draft view.
+    if (viewKey === 'PUBLISHED' && !latestPublished) setViewKey('DRAFT');
+  }, [viewKey, latestPublished]);
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewMenuOpen(false);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const el = viewMenuRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      setViewMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [viewMenuOpen]);
 
   const versionLabel = useMemo(() => {
     if (!lc.version) return null;
@@ -60,6 +101,23 @@ export function TimetableModulePage() {
           : 'Working copy';
     return `${s} ${v}`.trim();
   }, [lc.version, lc.versionStatus]);
+
+  const activeViewLabel = useMemo(() => {
+    if (viewKey === 'PUBLISHED') {
+      const v = latestPublished?.version != null ? ` v${latestPublished.version}` : '';
+      return `Published${v}`;
+    }
+    return 'Draft';
+  }, [viewKey, latestPublished?.version]);
+
+  const setView = (next: 'DRAFT' | 'PUBLISHED') => {
+    if (next === 'PUBLISHED' && !latestPublished) {
+      toast.info('No published timetable yet', 'Publish a draft to enable this view.');
+      return;
+    }
+    setViewKey(next);
+    setViewMenuOpen(false);
+  };
 
   const headerActions = (
     <>
@@ -78,6 +136,15 @@ export function TimetableModulePage() {
         title={lc.hasEntries ? 'Discard the current draft and regenerate from scratch' : 'No draft to discard'}
       >
         {lc.discardPending ? 'Working…' : 'Discard & regenerate'}
+      </button>
+      <button
+        type="button"
+        className="btn secondary"
+        disabled={lc.clearDraftPending || !lc.hasEntries}
+        onClick={() => setConfirmClear(true)}
+        title={lc.hasEntries ? 'Clear all entries + locks from the current draft' : 'No draft to clear'}
+      >
+        {lc.clearDraftPending ? 'Clearing…' : 'Clear draft'}
       </button>
       <button
         type="button"
@@ -119,6 +186,91 @@ export function TimetableModulePage() {
               {versionLabel}
             </span>
           ) : null}
+          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: '#475569' }}>View</span>
+            <span ref={viewMenuRef} style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                type="button"
+                onClick={() => setViewMenuOpen((v) => !v)}
+                className="btn secondary"
+                style={{
+                  height: 28,
+                  padding: '0 10px',
+                  borderRadius: 999,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}
+                title="Switch between draft and published timetable"
+                aria-haspopup="menu"
+                aria-expanded={viewMenuOpen}
+              >
+                {activeViewLabel}
+                <span style={{ fontSize: 12, opacity: 0.75, lineHeight: 1 }}>▾</span>
+              </button>
+
+              {viewMenuOpen ? (
+                <div
+                  role="menu"
+                  style={{
+                    position: 'absolute',
+                    top: 34,
+                    right: 0,
+                    minWidth: 180,
+                    borderRadius: 14,
+                    border: '1px solid rgba(15,23,42,0.10)',
+                    background: '#fff',
+                    boxShadow: '0 16px 40px rgba(15,23,42,0.18)',
+                    padding: 6,
+                    zIndex: 50,
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setView('DRAFT')}
+                    className="w-full"
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: 12,
+                      border: '1px solid transparent',
+                      background: viewKey === 'DRAFT' ? 'rgba(59,130,246,0.10)' : 'transparent',
+                      color: '#0f172a',
+                      fontSize: 13,
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Draft
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setView('PUBLISHED')}
+                    className="w-full"
+                    disabled={!latestPublished}
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: 12,
+                      border: '1px solid transparent',
+                      background: viewKey === 'PUBLISHED' ? 'rgba(59,130,246,0.10)' : 'transparent',
+                      color: !latestPublished ? 'rgba(15,23,42,0.35)' : '#0f172a',
+                      fontSize: 13,
+                      fontWeight: 900,
+                      cursor: !latestPublished ? 'not-allowed' : 'pointer',
+                      marginTop: 2,
+                    }}
+                  >
+                    Published{latestPublished ? ` v${latestPublished.version ?? '?'}` : ''}
+                  </button>
+                </div>
+              ) : null}
+            </span>
+          </span>
         </>
       }
       status={lc.status}
@@ -168,6 +320,8 @@ export function TimetableModulePage() {
             toast.info('Use Publish', 'Publish the draft from the page header to make it active.');
           }}
           completePending={false}
+          viewVersion={viewKey === 'PUBLISHED' ? latestPublished : null}
+          readOnly={viewKey === 'PUBLISHED'}
         />
       )}
 
@@ -183,6 +337,20 @@ export function TimetableModulePage() {
           setConfirmDiscard(false);
         }}
         onClose={() => setConfirmDiscard(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="Clear this draft timetable?"
+        description="This deletes all draft entries and locks (it does not regenerate). This cannot be undone."
+        confirmLabel={lc.clearDraftPending ? 'Clearing…' : 'Clear draft'}
+        confirmDisabled={lc.clearDraftPending}
+        danger
+        onConfirm={async () => {
+          await lc.clearDraft();
+          setConfirmClear(false);
+        }}
+        onClose={() => setConfirmClear(false)}
       />
 
       <ConfirmDialog

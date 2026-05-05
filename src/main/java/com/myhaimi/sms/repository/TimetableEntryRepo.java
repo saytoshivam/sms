@@ -14,6 +14,8 @@ public interface TimetableEntryRepo extends JpaRepository<TimetableEntry, Intege
     List<TimetableEntry> findBySchool_IdAndTimetableVersion_Id(Integer schoolId, Integer versionId);
     List<TimetableEntry> findBySchool_IdAndTimetableVersion_IdAndClassGroup_Id(Integer schoolId, Integer versionId, Integer classGroupId);
 
+    long countBySchool_IdAndTimetableVersion_Id(Integer schoolId, Integer versionId);
+
     Optional<TimetableEntry> findBySchool_IdAndTimetableVersion_IdAndClassGroup_IdAndDayOfWeekAndTimeSlot_Id(
             Integer schoolId, Integer versionId, Integer classGroupId, DayOfWeek dayOfWeek, Integer timeSlotId);
 
@@ -47,6 +49,10 @@ public interface TimetableEntryRepo extends JpaRepository<TimetableEntry, Intege
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from TimetableEntry e where e.school.id = :schoolId and e.classGroup.id = :classGroupId")
     int deleteBySchool_IdAndClassGroup_Id(@Param("schoolId") Integer schoolId, @Param("classGroupId") Integer classGroupId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from TimetableEntry e where e.school.id = :schoolId and e.timetableVersion.id = :versionId")
+    int deleteBySchool_IdAndTimetableVersion_Id(@Param("schoolId") Integer schoolId, @Param("versionId") Integer versionId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update TimetableEntry e set e.room = null where e.school.id = :schoolId")

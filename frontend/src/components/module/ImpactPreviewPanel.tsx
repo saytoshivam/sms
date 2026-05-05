@@ -5,7 +5,6 @@ import { api } from '../../lib/api';
 import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
 import { useApiTags } from '../../lib/apiTags';
-import { extractTeacherDemandWarnings } from '../../lib/teacherDemandAnalysis';
 import {
   useImpactStore,
   type ImpactChange,
@@ -39,7 +38,7 @@ const SCOPE_ROUTE: Record<ImpactScope, string> = {
 
 const SCOPE_ORDER: ImpactScope[] = ['allocations', 'staff', 'subjects', 'rooms', 'time', 'classes', 'school'];
 
-type AutoGenResponse = { success?: boolean; placed?: number; required?: number };
+type AutoGenResponse = { stats?: { placedCount?: number; totalSessions?: number } };
 
 /**
  * Slide-over that summarises every uncommitted impact change tracked in the
@@ -81,18 +80,17 @@ export function ImpactPreviewPanel({ open, onClose }: Props) {
 
   const regenerate = useMutation<AutoGenResponse, unknown>({
     mutationFn: async () =>
-      (await api.post<AutoGenResponse>('/api/v1/onboarding/timetable/auto-generate', {})).data,
+      (
+        await api.post<AutoGenResponse>('/api/timetable/generate', {
+          schoolId: null,
+          academicYearId: null,
+          replaceExisting: true,
+        })
+      ).data,
     onSuccess: async (data) => {
-      const placed = data?.placed ?? 0;
-      const required = data?.required ?? 0;
-      const warn = extractTeacherDemandWarnings(data);
-      if (warn.length) {
-        toast.info(
-          'Teacher capacity warning',
-          `${warn.slice(0, 2).join(' · ')}${warn.length > 2 ? ` (+${warn.length - 2} more)` : ''}`,
-        );
-      }
-      toast.success('Timetable regenerated', `${placed}/${required} sessions placed.`);
+      const placed = Number(data?.stats?.placedCount ?? 0);
+      const required = Number(data?.stats?.totalSessions ?? 0);
+      toast.success('Timetable regenerated', required ? `${placed}/${required} sessions placed.` : `${placed} session(s) placed.`);
       // Drop the impact entries that motivated this regenerate. Server-side
       // freshness / conflicts are now the source of truth.
       clearAll();

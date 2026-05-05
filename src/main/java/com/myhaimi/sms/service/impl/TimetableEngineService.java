@@ -6,6 +6,7 @@ import com.myhaimi.sms.DTO.timetable.engine.*;
 import com.myhaimi.sms.DTO.timetable.v2.TimetableEntryViewDTO;
 import com.myhaimi.sms.DTO.timetable.v2.TimetableVersionViewDTO;
 import com.myhaimi.sms.DTO.timetable.v2.TimetableEntryUpsertDTO;
+import com.myhaimi.sms.academic.RoomVenueCompatibility;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
@@ -69,7 +70,10 @@ public class TimetableEngineService {
                 };
                 if (dow != null) set.add(dow);
             }
-            return new ArrayList<>(set);
+            ArrayList<DayOfWeek> out = new ArrayList<>(set);
+            // Calendar order so phase-1 ideals, tail/sparsity penalties, and period-major passes match Mon→Sun (not JSON array order).
+            out.sort(Comparator.comparingInt(DayOfWeek::getValue));
+            return out;
         } catch (Exception ignored) {
             return List.of();
         }
@@ -267,10 +271,7 @@ public class TimetableEngineService {
         List<ClassGroup> classGroups = classGroupRepo.findAllBySchool_IdAndIsDeletedFalseOrderByGradeLevelAscCodeAsc(schoolId);
         Map<Integer, ClassGroup> classById = classGroups.stream().collect(Collectors.toMap(ClassGroup::getId, x -> x));
 
-        // Room conflicts are intentionally ignored in the current engine mode (homeroom-only),
-        // per product requirement for onboarding Step 7.
-
-        // Staff teachables
+        // Staff teachables (used by legacy fill paths; schedule generation trusts assigned teachers)
         Map<Integer, Set<Integer>> teachableByStaffId = new HashMap<>();
         for (StaffTeachableSubject ts : staffTeachableSubjectRepository.findByStaff_School_Id(schoolId)) {
             Integer sid = ts.getStaff() == null ? null : ts.getStaff().getId();
@@ -317,6 +318,19 @@ public class TimetableEngineService {
             classOcc.computeIfAbsent(e.getClassGroup().getId(), k -> new HashSet<>()).add(cell);
             teacherOcc.computeIfAbsent(e.getStaff().getId(), k -> new HashSet<>()).add(cell);
         }
+        // Homeroom room occupancy (same physical room cannot host two sections in one slot)
+        Map<Integer, Set<String>> roomOcc = new HashMap<>();
+        for (TimetableEntry e : existingByCell.values()) {
+            ClassGroup eCg = e.getClassGroup();
+            if (eCg == null) continue;
+            ClassGroup resolved = classById.get(eCg.getId());
+            if (resolved == null) continue;
+            Integer rid = e.getRoom() != null ? e.getRoom().getId()
+                    : (resolved.getDefaultRoom() == null ? null : resolved.getDefaultRoom().getId());
+            if (rid == null) continue;
+            String cell = e.getDayOfWeek().name() + "|" + e.getTimeSlot().getId();
+            roomOcc.computeIfAbsent(rid, k -> new HashSet<>()).add(cell);
+        }
         // Also block locked empty cells
         for (String lc : lockedCells) {
             String[] parts = lc.split("\\|");
@@ -360,6 +374,17 @@ public class TimetableEngineService {
         Map<Integer, Staff> staffById = staffRepo.findBySchool_IdAndIsDeletedFalseOrderByEmployeeNoAsc(schoolId).stream()
                 .collect(Collectors.toMap(Staff::getId, s -> s));
         Map<Integer, SchoolTimeSlot> slotById = slots.stream().collect(Collectors.toMap(SchoolTimeSlot::getId, s -> s));
+
+        Map<Integer, Integer> classTeacherStaffIdByClassGroupId = new HashMap<>();
+        Map<Integer, Room> homeroomRoomByClassGroupId = new HashMap<>();
+        for (ClassGroup cg : classGroups) {
+            if (cg.getClassTeacherStaffId() != null) {
+                classTeacherStaffIdByClassGroupId.put(cg.getId(), cg.getClassTeacherStaffId());
+            }
+            if (cg.getDefaultRoom() != null) {
+                homeroomRoomByClassGroupId.put(cg.getId(), cg.getDefaultRoom());
+            }
+        }
 
         // Expand required sessions globally (teacher clashes enforced across school).
         List<TimetableGeneratorService.Session> sessions = new ArrayList<>();
@@ -405,28 +430,26 @@ public class TimetableEngineService {
                     continue;
                 }
 
-                Set<Integer> teachables = teachableByStaffId.getOrDefault(fixedStaffId, Set.of());
-                if (!teachables.contains(subjId)) {
+                if (cg.getDefaultRoom() == null) {
                     Subject subj = a.getSubject();
                     String subjCode = subj == null ? ("#" + subjId) : subj.getCode();
                     String subjName = subj == null ? "" : (" (" + subj.getName() + ")");
-                    Staff st = staffById.get(fixedStaffId);
-                    String staffName = st == null ? ("#" + fixedStaffId) : st.getFullName();
                     hard.add(new TimetableConflictDTO(
                             "HARD",
-                            "TEACHER_NOT_TEACHABLE",
+                            "UNASSIGNED_HOMEROOM",
                             cgId,
                             cg.getCode(),
                             null,
                             null,
-                            "Teacher not teachable",
-                            "Cannot schedule " + cg.getCode() + " · " + subjCode + subjName + " because assigned teacher " + staffName + " is not mapped teachable for this subject."
+                            "Unassigned homeroom",
+                            "Cannot schedule " + cg.getCode() + " · " + subjCode + subjName + " because the section has no homeroom room. Assign a homeroom in Smart Assignment first."
                     ));
                     continue;
                 }
 
+                int homeroomRid = cg.getDefaultRoom().getId();
                 for (int i = 0; i < n; i++) {
-                    sessions.add(new TimetableGeneratorService.Session(cgId, subjId, fixedStaffId));
+                    sessions.add(new TimetableGeneratorService.Session(cgId, subjId, fixedStaffId, homeroomRid, i));
                 }
                 requiredByBundle.merge(cgId + ":" + subjId + ":" + fixedStaffId, (long) n, Long::sum);
                 requiredByClass.merge(cgId, (long) n, Long::sum);
@@ -482,7 +505,10 @@ public class TimetableEngineService {
                 nodeBudget,
                 classOcc,
                 teacherOcc,
-                existingByCell
+                roomOcc,
+                existingByCell,
+                classTeacherStaffIdByClassGroupId,
+                homeroomRoomByClassGroupId
         );
 
         List<TimetableEntry> toCreate = gen.placed();
@@ -998,14 +1024,30 @@ public class TimetableEngineService {
                 }
                 if (teacherOptions.isEmpty()) continue;
 
-                // room options (prefer fixed/default, else any)
+                Subject subjRow = subjectRepo.findById(r.subjectId).orElse(null);
+                SubjectAllocationVenueRequirement vreq =
+                        subjRow == null ? SubjectAllocationVenueRequirement.STANDARD_CLASSROOM : subjRow.getAllocationVenueRequirement();
+                RoomType specVenue = subjRow == null ? null : subjRow.getSpecializedVenueType();
+                Set<RoomType> allowed = RoomVenueCompatibility.compatibleRoomTypes(vreq, specVenue);
+
                 List<Integer> roomOptions = new ArrayList<>();
                 if (r.fixedRoomId != null) {
                     roomOptions.add(r.fixedRoomId);
                 } else if (cg.getDefaultRoomId() != null) {
-                    roomOptions.add(cg.getDefaultRoomId());
+                    Room defRm = roomById.get(cg.getDefaultRoomId());
+                    if (defRm != null && allowed.contains(defRm.getType())) {
+                        roomOptions.add(cg.getDefaultRoomId());
+                    }
                 }
-                for (Room rm : rooms) {
+                List<Room> compatRooms = rooms.stream()
+                        .filter(Room::isSchedulable)
+                        .filter(rm -> allowed.contains(rm.getType()))
+                        .sorted(Comparator.comparingInt((Room rm) ->
+                                vreq == SubjectAllocationVenueRequirement.LAB_REQUIRED
+                                        ? RoomVenueCompatibility.labRoomPreferenceRank(rm.getType())
+                                        : 0))
+                        .toList();
+                for (Room rm : compatRooms) {
                     if (cg.getDefaultRoomId() != null && rm.getId().equals(cg.getDefaultRoomId())) continue;
                     roomOptions.add(rm.getId());
                 }
@@ -1107,19 +1149,33 @@ public class TimetableEngineService {
             }
             if (teacherOptions.isEmpty()) continue;
 
-            // room options
+            Subject subjBt = subjectRepo.findById(r.subjectId).orElse(null);
+            SubjectAllocationVenueRequirement vreqBt =
+                    subjBt == null ? SubjectAllocationVenueRequirement.STANDARD_CLASSROOM : subjBt.getAllocationVenueRequirement();
+            RoomType specBt = subjBt == null ? null : subjBt.getSpecializedVenueType();
+            Set<RoomType> allowedBt = RoomVenueCompatibility.compatibleRoomTypes(vreqBt, specBt);
+
             List<Integer> roomOptions = new ArrayList<>();
             if (r.fixedRoomId != null) {
                 roomOptions.add(r.fixedRoomId);
             } else if (cg.getDefaultRoomId() != null) {
-                roomOptions.add(cg.getDefaultRoomId());
+                Room defRmBt = roomById.get(cg.getDefaultRoomId());
+                if (defRmBt != null && allowedBt.contains(defRmBt.getType())) {
+                    roomOptions.add(cg.getDefaultRoomId());
+                }
             }
-            // add other schedulable rooms as fallback
-            for (Room rm : rooms) {
+            List<Room> compatBt = rooms.stream()
+                    .filter(Room::isSchedulable)
+                    .filter(rm -> allowedBt.contains(rm.getType()))
+                    .sorted(Comparator.comparingInt((Room rm) ->
+                            vreqBt == SubjectAllocationVenueRequirement.LAB_REQUIRED
+                                    ? RoomVenueCompatibility.labRoomPreferenceRank(rm.getType())
+                                    : 0))
+                    .toList();
+            for (Room rm : compatBt) {
                 if (cg.getDefaultRoomId() != null && rm.getId().equals(cg.getDefaultRoomId())) continue;
                 roomOptions.add(rm.getId());
             }
-            // allow "no room" option last
             roomOptions.add(null);
 
             // iterate a small subset of teacher/room combos for ranking
@@ -1138,14 +1194,6 @@ public class TimetableEngineService {
                     Integer roomId = roomOptions.get(ri);
                     if (roomId != null && roomOcc.getOrDefault(roomId, Set.of()).contains(cell)) continue;
                     if (r.fixedRoomId != null && !r.fixedRoomId.equals(roomId)) continue;
-                    if (roomId != null) {
-                        Room rm = roomById.get(roomId);
-                        // if allocation fixes a room, room type is enforced by that room itself.
-                        if (rm != null && rm.getType() == RoomType.LAB) {
-                            // ok
-                        }
-                    }
-
                     int roomScore = teacherScore;
                     if (cg.getDefaultRoomId() != null && roomId != null && !cg.getDefaultRoomId().equals(roomId)) roomScore += 2;
                     if (roomId == null) roomScore += 1;

@@ -86,6 +86,30 @@ public class ClassGroup {
         return defaultRoom == null ? null : defaultRoom.getId();
     }
 
+    /**
+     * When true, bulk "Auto assign homeroom" must not replace {@link #defaultRoom}.
+     */
+    @JsonProperty("homeroomLocked")
+    @Column(name = "homeroom_locked", nullable = false)
+    private boolean homeroomLocked = false;
+
+    /** Lowercase {@code auto} or {@code manual}; null when unknown / cleared. */
+    @JsonProperty("homeroomSource")
+    @Column(name = "homeroom_source", length = 16)
+    private String homeroomSource;
+
+    /** Lowercase {@code auto} or {@code manual}; null when unknown / cleared. */
+    @JsonProperty("classTeacherSource")
+    @Column(name = "class_teacher_source", length = 16)
+    private String classTeacherSource;
+
+    /**
+     * When true, bulk "Auto assign class teachers" must not replace {@link #classTeacher}.
+     */
+    @JsonProperty("classTeacherLocked")
+    @Column(name = "class_teacher_locked", nullable = false)
+    private boolean classTeacherLocked = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

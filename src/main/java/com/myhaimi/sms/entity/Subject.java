@@ -3,6 +3,8 @@ package com.myhaimi.sms.entity;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -32,6 +34,23 @@ public class Subject {
     private SubjectType type = SubjectType.CORE;
 
     /**
+     * Which physical room categories may host this subject (never inferred from name).
+     */
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "allocation_venue_requirement", nullable = false, length = 32)
+    private SubjectAllocationVenueRequirement allocationVenueRequirement = SubjectAllocationVenueRequirement.STANDARD_CLASSROOM;
+
+    /**
+     * When {@link #allocationVenueRequirement} is {@link SubjectAllocationVenueRequirement#SPECIALIZED_ROOM},
+     * the intended {@link RoomType} for that specialty (optional; MULTIPURPOSE remains a fallback).
+     */
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "specialized_venue_type", length = 32)
+    private RoomType specializedVenueType;
+
+    /**
      * Weekly frequency hint for timetable generation (e.g. 4 periods/week).
      */
     @Column(name = "weekly_frequency")
@@ -57,6 +76,9 @@ public class Subject {
         Instant now = Instant.now();
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
+        if (allocationVenueRequirement == null) {
+            allocationVenueRequirement = SubjectAllocationVenueRequirement.STANDARD_CLASSROOM;
+        }
     }
 
     @PreUpdate

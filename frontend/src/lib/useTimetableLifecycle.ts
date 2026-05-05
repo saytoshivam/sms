@@ -3,7 +3,6 @@ import { api } from './api';
 import { formatApiError } from './errors';
 import { toast } from './toast';
 import { useApiTags } from './apiTags';
-import { extractTeacherDemandWarnings } from './teacherDemandAnalysis';
 import { useImpactStore } from './impactStore';
 import {
   useTimetableStatus,
@@ -17,7 +16,7 @@ import type { EntryRef, SetupSnapshot } from './timetableConflicts';
  *
  * Backend reality:
  *   POST /api/v2/timetable/versions/draft         - ensure a draft exists
- *   POST /api/v1/onboarding/timetable/auto-generate - rebuild the draft from setup
+ *   POST /api/timetable/generate                   - rebuild the draft from setup (global engine)
  *   POST /api/timetable/save-draft?timetableVersionId=X - move DRAFT -> REVIEW
  *   POST /api/timetable/publish?timetableVersionId=X    - REVIEW/DRAFT -> PUBLISHED
  *   POST /api/timetable/auto-fix                       - re-run respecting locks
@@ -33,11 +32,7 @@ import type { EntryRef, SetupSnapshot } from './timetableConflicts';
 
 type Version = { id: number; status: string; version: number };
 
-type AutoGenResponse = {
-  success?: boolean;
-  placed?: number;
-  required?: number;
-};
+type AutoGenResponse = { stats?: { placedCount?: number; totalSessions?: number } };
 
 export type UseTimetableLifecycleResult = {
   // Server data (re-exported from useTimetableStatus)
@@ -66,6 +61,8 @@ export type UseTimetableLifecycleResult = {
   publishPending: boolean;
   discardAndRegenerate: () => Promise<AutoGenResponse | undefined>;
   discardPending: boolean;
+  clearDraft: () => Promise<{ deletedEntries: number; deletedLocks: number } | undefined>;
+  clearDraftPending: boolean;
   autoFix: () => Promise<AutoGenResponse | undefined>;
   autoFixPending: boolean;
 };
@@ -80,18 +77,17 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
   // ---- mutations ----
   const regen = useMutation({
     mutationFn: async () =>
-      (await api.post<AutoGenResponse>('/api/v1/onboarding/timetable/auto-generate', {})).data,
+      (
+        await api.post<AutoGenResponse>('/api/timetable/generate', {
+          schoolId: null,
+          academicYearId: null,
+          replaceExisting: true,
+        })
+      ).data,
     onSuccess: async (data) => {
-      const placed = data?.placed ?? 0;
-      const required = data?.required ?? 0;
-      const warn = extractTeacherDemandWarnings(data);
-      if (warn.length) {
-        toast.info(
-          'Teacher capacity warning',
-          `${warn.slice(0, 2).join(' · ')}${warn.length > 2 ? ` (+${warn.length - 2} more)` : ''}`,
-        );
-      }
-      toast.success('Timetable regenerated', `${placed}/${required} sessions placed.`);
+      const placed = Number(data?.stats?.placedCount ?? 0);
+      const required = Number(data?.stats?.totalSessions ?? 0);
+      toast.success('Timetable regenerated', required ? `${placed}/${required} sessions placed.` : `${placed} session(s) placed.`);
       clearAllImpact();
       await invalidate(['timetable.draft', 'timetable.conflicts', 'timetable.freshness']);
     },
@@ -129,22 +125,35 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
 
   const discardMut = useMutation({
     mutationFn: async () =>
-      (await api.post<AutoGenResponse>('/api/v1/onboarding/timetable/auto-generate', {})).data,
+      (
+        await api.post<AutoGenResponse>('/api/timetable/generate', {
+          schoolId: null,
+          academicYearId: null,
+          replaceExisting: true,
+        })
+      ).data,
     onSuccess: async (data) => {
-      const placed = data?.placed ?? 0;
-      const required = data?.required ?? 0;
-      const warn = extractTeacherDemandWarnings(data);
-      if (warn.length) {
-        toast.info(
-          'Teacher capacity warning',
-          `${warn.slice(0, 2).join(' · ')}${warn.length > 2 ? ` (+${warn.length - 2} more)` : ''}`,
-        );
-      }
-      toast.success('Draft discarded', `Rebuilt: ${placed}/${required} sessions placed.`);
+      const placed = Number(data?.stats?.placedCount ?? 0);
+      const required = Number(data?.stats?.totalSessions ?? 0);
+      const detail = required ? `${placed}/${required} sessions placed.` : `${placed} session(s) placed.`;
+      toast.success('Draft discarded', `Rebuilt: ${detail}`);
       clearAllImpact();
       await invalidate(['timetable.draft', 'timetable.conflicts', 'timetable.freshness']);
     },
     onError: (e) => toast.error('Discard failed', formatApiError(e)),
+  });
+
+  const clearDraftMut = useMutation({
+    mutationFn: async () => {
+      if (!versionId) throw new Error('Missing draft version. Generate a draft first.');
+      return (await api.post<{ deletedEntries: number; deletedLocks: number }>(`/api/v2/timetable/versions/${encodeURIComponent(String(versionId))}/clear`)).data;
+    },
+    onSuccess: async (r) => {
+      toast.success('Draft cleared', `Removed ${r?.deletedEntries ?? 0} entries and ${r?.deletedLocks ?? 0} locks.`);
+      clearAllImpact();
+      await invalidate(['timetable.draft', 'timetable.conflicts', 'timetable.freshness']);
+    },
+    onError: (e) => toast.error('Clear draft failed', formatApiError(e)),
   });
 
   const autoFixMut = useMutation({
@@ -157,9 +166,9 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
         })
       ).data,
     onSuccess: async (data) => {
-      const placed = data?.placed ?? 0;
-      const required = data?.required ?? 0;
-      const detail = required ? `${placed}/${required} sessions placed.` : 'Engine re-ran respecting locks.';
+      const placed = Number(data?.stats?.placedCount ?? 0);
+      const required = Number(data?.stats?.totalSessions ?? 0);
+      const detail = required ? `${placed}/${required} sessions placed.` : `Placed ${placed} session(s).`;
       toast.success('Auto-fix attempted', detail);
       // Auto-fix re-evaluates conflicts against the current setup, so any
       // pending impact has effectively been consumed.
@@ -193,6 +202,8 @@ export function useTimetableLifecycle(): UseTimetableLifecycleResult {
     publishPending: publishMut.isPending,
     discardAndRegenerate: () => discardMut.mutateAsync(),
     discardPending: discardMut.isPending,
+    clearDraft: () => clearDraftMut.mutateAsync(),
+    clearDraftPending: clearDraftMut.isPending,
     autoFix: () => autoFixMut.mutateAsync(),
     autoFixPending: autoFixMut.isPending,
   };

@@ -56,7 +56,8 @@ export function useTimetableStatus(): UseTimetableStatusResult {
 
   const draftQuery = useQuery({
     queryKey: ['ttv2-draft-version'],
-    queryFn: async () => (await api.post<Version>('/api/v2/timetable/versions/draft')).data,
+    // "Workspace" version reflects saved/published state without creating a new draft every time.
+    queryFn: async () => (await api.post<Version>('/api/v2/timetable/versions/workspace')).data,
   });
 
   const versionId = draftQuery.data?.id ?? null;

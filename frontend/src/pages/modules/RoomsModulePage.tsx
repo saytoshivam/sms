@@ -10,11 +10,10 @@ import { useApiTags } from '../../lib/apiTags';
 import { useImpactStore } from '../../lib/impactStore';
 import { onboardingStepHref } from '../../lib/onboardingWizardMeta';
 import { SavedRoomsCatalogPanel } from '../../components/catalog/SavedRoomsCatalogPanel';
+import { ROOM_TYPES, ROOM_TYPE_LABELS, type RoomVenueType } from '../../lib/roomVenueCompatibility';
 
-type RoomType = 'CLASSROOM' | 'LAB' | 'LIBRARY' | 'AUDITORIUM' | 'SPORTS_ROOM' | 'STAFF_ROOM' | 'OFFICE' | 'OTHER';
 type LabType = 'PHYSICS' | 'CHEMISTRY' | 'COMPUTER' | 'OTHER';
 
-const ROOM_TYPES: RoomType[] = ['CLASSROOM', 'LAB', 'LIBRARY', 'AUDITORIUM', 'SPORTS_ROOM', 'STAFF_ROOM', 'OFFICE', 'OTHER'];
 const LAB_TYPES: LabType[] = ['PHYSICS', 'CHEMISTRY', 'COMPUTER', 'OTHER'];
 
 type Room = {
@@ -22,7 +21,7 @@ type Room = {
   building: string;
   buildingName?: string;
   roomNumber: string;
-  type: RoomType;
+  type: string;
   labType: LabType | null;
   capacity: number | null;
   floorNumber: number | null;
@@ -37,7 +36,7 @@ type Page<T> = { content: T[]; totalElements?: number };
 type CreateDraft = {
   building: string;
   roomNumber: string;
-  type: RoomType;
+  type: RoomVenueType;
   labType: LabType | null;
   capacity: number | '';
   floorNumber: number | '';
@@ -47,7 +46,7 @@ type CreateDraft = {
 const EMPTY_CREATE: CreateDraft = {
   building: '',
   roomNumber: '',
-  type: 'CLASSROOM',
+  type: 'STANDARD_CLASSROOM',
   labType: null,
   capacity: '',
   floorNumber: '',
@@ -87,7 +86,7 @@ export function RoomsModulePage() {
         building: d.building.trim(),
         roomNumber: d.roomNumber.trim(),
         type: d.type,
-        labType: d.type === 'LAB' ? (d.labType ?? 'OTHER') : null,
+        labType: d.type === 'SCIENCE_LAB' || d.type === 'COMPUTER_LAB' ? (d.labType ?? 'OTHER') : null,
         capacity: d.capacity === '' ? null : Math.max(0, Math.trunc(Number(d.capacity))),
         floorNumber: d.floorNumber === '' ? null : Math.trunc(Number(d.floorNumber)),
         floorName: d.floorName.trim() || null,
@@ -225,14 +224,15 @@ function AddRoomCard({
             onChange={(v) =>
               setDraft({
                 ...draft,
-                type: v as RoomType,
-                labType: v === 'LAB' ? (draft.labType ?? 'OTHER') : null,
+                type: v as RoomVenueType,
+                labType:
+                  v === 'SCIENCE_LAB' || v === 'COMPUTER_LAB' ? (draft.labType ?? 'OTHER') : null,
               })
             }
-            options={ROOM_TYPES.map((t) => ({ value: t, label: t }))}
+            options={ROOM_TYPES.map((t) => ({ value: t, label: ROOM_TYPE_LABELS[t] }))}
           />
         </Field>
-        {draft.type === 'LAB' ? (
+        {draft.type === 'SCIENCE_LAB' || draft.type === 'COMPUTER_LAB' ? (
           <Field label="Lab type" flex="1 1 160px">
             <SmartSelect
               value={draft.labType ?? 'OTHER'}

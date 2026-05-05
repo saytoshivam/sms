@@ -10,6 +10,8 @@ import { useApiTags } from '../../lib/apiTags';
 import { useImpactStore } from '../../lib/impactStore';
 import { onboardingStepHref } from '../../lib/onboardingWizardMeta';
 import { SavedSubjectsCatalogPanel } from '../../components/catalog/SavedSubjectsCatalogPanel';
+import { formatCompatibleRoomTypesList, schoolHasAnyCompatibleRoom } from '../../lib/roomVenueCompatibility';
+import { parseSubjectVenueRequirement, SUBJECT_VENUE_LABELS, SUBJECT_VENUE_REQUIREMENTS } from '../../lib/subjectVenueRequirement';
 
 type Subject = {
   id: number;
@@ -17,6 +19,8 @@ type Subject = {
   name: string;
   type?: 'CORE' | 'OPTIONAL';
   weeklyFrequency?: number | null;
+  allocationVenueRequirement?: string | null;
+  specializedVenueType?: string | null;
 };
 
 type Page<T> = { content: T[]; totalElements?: number };
@@ -38,9 +42,16 @@ type CreateDraft = {
   code: string;
   type: 'CORE' | 'OPTIONAL';
   weeklyFrequency: number;
+  allocationVenueRequirement: string;
 };
 
-const EMPTY_DRAFT: CreateDraft = { name: '', code: '', type: 'CORE', weeklyFrequency: 4 };
+const EMPTY_DRAFT: CreateDraft = {
+  name: '',
+  code: '',
+  type: 'CORE',
+  weeklyFrequency: 4,
+  allocationVenueRequirement: 'STANDARD_CLASSROOM',
+};
 
 export function SubjectsModulePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -62,6 +73,12 @@ export function SubjectsModulePage() {
     queryKey: ['onboarding-academic-structure'],
     queryFn: async () => (await api.get<AcademicStructure>('/api/v1/onboarding/academic-structure')).data,
     staleTime: 60_000,
+  });
+
+  const roomsForVenue = useQuery({
+    queryKey: ['rooms-venue-check'],
+    queryFn: async () => (await api.get<{ content?: Array<{ type?: string | null }> }>('/api/rooms?size=500')).data,
+    staleTime: 120_000,
   });
 
   const list: Subject[] = useMemo(() => subjects.data?.content ?? [], [subjects.data]);
@@ -87,7 +104,13 @@ export function SubjectsModulePage() {
       if (!draft.name.trim()) throw new Error('Subject name is required.');
       const freq = Math.trunc(Number(draft.weeklyFrequency));
       if (!Number.isFinite(freq) || freq <= 0) throw new Error('Weekly frequency must be > 0.');
-      const body = { name: draft.name.trim(), code, type: draft.type, weeklyFrequency: freq };
+      const body = {
+        name: draft.name.trim(),
+        code,
+        type: draft.type,
+        weeklyFrequency: freq,
+        allocationVenueRequirement: draft.allocationVenueRequirement,
+      };
       return (await api.post<Subject>('/api/subjects', body)).data;
     },
     onSuccess: async (s) => {
@@ -142,6 +165,7 @@ export function SubjectsModulePage() {
           setDraft={setCreateDraft}
           onSave={() => createOne.mutate(createDraft)}
           busy={createOne.isPending}
+          roomTypesForCheck={(roomsForVenue.data?.content ?? []).map((r) => r.type)}
         />
       ) : null}
 
@@ -193,16 +217,21 @@ function AddSubjectCard({
   setDraft,
   onSave,
   busy,
+  roomTypesForCheck,
 }: {
   draft: CreateDraft;
   setDraft: (d: CreateDraft) => void;
   onSave: () => void;
   busy: boolean;
+  roomTypesForCheck: Array<string | null | undefined>;
 }) {
   const code = normalizeCode(draft.code);
   const codeOk = isValidCode(code);
   const nameOk = draft.name.trim().length > 0;
   const freqOk = Number.isFinite(draft.weeklyFrequency) && draft.weeklyFrequency > 0;
+  const req = parseSubjectVenueRequirement(draft.allocationVenueRequirement);
+  const noCompatRoom =
+    req !== 'FLEXIBLE' && !schoolHasAnyCompatibleRoom(roomTypesForCheck, req, null);
 
   return (
     <div className="card stack" style={{ gap: 12, padding: 12, border: '1px solid rgba(15,23,42,0.10)', borderRadius: 12 }}>
@@ -251,10 +280,34 @@ function AddSubjectCard({
             }
           />
         </label>
+        <label className="stack" style={{ gap: 6, flex: '1 1 220px', minWidth: 200 }}>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+            Room allocation need
+          </span>
+          <SmartSelect
+            value={draft.allocationVenueRequirement}
+            onChange={(v) => setDraft({ ...draft, allocationVenueRequirement: v || 'STANDARD_CLASSROOM' })}
+            options={SUBJECT_VENUE_REQUIREMENTS.map((k) => ({ value: k, label: SUBJECT_VENUE_LABELS[k] }))}
+            ariaLabel="Subject venue requirement"
+          />
+        </label>
         <button type="button" className="btn" disabled={busy || !nameOk || !codeOk || !freqOk} onClick={onSave}>
           {busy ? 'Adding…' : 'Add'}
         </button>
       </div>
+      {noCompatRoom ? (
+        <div
+          className="sms-alert sms-alert--info"
+          style={{ margin: 0, fontSize: 12 }}
+          title="Configured via Subject Type (room allocation need) in Subject setup."
+        >
+          <div className="sms-alert__title">No compatible room yet</div>
+          <div className="sms-alert__msg">
+            No room in this school matches types required for <strong>{SUBJECT_VENUE_LABELS[req]}</strong> (
+            {formatCompatibleRoomTypesList(req)}). Manual timetable assignment may be needed. You can still save.
+          </div>
+        </div>
+      ) : null}
       <div className="muted" style={{ fontSize: 12 }}>
         After saving, map this subject to sections in <Link to="/app/academic">Academic structure</Link>. Editing weekly frequency on existing subjects will mark the timetable as affected.
       </div>

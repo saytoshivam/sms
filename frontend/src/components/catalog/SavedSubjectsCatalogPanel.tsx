@@ -8,8 +8,28 @@ import { useApiTags } from '../../lib/apiTags';
 import { useImpactStore } from '../../lib/impactStore';
 import { RowActionsMenu } from '../RowActionsMenu';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { SmartSelect } from '../SmartSelect';
+import {
+  formatCompatibleRoomTypesList,
+  parseRoomVenueType,
+  ROOM_TYPES,
+  ROOM_TYPE_LABELS,
+  schoolHasAnyCompatibleRoom,
+} from '../../lib/roomVenueCompatibility';
+import {
+  parseSubjectVenueRequirement,
+  SUBJECT_VENUE_LABELS,
+  SUBJECT_VENUE_REQUIREMENTS,
+} from '../../lib/subjectVenueRequirement';
 
-type SubjectCatalogRow = { id: number; code: string; name: string; weeklyFrequency?: number | null };
+type SubjectCatalogRow = {
+  id: number;
+  code: string;
+  name: string;
+  weeklyFrequency?: number | null;
+  allocationVenueRequirement?: string | null;
+  specializedVenueType?: string | null;
+};
 
 function normalizeSubjectCode(raw: string): string {
   return String(raw ?? '')
@@ -50,8 +70,25 @@ export function SavedSubjectsCatalogPanel() {
     name: string;
     code: string;
     weeklyFrequency: number | null;
+    allocationVenueRequirement: string;
+    specializedVenueType: string;
     busy: boolean;
-  }>({ open: false, subjectId: null, name: '', code: '', weeklyFrequency: null, busy: false });
+  }>({
+    open: false,
+    subjectId: null,
+    name: '',
+    code: '',
+    weeklyFrequency: null,
+    allocationVenueRequirement: 'STANDARD_CLASSROOM',
+    specializedVenueType: '',
+    busy: false,
+  });
+
+  const roomsForVenue = useQuery({
+    queryKey: ['rooms-venue-check-catalog'],
+    queryFn: async () => (await api.get<{ content?: Array<{ type?: string | null }> }>('/api/rooms?size=500')).data,
+    staleTime: 120_000,
+  });
 
   const subjectsCatalog = useQuery({
     queryKey: ['subjects-catalog'],
@@ -73,13 +110,24 @@ export function SavedSubjectsCatalogPanel() {
         name,
         code,
         weeklyFrequency,
+        allocationVenueRequirement,
+        specializedVenueType,
       }: {
         subjectId: number;
         name: string;
         code: string;
         weeklyFrequency: number | null;
+        allocationVenueRequirement: string;
+        specializedVenueType: string;
       }) => {
-        await api.put(`/api/subjects/${subjectId}`, { name, code, weeklyFrequency });
+        const req = parseSubjectVenueRequirement(allocationVenueRequirement);
+        await api.put(`/api/subjects/${subjectId}`, {
+          name,
+          code,
+          weeklyFrequency,
+          allocationVenueRequirement: req,
+          specializedVenueType: req === 'SPECIALIZED_ROOM' ? specializedVenueType.trim() || null : null,
+        });
       },
     [],
   );
@@ -126,6 +174,9 @@ export function SavedSubjectsCatalogPanel() {
                 <tr>
                   <th style={{ textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>Subject</th>
                   <th style={{ textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>Code</th>
+                  <th style={{ textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                    Room need
+                  </th>
                   <th style={{ textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
                     Freq/wk
                   </th>
@@ -151,6 +202,11 @@ export function SavedSubjectsCatalogPanel() {
                           {s.code}
                         </span>
                       </td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
+                        <span className="muted" style={{ fontWeight: 800, fontSize: 12 }}>
+                          {SUBJECT_VENUE_LABELS[parseSubjectVenueRequirement(s.allocationVenueRequirement)]}
+                        </span>
+                      </td>
                       <td style={{ padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.06)', textAlign: 'right' }}>
                         <span style={{ fontWeight: 900 }}>{s.weeklyFrequency ?? '—'}</span>
                       </td>
@@ -168,6 +224,8 @@ export function SavedSubjectsCatalogPanel() {
                                   name: s.name,
                                   code: s.code,
                                   weeklyFrequency: s.weeklyFrequency ?? null,
+                                  allocationVenueRequirement: parseSubjectVenueRequirement(s.allocationVenueRequirement),
+                                  specializedVenueType: s.specializedVenueType ?? '',
                                   busy: false,
                                 });
                               },
@@ -267,7 +325,16 @@ export function SavedSubjectsCatalogPanel() {
           )
         }
         onClose={() =>
-          setSubjectEditModal({ open: false, subjectId: null, name: '', code: '', weeklyFrequency: null, busy: false })
+          setSubjectEditModal({
+            open: false,
+            subjectId: null,
+            name: '',
+            code: '',
+            weeklyFrequency: null,
+            allocationVenueRequirement: 'STANDARD_CLASSROOM',
+            specializedVenueType: '',
+            busy: false,
+          })
         }
         onConfirm={async () => {
           if (!subjectEditModal.subjectId) return;
@@ -282,6 +349,8 @@ export function SavedSubjectsCatalogPanel() {
               name,
               code,
               weeklyFrequency: subjectEditModal.weeklyFrequency,
+              allocationVenueRequirement: subjectEditModal.allocationVenueRequirement,
+              specializedVenueType: subjectEditModal.specializedVenueType,
             });
             const freqChanged =
               prev != null && Number(prev.weeklyFrequency ?? 0) !== Number(subjectEditModal.weeklyFrequency ?? 0);
@@ -296,7 +365,16 @@ export function SavedSubjectsCatalogPanel() {
             });
             await invalidate(['subjects', 'allocations']);
             toast.success('Saved', `${code} updated.`);
-            setSubjectEditModal({ open: false, subjectId: null, name: '', code: '', weeklyFrequency: null, busy: false });
+            setSubjectEditModal({
+              open: false,
+              subjectId: null,
+              name: '',
+              code: '',
+              weeklyFrequency: null,
+              allocationVenueRequirement: 'STANDARD_CLASSROOM',
+              specializedVenueType: '',
+              busy: false,
+            });
           } catch (e) {
             toast.error('Update failed', formatApiError(e));
             setSubjectEditModal((p) => ({ ...p, busy: false }));
@@ -304,6 +382,29 @@ export function SavedSubjectsCatalogPanel() {
         }}
       >
         <div className="stack" style={{ gap: 10 }}>
+          {(() => {
+            const req = parseSubjectVenueRequirement(subjectEditModal.allocationVenueRequirement);
+            const spec =
+              req === 'SPECIALIZED_ROOM'
+                ? parseRoomVenueType(subjectEditModal.specializedVenueType || undefined)
+                : null;
+            const roomTypes = (roomsForVenue.data?.content ?? []).map((r) => r.type);
+            const noCompat =
+              req !== 'FLEXIBLE' && !schoolHasAnyCompatibleRoom(roomTypes, req, spec);
+            return noCompat ? (
+              <div
+                className="sms-alert sms-alert--info"
+                style={{ margin: 0, fontSize: 12 }}
+                title="Configured via Subject Type (room allocation need) in Subject setup."
+              >
+                <div className="sms-alert__title">No compatible room yet</div>
+                <div className="sms-alert__msg">
+                  No room in this school matches types required for this subject (
+                  {formatCompatibleRoomTypesList(req)}). Manual assignment may be needed. You can still save.
+                </div>
+              </div>
+            ) : null;
+          })()}
           <div className="stack" style={{ gap: 4 }}>
             <label style={{ fontSize: 12, fontWeight: 800 }}>Name</label>
             <input
@@ -340,6 +441,35 @@ export function SavedSubjectsCatalogPanel() {
               placeholder="Leave empty to keep server default"
             />
           </div>
+          <div className="stack" style={{ gap: 4 }}>
+            <label style={{ fontSize: 12, fontWeight: 800 }}>Room allocation need</label>
+            <SmartSelect
+              value={subjectEditModal.allocationVenueRequirement}
+              onChange={(v) =>
+                setSubjectEditModal((p) => ({
+                  ...p,
+                  allocationVenueRequirement: v || 'STANDARD_CLASSROOM',
+                  specializedVenueType: v === 'SPECIALIZED_ROOM' ? p.specializedVenueType : '',
+                }))
+              }
+              options={SUBJECT_VENUE_REQUIREMENTS.map((k) => ({ value: k, label: SUBJECT_VENUE_LABELS[k] }))}
+              ariaLabel="Subject venue requirement"
+            />
+            <div className="muted" style={{ fontSize: 11 }}>
+              Timetable uses this with each room&apos;s type — not the subject name.
+            </div>
+          </div>
+          {parseSubjectVenueRequirement(subjectEditModal.allocationVenueRequirement) === 'SPECIALIZED_ROOM' ? (
+            <div className="stack" style={{ gap: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 800 }}>Specialized room type</label>
+              <SmartSelect
+                value={subjectEditModal.specializedVenueType || 'MULTIPURPOSE'}
+                onChange={(v) => setSubjectEditModal((p) => ({ ...p, specializedVenueType: v || 'MULTIPURPOSE' }))}
+                options={ROOM_TYPES.map((t) => ({ value: t, label: ROOM_TYPE_LABELS[t] }))}
+                ariaLabel="Specialized room type"
+              />
+            </div>
+          ) : null}
         </div>
       </ConfirmDialog>
     </>

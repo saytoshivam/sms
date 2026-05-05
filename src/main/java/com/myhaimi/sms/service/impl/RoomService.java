@@ -5,6 +5,7 @@ import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.DTO.RoomDeleteInfoDTO;
 import com.myhaimi.sms.DTO.RoomUpdateDTO;
 import com.myhaimi.sms.entity.LabType;
+import com.myhaimi.sms.academic.RoomTypeParsing;
 import com.myhaimi.sms.entity.RoomType;
 import com.myhaimi.sms.repository.ClassGroupRepo;
 import com.myhaimi.sms.repository.ClassSubjectConfigRepo;
@@ -123,24 +124,26 @@ public class RoomService {
         Integer schoolId = requireSchoolId();
         Room r = roomRepo.findByIdAndSchool_Id(roomId, schoolId).orElseThrow();
 
-        RoomType type;
-        try {
-            type = RoomType.valueOf((body == null || body.type() == null ? r.getType().name() : body.type().trim().toUpperCase()));
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid room type: " + (body == null ? null : body.type()));
+        String typeStr = body == null || body.type() == null ? r.getType().name() : body.type().trim();
+        String labRaw = body == null ? null : body.labType();
+        LabType labParsed = null;
+        if (labRaw != null && !labRaw.isBlank()) {
+            try {
+                labParsed = LabType.valueOf(labRaw.trim().toUpperCase());
+            } catch (Exception ignored) {
+                labParsed = LabType.OTHER;
+            }
         }
+        RoomType type = RoomTypeParsing.parseRoomType(typeStr, labParsed != null ? labParsed : r.getLabType());
         r.setType(type);
 
-        if (type == RoomType.LAB) {
-            String raw = body == null ? null : body.labType();
-            if (raw == null || raw.isBlank()) {
-                r.setLabType(LabType.OTHER);
+        if (type == RoomType.SCIENCE_LAB || type == RoomType.COMPUTER_LAB) {
+            if (labParsed != null) {
+                r.setLabType(labParsed);
+            } else if (type == RoomType.COMPUTER_LAB) {
+                r.setLabType(LabType.COMPUTER);
             } else {
-                try {
-                    r.setLabType(LabType.valueOf(raw.trim().toUpperCase()));
-                } catch (Exception ignored) {
-                    r.setLabType(LabType.OTHER);
-                }
+                r.setLabType(r.getLabType() != null ? r.getLabType() : LabType.OTHER);
             }
         } else {
             r.setLabType(null);

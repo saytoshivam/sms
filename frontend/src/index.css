@@ -4305,6 +4305,39 @@ textarea:disabled {
   right: auto;
 }
 
+.select-keeper__panel {
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, #e2e8f0);
+  background: #ffffff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
+}
+
+.select-keeper__search {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px 12px 0 0;
+  font-size: 14px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-text);
+  background: color-mix(in srgb, #fff7ed 35%, #ffffff);
+  outline: none;
+}
+
+.select-keeper__search:focus {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+
+.select-keeper__menu--in-panel {
+  position: static;
+  flex: 1;
+  min-height: 0;
+  border-radius: 0 0 12px 12px;
+}
+
 .select-keeper__option {
   width: 100%;
   text-align: left;
@@ -4425,4 +4458,53 @@ textarea:disabled {
 
 .catalog-combobox__hint--error {
   color: #b91c1c;
+}
+
+/* Academic structure: AUTO/MANUAL + bulk-lock pills (homeroom / class teacher) */
+.sms-provenance-badge-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sms-provenance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.sms-provenance-badge--auto {
+  background: #ffe9d8;
+  color: #9a3412;
+}
+
+.sms-provenance-badge__label {
+  font-weight: 800;
+}
+
+.sms-provenance-badge__lock-icon {
+  flex-shrink: 0;
+  opacity: 0.92;
+  color: #c2410c;
+}
+
+.sms-provenance-badge--manual {
+  background: #eef2f7;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.sms-provenance-badge--bulk-lock {
+  background: #eef2ff;
+  color: #1e40af;
+  border: 1px solid #c7d2fe;
 }

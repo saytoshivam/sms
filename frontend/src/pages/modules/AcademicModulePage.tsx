@@ -93,12 +93,20 @@ export function AcademicModulePage() {
         formatError={formatApiError}
         assignmentMeta={m.assignmentMeta}
         setAssignmentMeta={m.setAssignmentMeta}
+        clearHomeroomDraft={m.clearHomeroomDraft}
+        clearAutoAssignedClassTeachers={m.clearAutoAssignedClassTeachers}
+        clearAllClassTeacherAssignments={m.clearAllClassTeacherAssignments}
         clearAutoHomeroomAssignments={m.clearAutoHomeroomAssignments}
         patchSectionHomeroom={m.patchSectionHomeroom}
         homeroomSourceByClassId={m.homeroomSourceByClassId}
+        homeroomLockedByClassId={m.homeroomLockedByClassId}
+        patchHomeroomLock={m.patchHomeroomLock}
+        homeroomSelectOptions={m.classDefaultRoomSelectOptions}
         classTeacherByClassId={m.classTeacherByClassId}
         classTeacherSourceByClassId={m.classTeacherSourceByClassId}
+        classTeacherLockedByClassId={m.classTeacherLockedByClassId}
         patchSectionClassTeacher={m.patchSectionClassTeacher}
+        patchClassTeacherLock={m.patchClassTeacherLock}
         autoAssignClassTeachers={m.autoAssignClassTeachers}
       />
     </ModulePage>
