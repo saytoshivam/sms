@@ -22,6 +22,9 @@ public interface ClassGroupRepo extends JpaRepository<ClassGroup, Integer> {
 
     List<ClassGroup> findAllBySchool_IdAndIsDeletedFalseOrderByGradeLevelAscCodeAsc(Integer schoolId);
 
+    List<ClassGroup> findBySchool_IdAndClassTeacher_IdAndIsDeletedFalseOrderByDisplayNameAsc(
+            Integer schoolId, Integer staffId);
+
     @Query("select cg from ClassGroup cg where cg.isDeleted = true")
     List<ClassGroup> findAllSoftDeleted();
 

@@ -227,9 +227,9 @@ export function SchoolManagementPage() {
       </div>
 
       <div className="workspace-panel">
-        <h2 className="workspace-panel__title">Budgets & payroll approvals</h2>
+        <h2 className="workspace-panel__title">Budget approvals</h2>
         <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: 'var(--color-text-muted)' }}>
-          Structured approval flows for annual fee budgets and salary envelopes are on the roadmap. Use{' '}
+          Structured approval flows for annual fee budgets are on the roadmap. Use{' '}
           <Link to="/app/fees" style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
             Fees & invoices
           </Link>{' '}

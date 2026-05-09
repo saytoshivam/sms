@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useBranding } from '../lib/branding';
+import { defaultAppHomePath } from '../lib/roleGroups';
 
 /** One exchange per auth code (React StrictMode runs effects twice in dev). */
 const googleJwtByCode = new Map<string, Promise<string>>();
@@ -56,7 +57,8 @@ export function GoogleOAuthCallbackPage() {
         const token = await fetchGoogleJwtOnce(code);
         if (cancelled) return;
         login(token);
-        navigate('/app', { replace: true });
+        const { data: profile } = await api.get<{ roles: string[] }>('/user/me');
+        navigate(defaultAppHomePath(profile.roles), { replace: true });
       } catch (err: unknown) {
         if (cancelled) return;
         const ax = err as { response?: { data?: unknown }; message?: string };

@@ -1,7 +1,19 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import {
+  BookOpen,
+  Building2,
+  CalendarDays,
+  Clock,
+  GraduationCap,
+  Network,
+  Search,
+  Users,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { api } from '../lib/api';
+import '../styles/erpDashboard.css';
 import { hasSchoolLeadershipRole } from '../lib/roleGroups';
 import { DashboardPage } from './DashboardPage';
 import { SetupChecklistPanel } from '../components/module/SetupChecklistPanel';
@@ -69,44 +81,33 @@ function pageContent<T>(p: { content?: T[] } | T[] | null | undefined): T[] {
 
 function HubCard({
   title,
+  icon: Icon,
   level,
   primary,
   secondary,
   to,
 }: {
   title: string;
+  icon: LucideIcon;
   level: StatusLevel;
   primary: string;
   secondary?: string;
   to: string;
 }) {
   return (
-    <Link
-      to={to}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        padding: 14,
-        borderRadius: 12,
-        border: '1px solid rgba(15,23,42,0.10)',
-        background: '#fff',
-        textDecoration: 'none',
-        color: '#0f172a',
-        minHeight: 110,
-      }}
-    >
-      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-        <div style={{ fontWeight: 950, fontSize: 14 }}>{title}</div>
+    <Link to={to} className="erp-hub-card">
+      <div className="erp-hub-card__top">
+        <span className="erp-hub-card__icon-wrap">
+          <Icon size={17} strokeWidth={2} aria-hidden />
+        </span>
         <StatusChip level={level} label={level === 'ok' ? 'Ready' : level === 'warn' ? 'Attention' : level === 'error' ? 'Issues' : level === 'info' ? 'Info' : 'Not started'} />
       </div>
-      <div style={{ fontSize: 13, fontWeight: 800 }}>{primary}</div>
-      {secondary ? (
-        <div className="muted" style={{ fontSize: 12 }}>
-          {secondary}
-        </div>
-      ) : null}
-      <div style={{ marginTop: 'auto', fontSize: 12, fontWeight: 900, color: 'var(--color-primary, #ea580c)' }}>Open ›</div>
+      <div className="erp-hub-card__title">{title}</div>
+      <div className="erp-hub-card__primary">{primary}</div>
+      {secondary ? <div className="erp-hub-card__secondary">{secondary}</div> : null}
+      <span className="erp-hub-card__cta">
+        Open <span aria-hidden>→</span>
+      </span>
     </Link>
   );
 }
@@ -115,14 +116,13 @@ function NbaCard({ nba }: { nba: Nba }) {
   return (
     <Link
       to={nba.to}
+      className="erp-nba-card"
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 6,
-        padding: 14,
-        borderRadius: 12,
-        border: `1px solid ${nba.level === 'error' ? 'rgba(220,38,38,0.30)' : nba.level === 'warn' ? 'rgba(234,179,8,0.30)' : 'rgba(37,99,235,0.30)'}`,
-        background: nba.level === 'error' ? 'rgba(254,242,242,0.95)' : nba.level === 'warn' ? 'rgba(254,252,232,0.95)' : 'rgba(239,246,255,0.95)',
+        gap: 5,
+        border: `1px solid ${nba.level === 'error' ? 'rgba(220,38,38,0.28)' : nba.level === 'warn' ? 'rgba(234,179,8,0.28)' : 'rgba(37,99,235,0.28)'}`,
+        background: nba.level === 'error' ? 'rgba(254,242,242,0.92)' : nba.level === 'warn' ? 'rgba(254,252,232,0.92)' : 'rgba(239,246,255,0.92)',
         textDecoration: 'none',
         color: '#0f172a',
       }}
@@ -132,7 +132,7 @@ function NbaCard({ nba }: { nba: Nba }) {
       </div>
       <div style={{ fontWeight: 950, fontSize: 14, marginTop: 2 }}>{nba.title}</div>
       {nba.detail ? <div className="muted" style={{ fontSize: 12 }}>{nba.detail}</div> : null}
-      <div style={{ marginTop: 6, fontSize: 12, fontWeight: 900, color: 'var(--color-primary, #ea580c)' }}>{nba.cta}</div>
+      <div style={{ marginTop: 4, fontSize: 11, fontWeight: 900, color: 'var(--color-primary, #ea580c)' }}>{nba.cta}</div>
     </Link>
   );
 }
@@ -453,18 +453,15 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
   ]);
 
   return (
-    <div className="stack" style={{ gap: 14 }}>
-      <header
-        className="card stack"
-        style={{ gap: 10, padding: 16, borderRadius: 14, border: '1px solid rgba(15,23,42,0.10)' }}
-      >
-        <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, alignItems: 'flex-start' }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              Operations Hub
+    <div className="stack operations-hub-erp" style={{ gap: 10 }}>
+      <header className="erp-hub-page-head">
+        <div className="erp-hub-page-head__row">
+          <div className="erp-hub-page-head__title-block" style={{ minWidth: 0 }}>
+            <div className="muted" style={{ fontSize: 10, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              Operations hub
             </div>
-            <h1 style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 950, color: '#0f172a' }}>{schoolName}</h1>
-            <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+            <h1>{schoolName}</h1>
+            <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
               <StatusChip
                 level={overallHealth}
                 label={
@@ -477,7 +474,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
                         : 'Setup needed'
                 }
               />
-              <span className="muted" style={{ fontSize: 12, fontWeight: 800 }}>
+              <span className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
                 Setup {setupCount}/{requiredTotal}
               </span>
               <ImpactPill
@@ -488,8 +485,19 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
               />
             </div>
           </div>
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <Link to="/app/onboarding" className="btn secondary">
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'flex-start' }}>
+            <div className="erp-cmd-search-wrap" role="search" style={{ minWidth: 200, flex: '1 1 220px' }}>
+              <Search size={16} strokeWidth={2.25} aria-hidden />
+              <input
+                className="erp-cmd-search-input"
+                placeholder="Search modules, entities, setup steps…"
+                readOnly
+                onFocus={(e) => e.currentTarget.blur()}
+                title="Hub-wide search preview"
+                aria-label="Hub search preview"
+              />
+            </div>
+            <Link to="/app/onboarding" className="btn secondary" style={{ whiteSpace: 'nowrap' }}>
               Setup wizard & CSV
             </Link>
           </div>
@@ -498,16 +506,16 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
 
       {/* Next Best Actions */}
       {nbas.length ? (
-        <section className="stack" style={{ gap: 8 }}>
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <h2 style={{ margin: 0, fontSize: 14, fontWeight: 950, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#475569' }}>
+        <section className="stack" style={{ gap: 6 }}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <h2 className="erp-hub-section-title" style={{ margin: 0 }}>
               Next best actions
             </h2>
             <button type="button" className="btn secondary" onClick={() => setChecklistOpen(true)}>
               See all
             </button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
             {nbas.map((n) => (
               <NbaCard key={n.id} nba={n} />
             ))}
@@ -516,27 +524,28 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
       ) : null}
 
       {/* Modules */}
-      <section className="stack" style={{ gap: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 950, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#475569' }}>
+      <section className="stack" style={{ gap: 6 }}>
+        <h2 className="erp-hub-section-title" style={{ margin: 0 }}>
           Modules
         </h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+        <div className="erp-hub-grid">
           {/*
             Time → Classes & sections (roster) → catalog resources → Academic (mapping) → Timetable.
           */}
-          <HubCard title="Time slots" level={timeReadiness.level} primary={timeReadiness.primary} secondary={timeReadiness.secondary} to="/app/time" />
+          <HubCard icon={Clock} title="Time slots" level={timeReadiness.level} primary={timeReadiness.primary} secondary={timeReadiness.secondary} to="/app/time" />
           <HubCard
+            icon={Users}
             title="Classes & sections"
             level={classesSectionsReadiness.level}
             primary={classesSectionsReadiness.primary}
             secondary={classesSectionsReadiness.secondary}
             to="/app/classes-sections"
           />
-          <HubCard title="Subjects" level={subjectsReadiness.level} primary={subjectsReadiness.primary} secondary={subjectsReadiness.secondary} to="/app/subjects" />
-          <HubCard title="Rooms" level={roomsReadiness.level} primary={roomsReadiness.primary} secondary={roomsReadiness.secondary} to="/app/rooms" />
-          <HubCard title="Teachers" level={teachersReadiness.level} primary={teachersReadiness.primary} secondary={teachersReadiness.secondary} to="/app/teachers" />
-          <HubCard title="Academic structure" level={academicReadiness.level} primary={academicReadiness.primary} secondary={academicReadiness.secondary} to="/app/academic" />
-          <HubCard title="Timetable" level={timetableReadiness.level} primary={timetableReadiness.primary} secondary={timetableReadiness.secondary} to="/app/timetable" />
+          <HubCard icon={BookOpen} title="Subjects" level={subjectsReadiness.level} primary={subjectsReadiness.primary} secondary={subjectsReadiness.secondary} to="/app/subjects" />
+          <HubCard icon={Building2} title="Rooms" level={roomsReadiness.level} primary={roomsReadiness.primary} secondary={roomsReadiness.secondary} to="/app/rooms" />
+          <HubCard icon={GraduationCap} title="Teachers" level={teachersReadiness.level} primary={teachersReadiness.primary} secondary={teachersReadiness.secondary} to="/app/teachers" />
+          <HubCard icon={Network} title="Academic structure" level={academicReadiness.level} primary={academicReadiness.primary} secondary={academicReadiness.secondary} to="/app/academic" />
+          <HubCard icon={CalendarDays} title="Timetable" level={timetableReadiness.level} primary={timetableReadiness.primary} secondary={timetableReadiness.secondary} to="/app/timetable" />
         </div>
       </section>
 

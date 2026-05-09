@@ -43,6 +43,9 @@ export type TimetableOccurrence = {
   room: string | null;
   classGroupDisplayName: string;
   source: string;
+  /** When from engine v2 — used for lecture-wise attendance deep links. */
+  classGroupId?: number | null;
+  lectureRowId?: number | null;
 };
 
 export type PublishedTeacherWeekly = {

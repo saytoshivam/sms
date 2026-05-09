@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,6 +25,14 @@ public interface LectureRepo extends JpaRepository<Lecture, Integer> {
             Integer schoolId, Integer classGroupId, LocalDate date);
 
     Optional<Lecture> findByIdAndSchool_Id(Integer id, Integer schoolId);
+
+    Optional<Lecture> findFirstBySchool_IdAndClassGroup_IdAndDateAndStartTimeAndEndTimeAndSubjectIgnoreCase(
+            Integer schoolId,
+            Integer classGroupId,
+            LocalDate date,
+            LocalTime startTime,
+            LocalTime endTime,
+            String subject);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from Lecture l where l.school.id = :schoolId")

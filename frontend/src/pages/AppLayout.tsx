@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { hasSchoolLeadershipRole, hasTeachingRole } from '../lib/roleGroups';
 import { FeatureArea } from '../lib/featureAreas';
 import { DrawerNavSection, DrawerNavSoon } from '../components/DrawerNavSection';
+import { SchoolLeaderErpChrome } from '../components/erp/SchoolLeaderErpChrome';
 
 type MePayload = {
   email: string;
@@ -49,10 +50,11 @@ function schoolLeaderRoleLine(roles: string[]): string {
   return parts.join(' · ') || 'School leader';
 }
 
-/** True on any /app/* route except the dashboard index. */
+/** True on /app/* feature routes; hidden on operations hub (/app) and school dashboard (/app/dashboard). */
 function shouldShowFeatureBack(pathname: string): boolean {
   const p = pathname.replace(/\/$/, '') || '/';
-  return p !== '/app' && p.startsWith('/app');
+  if (p === '/app' || p === '/app/dashboard') return false;
+  return p.startsWith('/app');
 }
 
 function FeatureBackRow({ visible }: { visible: boolean }) {
@@ -303,169 +305,8 @@ export function AppLayout() {
             <Outlet />
           </div>
         </>
-      ) : schoolLeaderShell && me.data && schoolProfile ? (
-        <>
-          {shellMenuOpen ? (
-            <button
-              type="button"
-              className="student-menu-backdrop"
-              aria-label="Close menu"
-              onClick={closeMenu}
-            />
-          ) : null}
-          <aside
-            className={
-              shellMenuOpen ? 'student-menu-drawer student-menu-drawer--open' : 'student-menu-drawer'
-            }
-          >
-            <div className="student-drawer-inner">
-              <div className="student-drawer-profile">
-                <div className="student-drawer-avatar-wrap">
-                  {schoolProfile.photoUrl ? (
-                    <img src={schoolProfile.photoUrl} alt="" className="student-drawer-avatar" />
-                  ) : (
-                    <div className="student-drawer-avatar student-drawer-avatar--placeholder" aria-hidden>
-                      {initialsFrom(schoolProfile.displayName, me.data.email)}
-                    </div>
-                  )}
-                </div>
-                <div className="student-drawer-name">{schoolProfile.displayName}</div>
-                <div className="student-drawer-meta">{schoolProfile.subtitle}</div>
-                {me.data.schoolName ? <div className="student-drawer-program">{me.data.schoolName}</div> : null}
-              </div>
-              <nav className="student-drawer-nav">
-                <Link className="student-drawer-link" to="/app" onClick={closeMenu}>
-                  Operations hub
-                </Link>
-                <Link className="student-drawer-link" to="/app/dashboard" onClick={closeMenu}>
-                  Classic workspace
-                </Link>
-                <Link className="student-drawer-link" to="/app/onboarding" onClick={closeMenu}>
-                  Setup wizard (CSV imports)
-                </Link>
-                <DrawerNavSection title={FeatureArea.ACADEMIC}>
-                  <Link className="student-drawer-link" to="/app/time" onClick={closeMenu}>
-                    Time slots
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/classes-sections" onClick={closeMenu}>
-                    Classes & sections
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/academic" onClick={closeMenu}>
-                    Academic structure
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/subjects" onClick={closeMenu}>
-                    Subjects
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/rooms" onClick={closeMenu}>
-                    Rooms
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/teachers" onClick={closeMenu}>
-                    Teachers
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/timetable" onClick={closeMenu}>
-                    Timetable workspace
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/lectures" onClick={closeMenu}>
-                    Lectures
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/teacher/timetable" onClick={closeMenu}>
-                    Teacher timetable
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/timetable/grid" onClick={closeMenu}>
-                    Timetable editor (advanced)
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/timetable/rules" onClick={closeMenu}>
-                    Recurring timetable slots
-                  </Link>
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.USER_ACCESS}>
-                  <Link className="student-drawer-link" to="/app/user-access" onClick={closeMenu}>
-                    Role & access management
-                  </Link>
-                  <Link className="student-drawer-link" to="/app/students" onClick={closeMenu}>
-                    Students
-                  </Link>
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.ATTENDANCE}>
-                  <Link className="student-drawer-link" to="/app/attendance" onClick={closeMenu}>
-                    Attendance
-                  </Link>
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.EXAMS_RESULTS}>
-                  <Link className="student-drawer-link" to="/app/teacher/class-progress" onClick={closeMenu}>
-                    Class progress & marks
-                  </Link>
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.FEES_FINANCE}>
-                  <Link className="student-drawer-link" to="/app/fees" onClick={closeMenu}>
-                    Fees & invoices
-                  </Link>
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.SCHOOL_OWNER}>
-                  <Link className="student-drawer-link" to="/app/school/management" onClick={closeMenu}>
-                    School management
-                  </Link>
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.COMMUNICATION}>
-                  <Link className="student-drawer-link" to="/app/school/announcements/new" onClick={closeMenu}>
-                    School-wide announcement
-                  </Link>
-                  {isTeacher ? (
-                    <Link className="student-drawer-link" to="/app/teacher/announcements/new" onClick={closeMenu}>
-                      Class announcement
-                    </Link>
-                  ) : null}
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.LIBRARY}>
-                  <DrawerNavSoon />
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.TRANSPORT}>
-                  <DrawerNavSoon />
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.REPORTS_ANALYTICS}>
-                  <Link className="student-drawer-link" to="/app/dashboard" onClick={closeMenu}>
-                    School overview (dashboard)
-                  </Link>
-                  <DrawerNavSoon text="Exports, cohort KPIs, and scheduled reports — coming soon. Dashboard shows enrollment and fee KPIs; Class progress covers teaching trends." />
-                </DrawerNavSection>
-                <DrawerNavSection title={FeatureArea.SYSTEM_CONFIG}>
-                  <Link className="student-drawer-link" to="/app/school-theme" onClick={closeMenu}>
-                    School theme & branding
-                  </Link>
-                </DrawerNavSection>
-              </nav>
-              <div className="student-drawer-footer">
-                <button
-                  type="button"
-                  className="student-drawer-logout"
-                  onClick={() => {
-                    closeMenu();
-                    logout();
-                    navigate('/login');
-                  }}
-                >
-                  Logout
-                </button>
-              </div>
-            </div>
-          </aside>
-          <div className="container container--school-leader-app">
-            <header className="student-m-header">
-              <button
-                type="button"
-                className="student-m-hamburger"
-                aria-label="Open menu"
-                onClick={() => setShellMenuOpen(true)}
-              >
-                ☰
-              </button>
-              <span className="student-m-header-title">{me.data.schoolName?.trim() || 'SMS'}</span>
-              <span className="student-m-header-spacer" aria-hidden />
-            </header>
-            <FeatureBackRow visible={showFeatureBack} />
-            <Outlet />
-          </div>
-        </>
+      ) : schoolLeaderShell && me.data ? (
+        <SchoolLeaderErpChrome me={me.data} logout={logout} />
       ) : showStudentPortalNav ? (
         <div className="container container--student-app">
           <FeatureBackRow visible={showFeatureBack} />
@@ -502,35 +343,69 @@ export function AppLayout() {
                 {me.data.schoolName ? <div className="student-drawer-program">{me.data.schoolName}</div> : null}
               </div>
               <nav className="student-drawer-nav">
-                <Link className="student-drawer-link" to="/app" onClick={closeMenu}>
+                <Link className="student-drawer-link" to="/app/dashboard" onClick={closeMenu}>
                   Dashboard
                 </Link>
-                <DrawerNavSection title={FeatureArea.USER_ACCESS}>
-                  <Link className="student-drawer-link" to="/app/students" onClick={closeMenu}>
-                    Students
-                  </Link>
-                </DrawerNavSection>
                 <DrawerNavSection title={FeatureArea.ACADEMIC}>
-                  <Link className="student-drawer-link" to="/app/lectures" onClick={closeMenu}>
-                    Lectures
-                  </Link>
                   <Link className="student-drawer-link" to="/app/teacher/timetable" onClick={closeMenu}>
                     My timetable
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/teacher/classes" onClick={closeMenu}>
+                    My classes
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/lectures" onClick={closeMenu}>
+                    Lectures
                   </Link>
                 </DrawerNavSection>
                 <DrawerNavSection title={FeatureArea.ATTENDANCE}>
                   <Link className="student-drawer-link" to="/app/attendance" onClick={closeMenu}>
-                    Attendance
+                    Attendance workspace
                   </Link>
                 </DrawerNavSection>
                 <DrawerNavSection title={FeatureArea.EXAMS_RESULTS}>
+                  <Link className="student-drawer-link" to="/app/teacher/homework" onClick={closeMenu}>
+                    Homework
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/teacher/assessments" onClick={closeMenu}>
+                    Assessments / marks
+                  </Link>
                   <Link className="student-drawer-link" to="/app/teacher/class-progress" onClick={closeMenu}>
                     Class progress
+                  </Link>
+                </DrawerNavSection>
+                <DrawerNavSection title={FeatureArea.USER_ACCESS}>
+                  <Link className="student-drawer-link" to="/app/students" onClick={closeMenu}>
+                    Students directory
                   </Link>
                 </DrawerNavSection>
                 <DrawerNavSection title={FeatureArea.COMMUNICATION}>
                   <Link className="student-drawer-link" to="/app/teacher/announcements/new" onClick={closeMenu}>
                     Class announcement
+                  </Link>
+                </DrawerNavSection>
+                <DrawerNavSection title="Operations">
+                  <Link className="student-drawer-link" to="/app/teacher/leave" onClick={closeMenu}>
+                    Leave
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/teacher/substitutions" onClick={closeMenu}>
+                    Substitutions
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/" onClick={closeMenu}>
+                    School operations hub
+                  </Link>
+                </DrawerNavSection>
+                <DrawerNavSection title="Self-service">
+                  <Link className="student-drawer-link" to="/app/teacher/documents" onClick={closeMenu}>
+                    Documents
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/teacher/reports" onClick={closeMenu}>
+                    Reports
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/teacher/notifications" onClick={closeMenu}>
+                    Notifications
+                  </Link>
+                  <Link className="student-drawer-link" to="/app/teacher/settings" onClick={closeMenu}>
+                    Settings
                   </Link>
                 </DrawerNavSection>
               </nav>
@@ -673,11 +548,6 @@ export function AppLayout() {
                     <Link className="student-drawer-link" to="/app/fees" onClick={closeMenu}>
                       Fees & invoices
                     </Link>
-                  </DrawerNavSection>
-                ) : null}
-                {roles.includes('LIBRARIAN') ? (
-                  <DrawerNavSection title={FeatureArea.LIBRARY}>
-                    <DrawerNavSoon />
                   </DrawerNavSection>
                 ) : null}
                 {roles.some((r) => ['RECEPTIONIST', 'TRANSPORT_MANAGER', 'IT_SUPPORT'].includes(r)) ? (

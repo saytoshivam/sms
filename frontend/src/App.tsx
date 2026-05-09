@@ -1,4 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { TeacherClassWorkspacePage } from './pages/teacher/TeacherClassWorkspacePage';
+import { TeacherMyClassesPage } from './pages/teacher/TeacherMyClassesPage';
+import { TeacherPlaceholderPage } from './pages/teacher/TeacherPlaceholderPage';
 import { useAuth } from './lib/auth';
 import { RequireSchoolLeadership } from './components/RequireSchoolLeadership';
 import { AppLayout } from './pages/AppLayout';
@@ -17,6 +20,7 @@ import { PlatformSchoolEditPage } from './pages/platform/PlatformSchoolEditPage'
 import { PlatformSchoolsDirectoryPage } from './pages/platform/PlatformSchoolsDirectoryPage';
 import { StudentsPage } from './pages/StudentsPage';
 import { AttendancePage } from './pages/AttendancePage';
+import { AdminDailyAttendanceMonitorPage } from './pages/AdminDailyAttendanceMonitorPage';
 import { FeesPage } from './pages/FeesPage';
 import { LecturesPage } from './pages/LecturesPage';
 import { SchoolThemePage } from './pages/SchoolThemePage';
@@ -40,7 +44,7 @@ import { StudentExamsPage } from './pages/StudentExamsPage';
 import { SchoolManagementPage } from './pages/SchoolManagementPage';
 import { UserAccessManagementPage } from './pages/UserAccessManagementPage';
 import { SchoolOnboardingWizardPage } from './pages/SchoolOnboardingWizardPage';
-import { OperationsHubPage } from './pages/OperationsHubPage';
+import { AppHomeRoute } from './pages/AppHomeRoute';
 import { AcademicModulePage } from './pages/modules/AcademicModulePage';
 import { SubjectsModulePage } from './pages/modules/SubjectsModulePage';
 import { TeachersModulePage } from './pages/modules/TeachersModulePage';
@@ -71,7 +75,7 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<OperationsHubPage />} />
+        <Route index element={<AppHomeRoute />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="classes-sections" element={<ClassesSectionsModulePage />} />
         <Route path="academic" element={<AcademicModulePage />} />
@@ -119,9 +123,28 @@ export default function App() {
         <Route path="teacher/announcements/new" element={<ComposeTeacherAnnouncementPage />} />
         <Route path="student/fees" element={<StudentFeeStatementPage />} />
         <Route path="students/:studentId/performance" element={<StudentPerformancePage />} />
+        <Route
+          path="attendance/daily-monitor"
+          element={
+            <RequireSchoolLeadership>
+              <AdminDailyAttendanceMonitorPage />
+            </RequireSchoolLeadership>
+          }
+        />
         <Route path="attendance" element={<AttendancePage />} />
         <Route path="fees" element={<FeesPage />} />
         <Route path="lectures" element={<LecturesPage />} />
+        <Route path="teacher" element={<Navigate to="/app/dashboard" replace />} />
+        <Route path="teacher/classes" element={<TeacherMyClassesPage />} />
+        <Route path="teacher/classes/:classGroupId" element={<TeacherClassWorkspacePage />} />
+        <Route path="teacher/homework" element={<TeacherPlaceholderPage title="Homework">Authoring, reminders, grading, and completion analytics for your cohorts.</TeacherPlaceholderPage>} />
+        <Route path="teacher/assessments" element={<TeacherPlaceholderPage title="Assessments & marks">Controlled assessments, spreadsheets-style entry, publish gates, and CSV import.</TeacherPlaceholderPage>} />
+        <Route path="teacher/leave" element={<TeacherPlaceholderPage title="Leave">Applications, balances, approvals, and timetable impact preview.</TeacherPlaceholderPage>} />
+        <Route path="teacher/substitutions" element={<TeacherPlaceholderPage title="Substitutions">Cover assignments, narrow substitute access, and acknowledgement workflow.</TeacherPlaceholderPage>} />
+        <Route path="teacher/documents" element={<TeacherPlaceholderPage title="Documents">Policies, appointment letters, and upload requests.</TeacherPlaceholderPage>} />
+        <Route path="teacher/reports" element={<TeacherPlaceholderPage title="Reports">Instructional and compliance exports scoped to your classes.</TeacherPlaceholderPage>} />
+        <Route path="teacher/notifications" element={<TeacherPlaceholderPage title="Notifications">Operational inbox merging attendance, substitutions, approvals, and school notices.</TeacherPlaceholderPage>} />
+        <Route path="teacher/settings" element={<TeacherPlaceholderPage title="Teacher settings">Profile visibility, notifications, passwords, preferred language.</TeacherPlaceholderPage>} />
         <Route path="teacher/class-progress" element={<ClassProgressPage />} />
         <Route path="teacher/timetable" element={<TeacherTimetablePage />} />
         <Route

@@ -1851,6 +1851,18 @@ textarea:disabled {
   color: #991b1b;
 }
 
+.attendance-pill--late.attendance-pill--active {
+  background: color-mix(in srgb, #d97706 18%, #fff);
+  border-color: #d97706;
+  color: #92400e;
+}
+
+.attendance-pill--excused.attendance-pill--active {
+  background: color-mix(in srgb, #2563eb 14%, #fff);
+  border-color: #2563eb;
+  color: #1e3a8a;
+}
+
 .attendance-pill:hover:not(.attendance-pill--active) {
   border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
 }

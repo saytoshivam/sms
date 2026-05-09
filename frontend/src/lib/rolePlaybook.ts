@@ -74,18 +74,8 @@ export const ROLE_PLAYBOOK_SECTIONS: {
     ],
   },
   {
-    id: 'librarian',
-    title: '12. Librarian',
-    tagline: 'Library system owner',
-    bullets: [
-      'Add/remove books; issue to students/teachers',
-      'Track due dates; manage fines; maintain inventory',
-      'Reports: issued books; overdue books',
-    ],
-  },
-  {
     id: 'accountant',
-    title: '13. Accountant',
+    title: '12. Accountant',
     tagline: 'Financial control',
     bullets: [
       'Fees: structures; invoices; payments; refunds',
@@ -95,7 +85,7 @@ export const ROLE_PLAYBOOK_SECTIONS: {
   },
   {
     id: 'receptionist',
-    title: '14. Receptionist / front desk',
+    title: '13. Receptionist / front desk',
     tagline: 'Entry-level admin',
     bullets: [
       'Student admissions (data entry); inquiries',
@@ -103,17 +93,8 @@ export const ROLE_PLAYBOOK_SECTIONS: {
     ],
   },
   {
-    id: 'transport',
-    title: '15. Transport manager',
-    tagline: 'Optional — strong feature',
-    bullets: [
-      'Manage buses/routes; assign students to routes',
-      'Track bus attendance; notify delays',
-    ],
-  },
-  {
     id: 'it-support',
-    title: '16. IT / system admin (school level)',
+    title: '14. IT / system admin (school level)',
     tagline: 'Technical operations',
     bullets: [
       'Manage user accounts; reset passwords',
@@ -128,6 +109,5 @@ export const FEATURE_ROLE_MATRIX: { feature: string; roles: string }[] = [
   { feature: 'Fees', roles: 'Accountant, Parent' },
   { feature: 'Exams', roles: 'Teacher, HOD, Principal' },
   { feature: 'Reports', roles: 'School admin, Principal' },
-  { feature: 'Library', roles: 'Librarian' },
   { feature: 'Notifications', roles: 'All (as applicable)' },
 ];

@@ -17,6 +17,8 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.*;
 
+import static com.myhaimi.sms.utils.LectureRowIdEncoding.publishedEntrySurrogate;
+
 @Service
 @RequiredArgsConstructor
 public class PublishedTimetableCalendarService {
@@ -242,7 +244,9 @@ public class PublishedTimetableCalendarService {
         String subject = e.getSubject() != null ? e.getSubject().getName() : "";
         String cgName = e.getClassGroup() != null ? e.getClassGroup().getDisplayName() : "";
         String room = roomLabel(e.getRoom());
-        return new TimetableOccurrenceDTO(date, start, end, subject, teacher, room, cgName, "RECURRING");
+        Integer cgId = e.getClassGroup() != null ? e.getClassGroup().getId() : null;
+        Integer rowId = publishedEntrySurrogate(e.getId());
+        return new TimetableOccurrenceDTO(date, start, end, subject, teacher, room, cgName, "RECURRING", cgId, rowId);
     }
 
     private static String roomLabel(Room room) {

@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 public interface AttendanceSessionRepo extends JpaRepository<AttendanceSession, Integer> {
@@ -30,6 +32,12 @@ public interface AttendanceSessionRepo extends JpaRepository<AttendanceSession, 
 
     Optional<AttendanceSession> findBySchool_IdAndClassGroup_IdAndDateAndLectureIsNull(
             Integer schoolId, Integer classGroupId, LocalDate date);
+
+    List<AttendanceSession> findBySchool_IdAndDateAndLectureIsNull(Integer schoolId, LocalDate date);
+
+    List<AttendanceSession> findBySchool_IdAndDateAndLecture_IdIn(Integer schoolId, LocalDate date, Collection<Integer> lectureIds);
+
+    Optional<AttendanceSession> findFirstBySchool_IdAndLecture_Id(Integer schoolId, Integer lectureId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from AttendanceSession s where s.school.id = :schoolId")

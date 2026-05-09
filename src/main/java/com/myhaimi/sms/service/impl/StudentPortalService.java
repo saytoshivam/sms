@@ -4,6 +4,7 @@ import com.myhaimi.sms.DTO.studentportal.FeeStatementDTO;
 import com.myhaimi.sms.DTO.studentportal.FeeStatementLineDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentExamCardDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentMarkRowDTO;
+import com.myhaimi.sms.DTO.studentportal.StudentDailyAttendanceRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
 import com.myhaimi.sms.DTO.timetable.PublishedStudentWeeklyTimetableDTO;
 import com.myhaimi.sms.DTO.timetable.TimetableOccurrenceDTO;
@@ -171,9 +172,8 @@ public class StudentPortalService {
     }
 
     /**
-     * Subject-wise attendance for the <strong>current academic year</strong> (India-style Apr–Mar), from the first
-     * day of that year up to today. Each <em>delivered</em> session is a class day that had a lecture for that subject;
-     * the student’s class-level roll for that day determines present / late / excused (duty leave) / absent.
+     * Subject-wise attendance for the academic year-to-date depends on {@link School#getAttendanceMode()}: daily roll
+     * per calendar day ({@link AttendanceMode#DAILY}), or lecture-slot marks ({@link AttendanceMode#LECTURE_WISE}).
      */
     @Transactional(readOnly = true)
     public List<StudentSubjectAttendanceDTO> mySubjectAttendance(int studentId) {
@@ -186,6 +186,8 @@ public class StudentPortalService {
             return List.of();
         }
         Integer cgId = student.getClassGroup().getId();
+        School school = student.getSchool();
+        AttendanceMode mode = school != null ? school.getAttendanceMode() : AttendanceMode.LECTURE_WISE;
         LocalDate today = LocalDate.now();
         LocalDate termStart = academicYearStart(today);
         LocalDate termEndInclusive = academicYearEnd(today);
@@ -198,6 +200,7 @@ public class StudentPortalService {
 
         Map<String, Set<LocalDate>> lectureDatesBySubjectCode = new LinkedHashMap<>();
         Map<String, Lecture> latestLectureBySubjectCode = new HashMap<>();
+        Map<String, List<Lecture>> lecturesBySubjectCode = new LinkedHashMap<>();
         for (Lecture lec : lectures) {
             subjects.stream()
                     .filter(sub -> sub.getName().equalsIgnoreCase(lec.getSubject().trim()))
@@ -206,10 +209,12 @@ public class StudentPortalService {
                         String code = sub.getCode();
                         lectureDatesBySubjectCode.computeIfAbsent(code, k -> new LinkedHashSet<>()).add(lec.getDate());
                         latestLectureBySubjectCode.merge(code, lec, (a, b) -> a.getDate().isBefore(b.getDate()) ? b : a);
+                        lecturesBySubjectCode.computeIfAbsent(code, k -> new ArrayList<>()).add(lec);
                     });
         }
 
-        Map<LocalDate, String> statusByDate = new HashMap<>();
+        Map<LocalDate, String> dailyRollByDate = new HashMap<>();
+        Map<Integer, String> lectureSlotStatusByLecturePk = new HashMap<>();
         for (StudentAttendance sa : studentAttendanceRepo.findByStudent_Id(studentId)) {
             AttendanceSession session = sa.getAttendanceSession();
             if (session == null
@@ -223,7 +228,11 @@ public class StudentPortalService {
             if (d.isBefore(termStart) || d.isAfter(windowEnd)) {
                 continue;
             }
-            statusByDate.put(d, sa.getStatus());
+            if (session.getLecture() == null) {
+                dailyRollByDate.put(d, sa.getStatus());
+            } else {
+                lectureSlotStatusByLecturePk.put(session.getLecture().getId(), sa.getStatus());
+            }
         }
 
         String sectionCode = student.getClassGroup().getCode();
@@ -237,24 +246,45 @@ public class StudentPortalService {
             List<LocalDate> sortedDates = new ArrayList<>(dates);
             Collections.sort(sortedDates);
 
-            int delivered = sortedDates.size();
             int attended = 0;
             int dutyLeaves = 0;
             LocalDate lastAttended = null;
-            for (LocalDate d : sortedDates) {
-                String st = statusByDate.get(d);
-                if (st == null) {
-                    continue;
-                }
-                if ("PRESENT".equalsIgnoreCase(st) || "LATE".equalsIgnoreCase(st)) {
-                    attended++;
-                    if (lastAttended == null || d.isAfter(lastAttended)) {
-                        lastAttended = d;
+
+            if (mode == AttendanceMode.DAILY) {
+                for (LocalDate d : sortedDates) {
+                    String st = dailyRollByDate.get(d);
+                    if (st == null || st.isBlank()) {
+                        continue;
                     }
-                } else if ("EXCUSED".equalsIgnoreCase(st)) {
-                    dutyLeaves++;
+                    if (isPresentOrLate(st)) {
+                        attended++;
+                        if (lastAttended == null || d.isAfter(lastAttended)) {
+                            lastAttended = d;
+                        }
+                    } else if (isExcused(st)) {
+                        dutyLeaves++;
+                    }
+                }
+            } else {
+                List<Lecture> lecs = lecturesBySubjectCode.getOrDefault(sub.getCode(), List.of());
+                for (Lecture lec : lecs) {
+                    String st = lectureSlotStatusByLecturePk.get(lec.getId());
+                    if (st == null || st.isBlank()) {
+                        continue;
+                    }
+                    if (isPresentOrLate(st)) {
+                        attended++;
+                        LocalDate dd = lec.getDate();
+                        if (lastAttended == null || dd.isAfter(lastAttended)) {
+                            lastAttended = dd;
+                        }
+                    } else if (isExcused(st)) {
+                        dutyLeaves++;
+                    }
                 }
             }
+
+            int delivered = sortedDates.size();
             double pct = delivered == 0 ? 0 : round2(100.0 * attended / delivered);
             Lecture sample = latestLectureBySubjectCode.get(sub.getCode());
             String faculty = sample != null && sample.getTeacherName() != null && !sample.getTeacherName().isBlank()
@@ -283,6 +313,74 @@ public class StudentPortalService {
                     rollNo));
         }
         return out;
+    }
+
+    @Transactional(readOnly = true)
+    public List<StudentDailyAttendanceRowDTO> myDailyAttendance(int studentId) {
+        Integer tenantId = TenantContext.getTenantId();
+        if (tenantId == null) {
+            throw new IllegalStateException("Tenant context required");
+        }
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, tenantId).orElseThrow();
+        if (student.getClassGroup() == null || student.getSchool() == null) {
+            return List.of();
+        }
+        if (student.getSchool().getAttendanceMode() != AttendanceMode.DAILY) {
+            return List.of();
+        }
+        Integer cgId = student.getClassGroup().getId();
+        LocalDate today = LocalDate.now();
+        LocalDate termStart = academicYearStart(today);
+        LocalDate termEndInclusive = academicYearEnd(today);
+        LocalDate windowEnd = today.isAfter(termEndInclusive) ? termEndInclusive : today;
+        TreeMap<LocalDate, StudentDailyAttendancePack> byDateDescending = new TreeMap<>(Collections.reverseOrder());
+        for (StudentAttendance sa : studentAttendanceRepo.findByStudent_Id(studentId)) {
+            AttendanceSession session = sa.getAttendanceSession();
+            if (session == null
+                    || session.getSchool() == null
+                    || !tenantId.equals(session.getSchool().getId())
+                    || session.getClassGroup() == null
+                    || !cgId.equals(session.getClassGroup().getId())
+                    || session.getLecture() != null) {
+                continue;
+            }
+            LocalDate d = session.getDate();
+            if (d.isBefore(termStart) || d.isAfter(windowEnd)) {
+                continue;
+            }
+            byDateDescending.put(d, new StudentDailyAttendancePack(sheetAttendanceLabel(sa.getStatus()), session.isLocked()));
+        }
+        List<StudentDailyAttendanceRowDTO> rows = new ArrayList<>();
+        for (Map.Entry<LocalDate, StudentDailyAttendancePack> e : byDateDescending.entrySet()) {
+            StudentDailyAttendancePack p = e.getValue();
+            rows.add(new StudentDailyAttendanceRowDTO(e.getKey(), p.status(), p.locked()));
+        }
+        return rows;
+    }
+
+    private record StudentDailyAttendancePack(String status, boolean locked) {}
+
+    private static boolean isPresentOrLate(String raw) {
+        if (raw == null) return false;
+        String u = raw.trim().toUpperCase(Locale.ROOT);
+        return "PRESENT".equals(u) || "LATE".equals(u);
+    }
+
+    private static boolean isExcused(String raw) {
+        if (raw == null) return false;
+        String u = raw.trim().toUpperCase(Locale.ROOT);
+        return "EXCUSED".equals(u) || "LEAVE".equals(u);
+    }
+
+    private static String sheetAttendanceLabel(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "—";
+        }
+        String u = raw.trim().toUpperCase(Locale.ROOT);
+        if ("LEAVE".equals(u)) {
+            return "EXCUSED";
+        }
+        return u;
     }
 
     /** First day of the academic year containing {@code d} (April 1). */

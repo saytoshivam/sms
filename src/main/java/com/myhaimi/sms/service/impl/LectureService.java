@@ -17,6 +17,7 @@ import com.myhaimi.sms.repository.TimetableEntryRepo;
 import com.myhaimi.sms.repository.TimetableSlotRepo;
 import com.myhaimi.sms.repository.TimetableVersionRepo;
 import com.myhaimi.sms.repository.UserRepo;
+import com.myhaimi.sms.utils.LectureRowIdEncoding;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -44,9 +45,6 @@ public class LectureService {
     private final TimetableSlotRepo timetableSlotRepo;
     private final TimetableVersionRepo timetableVersionRepo;
     private final TimetableEntryRepo timetableEntryRepo;
-
-    /** Legacy slot surrogate ids avoid collision with timetable_entry ids used as negatives in the timeline. */
-    private static final int WEEKLY_SLOT_ID_BASE = 1_000_000_000;
 
     private Integer requireSchoolId() {
         Integer schoolId = TenantContext.getSchoolId();
@@ -88,7 +86,7 @@ public class LectureService {
             if (slot.getDayOfWeek() != dow) continue;
             String tn = timetableSlotTeacherName(slot);
             rows.add(new LectureDayRowDTO(
-                    -(WEEKLY_SLOT_ID_BASE + slot.getId()),
+                    LectureRowIdEncoding.legacyWeeklySlotSurrogate(slot.getId()),
                     slot.getStartTime(),
                     slot.getEndTime(),
                     slot.getSubject(),
@@ -113,7 +111,7 @@ public class LectureService {
             String subj = e.getSubject() != null ? e.getSubject().getName() : "";
             String tn = e.getStaff() != null ? e.getStaff().getFullName() : null;
             rows.add(new LectureDayRowDTO(
-                    -e.getId(),
+                    LectureRowIdEncoding.publishedEntrySurrogate(e.getId()),
                     e.getTimeSlot().getStartTime(),
                     e.getTimeSlot().getEndTime(),
                     subj,

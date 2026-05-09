@@ -53,8 +53,17 @@ public class AttendanceSession {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** When set, roster is frozen; further marks require school leadership + edit reason + audit. */
+    @Column(name = "locked_at")
+    private Instant lockedAt;
+
     @JsonProperty("lectureId")
     public Integer getLectureId() {
         return lecture == null ? null : lecture.getId();
+    }
+
+    @JsonProperty("locked")
+    public boolean isLocked() {
+        return lockedAt != null;
     }
 }

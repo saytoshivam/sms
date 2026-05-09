@@ -1,17 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { formatJsonDate, pageContent, pageTotalElements, type SpringPage } from '../lib/apiData';
 import { DateKeeper } from '../components/DateKeeper';
 import { SmartSelect } from '../components/SmartSelect';
 import type { MeProfile } from '../modules/dashboards/SuperAdminDashboard';
+import { hasSchoolLeadershipRole } from '../lib/roleGroups';
 import { toast } from '../lib/toast';
+
+type MarkStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
 
 type Session = {
   id: number;
   date: string;
   lectureId?: number | null;
+  locked?: boolean;
   classGroup?: { id: number; displayName: string } | null;
 };
 type ClassGroup = { id: number; displayName: string };
@@ -23,7 +28,9 @@ type AttendanceSessionSheet = {
   classGroupDisplayName: string;
   lectureId: number | null;
   lectureSummary: string | null;
-  students: { studentId: number; admissionNo: string; displayName: string; status: 'PRESENT' | 'ABSENT' | null }[];
+  locked: boolean;
+  markingWindowOpenNow: boolean;
+  students: { studentId: number; admissionNo: string; displayName: string; status: MarkStatus | null }[];
 };
 
 function todayYmd() {
@@ -34,14 +41,32 @@ function todayYmd() {
   return `${y}-${m}-${day}`;
 }
 
+function normalizeSheetStatus(raw: string | null | undefined): MarkStatus | null {
+  if (raw === 'PRESENT' || raw === 'ABSENT' || raw === 'LATE' || raw === 'EXCUSED') return raw;
+  return null;
+}
+
 export function AttendancePage() {
   const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
   const [classGroupId, setClassGroupId] = useState('');
   const [date, setDate] = useState(() => todayYmd());
   const [lectureId, setLectureId] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
-  /** studentId → PRESENT | ABSENT */
-  const [draft, setDraft] = useState<Record<number, 'PRESENT' | 'ABSENT'>>({});
+  const [draft, setDraft] = useState<Record<number, MarkStatus>>({});
+
+  const hydrateFromUrl = useCallback(() => {
+    const cg = params.get('classGroupId');
+    const d = params.get('date');
+    const lec = params.get('lectureId');
+    if (cg) setClassGroupId(cg);
+    if (d && d.length >= 10) setDate(d);
+    if (lec !== null && lec !== '') setLectureId(lec);
+  }, [params]);
+
+  useEffect(() => {
+    hydrateFromUrl();
+  }, [hydrateFromUrl]);
 
   const me = useQuery({
     queryKey: ['me'],
@@ -50,6 +75,7 @@ export function AttendancePage() {
 
   const mode = me.data?.schoolAttendanceMode ?? 'LECTURE_WISE';
   const lectureWise = mode === 'LECTURE_WISE';
+  const isLeader = hasSchoolLeadershipRole(me.data?.roles ?? []);
 
   const sessionsParams = useMemo(() => {
     const p = new URLSearchParams();
@@ -92,19 +118,34 @@ export function AttendancePage() {
   });
 
   useEffect(() => {
-    setLectureId('');
-  }, [classGroupId, date, lectureWise]);
-
-  useEffect(() => {
     if (!sheet.data) return;
-    const next: Record<number, 'PRESENT' | 'ABSENT'> = {};
+    const next: Record<number, MarkStatus> = {};
     for (const r of sheet.data.students) {
-      if (r.status === 'PRESENT' || r.status === 'ABSENT') {
-        next[r.studentId] = r.status;
-      }
+      const s = normalizeSheetStatus(r.status);
+      next[r.studentId] = s ?? 'PRESENT';
     }
     setDraft(next);
   }, [sheet.data]);
+
+  const pushUrl = useCallback(
+    (next: { classGroupId?: string; date?: string; lectureId?: string | null }) => {
+      const p = new URLSearchParams(params);
+      if (next.classGroupId !== undefined) {
+        if (next.classGroupId) p.set('classGroupId', next.classGroupId);
+        else p.delete('classGroupId');
+      }
+      if (next.date !== undefined) {
+        if (next.date) p.set('date', next.date);
+        else p.delete('date');
+      }
+      if (next.lectureId !== undefined) {
+        if (next.lectureId) p.set('lectureId', next.lectureId);
+        else p.delete('lectureId');
+      }
+      setParams(p, { replace: true });
+    },
+    [params, setParams],
+  );
 
   const createSession = useMutation({
     mutationFn: async () => {
@@ -120,17 +161,19 @@ export function AttendancePage() {
     onSuccess: async (created) => {
       await qc.invalidateQueries({ queryKey: ['attendance-sessions'] });
       setSelectedSessionId(created.id);
+      pushUrl({ classGroupId, date, lectureId: lectureWise ? lectureId : null });
     },
   });
 
   const saveMarks = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ editReason }: { editReason?: string | null }) => {
       if (selectedSessionId == null) return;
       const body = Object.entries(draft).map(([studentId, status]) => ({
         studentId: Number(studentId),
         status,
       }));
-      await api.post(`/api/attendance/sessions/${selectedSessionId}/marks`, body);
+      const q = editReason && editReason.trim().length > 0 ? `?editReason=${encodeURIComponent(editReason.trim())}` : '';
+      await api.post(`/api/attendance/sessions/${selectedSessionId}/marks${q}`, body);
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['attendance-sheet', selectedSessionId] });
@@ -139,18 +182,69 @@ export function AttendancePage() {
     onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
+  const submitAttendance = useMutation({
+    mutationFn: async () => {
+      if (selectedSessionId == null) return;
+      await api.post(`/api/attendance/sessions/${selectedSessionId}/submit`);
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['attendance-sheet', selectedSessionId] });
+      await qc.invalidateQueries({ queryKey: ['attendance-sessions'] });
+      toast.success('Submitted', 'Attendance is locked.');
+    },
+    onError: (e) => toast.error('Submit failed', formatApiError(e)),
+  });
+
   const groupList = pageContent(classGroups.data);
   const sessionList = pageContent(sessions.data);
   const lectureList = lecturesForDay.data ?? [];
 
-  const canSubmit =
+  const canCreateSession =
     Boolean(classGroupId) &&
     date.length >= 10 &&
     (!lectureWise || (lectureId !== '' && !Number.isNaN(Number(lectureId))));
 
   const markedCount = Object.keys(draft).length;
   const rosterSize = sheet.data?.students.length ?? 0;
-  const canSaveMarks = selectedSessionId != null && rosterSize > 0 && markedCount > 0 && !saveMarks.isPending;
+  const locked = sheet.data?.locked ?? false;
+  const inWindow = sheet.data?.markingWindowOpenNow ?? true;
+
+  const canEditDraft =
+    selectedSessionId != null &&
+    rosterSize > 0 &&
+    markedCount === rosterSize &&
+    !saveMarks.isPending &&
+    ((locked && isLeader) || (!locked && (mode === 'DAILY' || inWindow || isLeader)));
+
+  const canSubmitNow =
+    selectedSessionId != null &&
+    rosterSize > 0 &&
+    !locked &&
+    !submitAttendance.isPending &&
+    (mode === 'DAILY' || inWindow || isLeader);
+
+  const markAllPresent = () => {
+    if (!sheet.data) return;
+    const next: Record<number, MarkStatus> = {};
+    for (const r of sheet.data.students) {
+      next[r.studentId] = 'PRESENT';
+    }
+    setDraft(next);
+  };
+
+  const onSaveClick = () => {
+    if (locked && isLeader) {
+      const reason = window.prompt('Reason for editing locked attendance (required):');
+      if (reason === null) return;
+      if (reason.trim().length < 4) {
+        toast.error('Reason required', 'Please enter at least a few characters.');
+        return;
+      }
+      saveMarks.mutate({ editReason: reason });
+      return;
+    }
+    saveMarks.mutate({});
+  };
 
   return (
     <div className="attendance-staff-page">
@@ -159,13 +253,14 @@ export function AttendancePage() {
         <p className="attendance-staff-lead">
           {lectureWise ? (
             <>
-              Open a session for a class period, then mark each student <strong>present</strong> or <strong>absent</strong>{' '}
-              for that period. Only the teacher for that slot (or a school leader) can record it.
+              Your school uses <strong>lecture-wise</strong> attendance: each published period has its own roll. Default is{' '}
+              <strong>all present</strong> until you change it. <strong>Submit</strong> locks the sheet; late edits need a reason
+              (school leaders) and are audited.
             </>
           ) : (
             <>
-              Open a daily session for a class, then mark each student <strong>present</strong> or <strong>absent</strong> for
-              the whole day.
+              Your school uses <strong>daily</strong> attendance: the class teacher records one roll per section per day. Default is{' '}
+              <strong>all present</strong>. Submit locks the sheet.
             </>
           )}
         </p>
@@ -195,7 +290,11 @@ export function AttendancePage() {
                 <label>Class group</label>
                 <SmartSelect
                   value={classGroupId}
-                  onChange={setClassGroupId}
+                  onChange={(v) => {
+                    setClassGroupId(v);
+                    setLectureId('');
+                    pushUrl({ classGroupId: v, lectureId: null });
+                  }}
                   placeholder="Select…"
                   options={groupList.map((cg) => ({ value: String(cg.id), label: cg.displayName }))}
                 />
@@ -205,7 +304,15 @@ export function AttendancePage() {
               </div>
               <div className="stack lecture-schedule-field lecture-schedule-field--date">
                 <label htmlFor="attendance-date">Date</label>
-                <DateKeeper id="attendance-date" value={date} onChange={setDate} />
+                <DateKeeper
+                  id="attendance-date"
+                  value={date}
+                  onChange={(v) => {
+                    setDate(v);
+                    setLectureId('');
+                    pushUrl({ date: v, lectureId: null });
+                  }}
+                />
               </div>
               {lectureWise ? (
                 <div className="stack lecture-schedule-field lecture-schedule-field--grow" style={{ minWidth: 220 }}>
@@ -213,7 +320,10 @@ export function AttendancePage() {
                   <SmartSelect
                     id="attendance-lecture"
                     value={lectureId}
-                    onChange={setLectureId}
+                    onChange={(v) => {
+                      setLectureId(v);
+                      pushUrl({ lectureId: v || null });
+                    }}
                     placeholder="Select a lecture…"
                     disabled={!classGroupId || lecturesForDay.isLoading}
                     options={lectureList.map((row) => ({
@@ -232,8 +342,8 @@ export function AttendancePage() {
                 </div>
               ) : null}
               <div style={{ alignSelf: 'end' }}>
-                <button type="submit" className="btn student-attendance-primary-btn" disabled={createSession.isPending || !canSubmit}>
-                  {createSession.isPending ? 'Creating…' : 'Create session'}
+                <button type="submit" className="btn student-attendance-primary-btn" disabled={createSession.isPending || !canCreateSession}>
+                  {createSession.isPending ? 'Creating…' : 'Create / open session'}
                 </button>
               </div>
             </div>
@@ -279,6 +389,7 @@ export function AttendancePage() {
                         ) : (
                           <span> · Full day</span>
                         )}
+                        {s.locked ? <span> · Locked</span> : null}
                       </span>
                     </span>
                     <span className="attendance-session-row__id">#{s.id}</span>
@@ -303,6 +414,16 @@ export function AttendancePage() {
             ) : sheet.data && !sheet.data.lectureId ? (
               <span className="student-tt-tag">Full day</span>
             ) : null}
+            {locked ? (
+              <span className="student-tt-tag" title="Marks are frozen">
+                Locked
+              </span>
+            ) : null}
+            {lectureWise && sheet.data && !inWindow && !isLeader ? (
+              <span className="student-tt-tag" title="Open during the lesson window plus grace period">
+                Outside marking window
+              </span>
+            ) : null}
           </div>
           <div className="student-tt-body">
             {sheet.isLoading ? (
@@ -318,12 +439,17 @@ export function AttendancePage() {
                   ) : (
                     <span>
                       {' '}
-                      · {markedCount} of {sheet.data.students.length} marked
+                      · {markedCount} of {sheet.data.students.length} in draft
                     </span>
                   )}
                 </p>
                 {sheet.data.students.length === 0 ? null : (
                   <>
+                    <div className="attendance-save-row row" style={{ flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+                      <button type="button" className="btn" disabled={locked && !isLeader} onClick={markAllPresent}>
+                        Mark all present
+                      </button>
+                    </div>
                     <div className="attendance-mark-list">
                       {sheet.data.students.map((row) => (
                         <div key={row.studentId} className="attendance-mark-row">
@@ -332,41 +458,44 @@ export function AttendancePage() {
                             <div className="muted attendance-mark-row__adm">{row.admissionNo}</div>
                           </div>
                           <div className="attendance-mark-toggle" role="group" aria-label={`Attendance for ${row.displayName}`}>
-                            <button
-                              type="button"
-                              className={
-                                draft[row.studentId] === 'PRESENT'
-                                  ? 'attendance-pill attendance-pill--present attendance-pill--active'
-                                  : 'attendance-pill attendance-pill--present'
-                              }
-                              onClick={() => setDraft((d) => ({ ...d, [row.studentId]: 'PRESENT' }))}
-                            >
-                              Present
-                            </button>
-                            <button
-                              type="button"
-                              className={
-                                draft[row.studentId] === 'ABSENT'
-                                  ? 'attendance-pill attendance-pill--absent attendance-pill--active'
-                                  : 'attendance-pill attendance-pill--absent'
-                              }
-                              onClick={() => setDraft((d) => ({ ...d, [row.studentId]: 'ABSENT' }))}
-                            >
-                              Absent
-                            </button>
+                            {(['PRESENT', 'ABSENT', 'LATE', 'EXCUSED'] as const).map((st) => (
+                              <button
+                                key={st}
+                                type="button"
+                                className={
+                                  draft[row.studentId] === st
+                                    ? `attendance-pill attendance-pill--${st === 'EXCUSED' ? 'excused' : st.toLowerCase()} attendance-pill--active`
+                                    : `attendance-pill attendance-pill--${st === 'EXCUSED' ? 'excused' : st.toLowerCase()}`
+                                }
+                                disabled={locked && !isLeader}
+                                onClick={() => setDraft((d) => ({ ...d, [row.studentId]: st }))}
+                              >
+                                {st === 'EXCUSED' ? 'Leave' : st.charAt(0) + st.slice(1).toLowerCase()}
+                              </button>
+                            ))}
                           </div>
                         </div>
                       ))}
                     </div>
-                    <div className="attendance-save-row">
-                      <button type="button" className="btn student-attendance-primary-btn" disabled={!canSaveMarks} onClick={() => saveMarks.mutate()}>
-                        {saveMarks.isPending ? 'Saving…' : 'Save attendance'}
+                    <div className="attendance-save-row row" style={{ flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+                      <button type="button" className="btn" disabled={!canEditDraft} onClick={onSaveClick}>
+                        {saveMarks.isPending ? 'Saving…' : locked && isLeader ? 'Save override' : 'Save draft'}
+                      </button>
+                      <button type="button" className="btn student-attendance-primary-btn" disabled={!canSubmitNow} onClick={() => submitAttendance.mutate()}>
+                        {submitAttendance.isPending ? 'Submitting…' : 'Submit & lock'}
                       </button>
                       {saveMarks.error ? (
                         <span className="attendance-field-error">{formatApiError(saveMarks.error)}</span>
                       ) : null}
-                      {saveMarks.isSuccess && !saveMarks.isPending ? null : null}
+                      {submitAttendance.error ? (
+                        <span className="attendance-field-error">{formatApiError(submitAttendance.error)}</span>
+                      ) : null}
                     </div>
+                    {locked && !isLeader ? (
+                      <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+                        This roll is locked. Ask a school leader if a correction is required.
+                      </p>
+                    ) : null}
                   </>
                 )}
               </>
@@ -379,5 +508,5 @@ export function AttendancePage() {
 }
 
 function formatLectureHint(lectureId: number) {
-  return `Period · lecture #${lectureId}`;
+  return `Period · #${lectureId}`;
 }

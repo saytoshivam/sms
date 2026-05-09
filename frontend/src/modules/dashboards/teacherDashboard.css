@@ -1,0 +1,520 @@
+/* Teacher dashboard — dense operational command center (distinct from admin monitoring UI) */
+
+.tdash {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 920px;
+}
+
+.tdash-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 14px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 14%, rgba(15, 23, 42, 0.08));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, #ffffff 94%, var(--color-bg)),
+    color-mix(in srgb, var(--color-primary) 6%, #ffffff)
+  );
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.85) inset;
+}
+
+@media (max-width: 640px) {
+  .tdash-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tdash-greet {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  line-height: 1.25;
+}
+
+.tdash-hero-metrics {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: #334155;
+  line-height: 1.45;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.tdash-hero-metrics strong {
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.tdash-hero-next {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.tdash-hero-next strong {
+  color: #334155;
+  font-weight: 750;
+}
+
+.tdash-hero-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tdash-pill {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: color-mix(in srgb, var(--color-primary) 70%, #1c1917);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  white-space: nowrap;
+}
+
+.tdash-meta-line {
+  font-size: 10px;
+  font-weight: 650;
+  color: #64748b;
+  text-align: right;
+  line-height: 1.3;
+}
+
+.tdash-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #15803d;
+}
+
+.tdash-sync-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+}
+
+/* Quick action strip */
+.tdash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tdash-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 11px;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, rgba(15, 23, 42, 0.1));
+  background: color-mix(in srgb, #ffffff 92%, var(--color-primary) 4%);
+  color: #1e293b;
+  text-decoration: none;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  white-space: nowrap;
+}
+
+.tdash-action:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, rgba(15, 23, 42, 0.12));
+  background: color-mix(in srgb, #ffffff 78%, var(--color-primary) 10%);
+}
+
+.tdash-action--primary {
+  background: color-mix(in srgb, var(--color-primary) 88%, #fff7ed);
+  border-color: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  font-weight: 800;
+}
+
+/* Now / Next operational card */
+.tdash-now-next {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .tdash-now-next {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tdash-nn-card {
+  padding: 10px 11px;
+  border-radius: 11px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.72);
+  min-height: 0;
+}
+
+.tdash-nn-label {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.tdash-nn-status {
+  font-size: 11px;
+  font-weight: 750;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.tdash-nn-main {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+.tdash-nn-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+.tdash-nn-btn {
+  margin-top: 8px;
+  display: inline-flex;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 750;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 12%, #fff);
+  color: #9a3412;
+  text-decoration: none;
+}
+
+.tdash-nn-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 20%, #fff);
+}
+
+/* Compact attendance */
+.tdash-att {
+  padding: 10px 11px;
+  border-radius: 11px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.65), rgba(255, 255, 255, 0.85));
+}
+
+.tdash-att-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.tdash-att-title {
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9a3412;
+}
+
+.tdash-att-body {
+  font-size: 12px;
+  font-weight: 650;
+  color: #334155;
+  line-height: 1.4;
+}
+
+.tdash-att-body strong {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.tdash-att-btn {
+  margin-top: 8px;
+  display: inline-flex;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 750;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 14%, #fff);
+  color: #9a3412;
+  text-decoration: none;
+}
+
+.tdash-att-btn:hover {
+  background: color-mix(in srgb, var(--color-primary) 22%, #fff);
+}
+
+/* Timeline */
+.tdash-section-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 2px 0 6px;
+}
+
+.tdash-section-title {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.tdash-section-link {
+  font-size: 11px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--color-primary) 85%, #7c2d12);
+}
+
+.tdash-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-radius: 11px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.tdash-feed-row {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  gap: 8px 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+@media (max-width: 520px) {
+  .tdash-feed-row {
+    grid-template-columns: 48px 1fr;
+  }
+  .tdash-feed-actions {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+.tdash-feed-row:last-child {
+  border-bottom: none;
+}
+
+.tdash-feed-row--now {
+  background: color-mix(in srgb, var(--color-primary) 9%, rgba(255, 251, 235, 0.85));
+  border-left: 3px solid var(--color-primary);
+  padding-left: 7px;
+}
+
+.tdash-feed-row--free {
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.tdash-feed-time {
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #475569;
+  padding-top: 1px;
+}
+
+.tdash-feed-core {
+  min-width: 0;
+}
+
+.tdash-feed-line1 {
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.tdash-feed-line2 {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+.tdash-feed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.tdash-feed-chip {
+  font-size: 10px;
+  font-weight: 750;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+  color: #334155;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tdash-feed-chip:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+.tdash-feed-chip--emphasis {
+  border-color: color-mix(in srgb, var(--color-primary) 38%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, #fff);
+  color: #9a3412;
+  font-weight: 800;
+}
+
+/* Alerts */
+.tdash-alerts {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed rgba(15, 23, 42, 0.12);
+  background: rgba(248, 250, 252, 0.85);
+}
+
+.tdash-alerts-title {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.tdash-alert-item {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  line-height: 1.45;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+}
+
+.tdash-alert-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.tdash-alert-empty {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+/* Insights */
+.tdash-insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.tdash-insight {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.tdash-insight-k {
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.tdash-insight-v {
+  font-size: 12px;
+  font-weight: 750;
+  color: #1e293b;
+  line-height: 1.35;
+}
+
+.tdash-insight-v a {
+  color: color-mix(in srgb, var(--color-primary) 90%, #7c2d12);
+  font-weight: 800;
+}
+
+/* Tools */
+.tdash-tools {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.tdash-tools-title {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.tdash-tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tdash-tool {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  color: #475569;
+  text-decoration: none;
+}
+
+.tdash-tool:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  color: #1e293b;
+}
+
+.tdash-muted {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.tdash-err {
+  color: #b91c1c;
+  font-size: 12px;
+}

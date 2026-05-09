@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useBranding } from '../lib/branding';
+import { defaultAppHomePath } from '../lib/roleGroups';
 import { buildGoogleAuthorizeUrl, type GoogleOAuthPublicConfig } from '../lib/googleOAuth';
 
 export function LoginPage() {
@@ -91,7 +92,8 @@ export function LoginPage() {
                 await persistSchoolBranding();
                 const res = await api.post<string>('/public/login', { username, password });
                 login(res.data);
-                navigate('/app');
+                const { data: profile } = await api.get<{ roles: string[] }>('/user/me');
+                navigate(defaultAppHomePath(profile.roles));
               } catch (err: unknown) {
                 const ax = err as { response?: { data?: unknown } };
                 setError(String(ax.response?.data ?? 'Login failed'));

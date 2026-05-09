@@ -11,3 +11,13 @@ export function hasSchoolLeadershipRole(roles: string[]): boolean {
 export function hasTeachingRole(roles: string[]): boolean {
   return TEACHING_ROLES.some((r) => roles.includes(r));
 }
+
+/**
+ * Where users land when opening `/app` index or post-login navigation.
+ * School leaders and instructional staff hit the dashboard (distinct shells per persona).
+ */
+export function defaultAppHomePath(roles: string[]): '/app' | '/app/dashboard' {
+  if (hasSchoolLeadershipRole(roles)) return '/app/dashboard';
+  if (hasTeachingRole(roles) && !hasSchoolLeadershipRole(roles)) return '/app/dashboard';
+  return '/app';
+}

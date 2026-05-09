@@ -6,6 +6,7 @@ import com.myhaimi.sms.DTO.studentportal.FeeStatementDTO;
 import com.myhaimi.sms.DTO.studentportal.UnreadCountDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentExamCardDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentMarkRowDTO;
+import com.myhaimi.sms.DTO.studentportal.StudentDailyAttendanceRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
 import com.myhaimi.sms.DTO.timetable.PublishedStudentWeeklyTimetableDTO;
 import com.myhaimi.sms.DTO.timetable.TimetableOccurrenceDTO;
@@ -77,6 +78,13 @@ public class StudentPortalV1Controller {
     public ResponseEntity<List<StudentSubjectAttendanceDTO>> subjectAttendance(@AuthenticationPrincipal UserDetails principal) {
         int studentId = linkedStudentId(principal);
         return ResponseEntity.ok(studentPortalService.mySubjectAttendance(studentId));
+    }
+
+    /** Day-level roll when the school uses {@code DAILY} attendance; empty for lecture-wise schools. */
+    @GetMapping("/daily-attendance")
+    public ResponseEntity<List<StudentDailyAttendanceRowDTO>> dailyAttendance(@AuthenticationPrincipal UserDetails principal) {
+        int studentId = linkedStudentId(principal);
+        return ResponseEntity.ok(studentPortalService.myDailyAttendance(studentId));
     }
 
     @GetMapping("/announcements")

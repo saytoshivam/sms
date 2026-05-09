@@ -22,7 +22,7 @@ type TimetableTab = (typeof TABS)[number];
  * Standalone Timetable workspace at /app/timetable.
  *
  * Two top-level tabs:
- *  - workspace  → existing Step7TimetableWorkspace (full-fat editor)
+ *  - workspace  → timetable editor grid (same “Timetable Editor” card as Step 7; no wizard shell)
  *  - conflicts  → first-class conflicts dashboard with deep-link resolutions
  *
  * Header actions cover the full lifecycle:
@@ -31,6 +31,9 @@ type TimetableTab = (typeof TABS)[number];
 export function TimetableModulePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
+  /** From Academic management tile: show only the live published timetable, read-only. */
+  const schedulePublishedViewer = searchParams.get('scope') === 'published';
 
   const tabParam = searchParams.get('tab') as TimetableTab | null;
   const [tab, setTab] = useState<TimetableTab>(TABS.includes(tabParam as TimetableTab) ? (tabParam as TimetableTab) : 'workspace');
@@ -74,9 +77,13 @@ export function TimetableModulePage() {
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
+    if (schedulePublishedViewer) {
+      setViewKey('PUBLISHED');
+      return;
+    }
     // If there is no published timetable, keep the UI on draft view.
     if (viewKey === 'PUBLISHED' && !latestPublished) setViewKey('DRAFT');
-  }, [viewKey, latestPublished]);
+  }, [viewKey, latestPublished, schedulePublishedViewer]);
   useEffect(() => {
     if (!viewMenuOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -95,6 +102,12 @@ export function TimetableModulePage() {
       document.removeEventListener('pointerdown', onPointerDown);
     };
   }, [viewMenuOpen]);
+
+  useEffect(() => {
+    if (!schedulePublishedViewer) return;
+    if (tab !== 'conflicts') return;
+    navigate('/app/timetable?scope=published&tab=workspace', { replace: true });
+  }, [schedulePublishedViewer, tab, navigate]);
 
   const versionLabel = useMemo(() => {
     if (!lc.version) return null;
@@ -126,7 +139,7 @@ export function TimetableModulePage() {
     setViewMenuOpen(false);
   };
 
-  const headerActions = (
+  const headerActionsFull = (
     <>
       <button
         type="button"
@@ -197,125 +210,176 @@ export function TimetableModulePage() {
     </>
   );
 
+  const headerActionsViewer = (
+    <button type="button" className="btn secondary" onClick={() => navigate('/app/timetable')}>
+      Manage timetable
+    </button>
+  );
+
   return (
     <ModulePage
       title="Timetable"
       subtitle={
-        <>
-          Generate a draft, fix conflicts, then publish. Teachers and students only see the published timetable.
-          {latestDraftVersion || latestPublished ? (
-            <span style={{ display: 'inline-block', marginLeft: 8, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 800, background: 'rgba(37,99,235,0.08)', color: '#1e3a8a' }}>
-              {latestDraftVersion ? `Draft v${latestDraftVersion.version}` : 'No draft'}
-              {' · '}
-              {latestPublished ? `Published v${latestPublished.version}` : 'Not published'}
-            </span>
-          ) : null}
-          {versionLabel ? (
-            <span style={{ display: 'inline-block', marginLeft: 8, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 800, background: 'rgba(15,23,42,0.06)', color: '#0f172a' }}>
-              {versionLabel}
-            </span>
-          ) : null}
-          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: '#475569' }}>View</span>
-            <span ref={viewMenuRef} style={{ position: 'relative', display: 'inline-flex' }}>
-              <button
-                type="button"
-                onClick={() => setViewMenuOpen((v) => !v)}
-                className="btn secondary"
+        schedulePublishedViewer ? (
+          <>
+            Published timetable — view only (same schedule teachers and students see).
+            {latestPublished ? (
+              <span
                 style={{
-                  height: 28,
-                  padding: '0 10px',
+                  display: 'inline-block',
+                  marginLeft: 8,
+                  padding: '2px 8px',
                   borderRadius: 999,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: 800,
+                  background: 'rgba(22,163,74,0.10)',
+                  color: '#166534',
                 }}
-                title="Switch between draft and published timetable"
-                aria-haspopup="menu"
-                aria-expanded={viewMenuOpen}
               >
-                {activeViewLabel}
-                <span style={{ fontSize: 12, opacity: 0.75, lineHeight: 1 }}>▾</span>
-              </button>
-
-              {viewMenuOpen ? (
-                <div
-                  role="menu"
+                Published v{latestPublished.version}
+              </span>
+            ) : (
+              <span
+                style={{
+                  display: 'inline-block',
+                  marginLeft: 8,
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  background: 'rgba(100,116,139,0.12)',
+                  color: '#475569',
+                }}
+              >
+                Nothing published yet
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            Generate a draft, fix conflicts, then publish. Teachers and students only see the published timetable.
+            {latestDraftVersion || latestPublished ? (
+              <span style={{ display: 'inline-block', marginLeft: 8, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 800, background: 'rgba(37,99,235,0.08)', color: '#1e3a8a' }}>
+                {latestDraftVersion ? `Draft v${latestDraftVersion.version}` : 'No draft'}
+                {' · '}
+                {latestPublished ? `Published v${latestPublished.version}` : 'Not published'}
+              </span>
+            ) : null}
+            {versionLabel ? (
+              <span style={{ display: 'inline-block', marginLeft: 8, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 800, background: 'rgba(15,23,42,0.06)', color: '#0f172a' }}>
+                {versionLabel}
+              </span>
+            ) : null}
+            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 10 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: '#475569' }}>View</span>
+              <span ref={viewMenuRef} style={{ position: 'relative', display: 'inline-flex' }}>
+                <button
+                  type="button"
+                  onClick={() => setViewMenuOpen((v) => !v)}
+                  className="btn secondary"
                   style={{
-                    position: 'absolute',
-                    top: 34,
-                    right: 0,
-                    minWidth: 180,
-                    borderRadius: 14,
-                    border: '1px solid rgba(15,23,42,0.10)',
-                    background: '#fff',
-                    boxShadow: '0 16px 40px rgba(15,23,42,0.18)',
-                    padding: 6,
-                    zIndex: 50,
+                    height: 28,
+                    padding: '0 10px',
+                    borderRadius: 999,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 12,
+                    fontWeight: 800,
                   }}
+                  title="Switch between draft and published timetable"
+                  aria-haspopup="menu"
+                  aria-expanded={viewMenuOpen}
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => setView('DRAFT')}
-                    className="w-full"
+                  {activeViewLabel}
+                  <span style={{ fontSize: 12, opacity: 0.75, lineHeight: 1 }}>▾</span>
+                </button>
+
+                {viewMenuOpen ? (
+                  <div
+                    role="menu"
                     style={{
-                      textAlign: 'left',
-                      padding: '8px 10px',
-                      borderRadius: 12,
-                      border: '1px solid transparent',
-                      background: viewKey === 'DRAFT' ? 'rgba(59,130,246,0.10)' : 'transparent',
-                      color: '#0f172a',
-                      fontSize: 13,
-                      fontWeight: 900,
-                      cursor: 'pointer',
+                      position: 'absolute',
+                      top: 34,
+                      right: 0,
+                      minWidth: 180,
+                      borderRadius: 14,
+                      border: '1px solid rgba(15,23,42,0.10)',
+                      background: '#fff',
+                      boxShadow: '0 16px 40px rgba(15,23,42,0.18)',
+                      padding: 6,
+                      zIndex: 50,
                     }}
                   >
-                    Draft
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => setView('PUBLISHED')}
-                    className="w-full"
-                    disabled={!latestPublished}
-                    style={{
-                      textAlign: 'left',
-                      padding: '8px 10px',
-                      borderRadius: 12,
-                      border: '1px solid transparent',
-                      background: viewKey === 'PUBLISHED' ? 'rgba(59,130,246,0.10)' : 'transparent',
-                      color: !latestPublished ? 'rgba(15,23,42,0.35)' : '#0f172a',
-                      fontSize: 13,
-                      fontWeight: 900,
-                      cursor: !latestPublished ? 'not-allowed' : 'pointer',
-                      marginTop: 2,
-                    }}
-                  >
-                    Published{latestPublished ? ` v${latestPublished.version ?? '?'}` : ''}
-                  </button>
-                </div>
-              ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => setView('DRAFT')}
+                      className="w-full"
+                      style={{
+                        textAlign: 'left',
+                        padding: '8px 10px',
+                        borderRadius: 12,
+                        border: '1px solid transparent',
+                        background: viewKey === 'DRAFT' ? 'rgba(59,130,246,0.10)' : 'transparent',
+                        color: '#0f172a',
+                        fontSize: 13,
+                        fontWeight: 900,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Draft
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => setView('PUBLISHED')}
+                      className="w-full"
+                      disabled={!latestPublished}
+                      style={{
+                        textAlign: 'left',
+                        padding: '8px 10px',
+                        borderRadius: 12,
+                        border: '1px solid transparent',
+                        background: viewKey === 'PUBLISHED' ? 'rgba(59,130,246,0.10)' : 'transparent',
+                        color: !latestPublished ? 'rgba(15,23,42,0.35)' : '#0f172a',
+                        fontSize: 13,
+                        fontWeight: 900,
+                        cursor: !latestPublished ? 'not-allowed' : 'pointer',
+                        marginTop: 2,
+                      }}
+                    >
+                      Published{latestPublished ? ` v${latestPublished.version ?? '?'}` : ''}
+                    </button>
+                  </div>
+                ) : null}
+              </span>
             </span>
-          </span>
-        </>
+          </>
+        )
       }
-      status={lc.status}
-      headerActions={headerActions}
-      tabs={[
-        { id: 'workspace', label: 'Workspace' },
-        {
-          id: 'conflicts',
-          label: 'Conflicts',
-          badge: lc.conflicts.total > 0 ? lc.conflicts.total : null,
-        },
-      ]}
+      status={schedulePublishedViewer ? undefined : lc.status}
+      headerActions={schedulePublishedViewer ? headerActionsViewer : headerActionsFull}
+      impact={schedulePublishedViewer ? null : undefined}
+      tabs={
+        schedulePublishedViewer
+          ? [{ id: 'workspace', label: 'Schedule' }]
+          : [
+              { id: 'workspace', label: 'Workspace' },
+              {
+                id: 'conflicts',
+                label: 'Conflicts',
+                badge: lc.conflicts.total > 0 ? lc.conflicts.total : null,
+              },
+            ]
+      }
       activeTabId={tab}
-      tabHrefBase="/app/timetable"
+      tabHrefBase={schedulePublishedViewer ? '/app/timetable?scope=published' : '/app/timetable'}
     >
-      {lc.publishBlockedReason && lc.versionStatus !== 'PUBLISHED' && lc.hasEntries ? (
+      {!schedulePublishedViewer &&
+      lc.publishBlockedReason &&
+      lc.versionStatus !== 'PUBLISHED' &&
+      lc.hasEntries ? (
         <div
           className="card"
           style={{
@@ -333,13 +397,27 @@ export function TimetableModulePage() {
         </div>
       ) : null}
 
-      {tab === 'conflicts' ? (
+      {schedulePublishedViewer && !latestPublished ? (
+        <div
+          className="card"
+          style={{
+            padding: 20,
+            borderRadius: 14,
+            fontSize: 14,
+            fontWeight: 700,
+            color: '#475569',
+          }}
+        >
+          No published timetable yet. Open <strong style={{ fontWeight: 900 }}>Manage timetable</strong> above to build and publish a draft.
+        </div>
+      ) : tab === 'conflicts' ? (
         <ConflictsPanel
           onRegenerate={() => lc.regenerate().then(() => undefined)}
           onAutoFix={() => lc.autoFix().then(() => undefined)}
         />
       ) : (
         <Step7TimetableWorkspace
+          surface="module"
           onAutoGenerateDraft={() => lc.regenerate().then((r) => r ?? { success: true })}
           autoGeneratePending={lc.regeneratePending}
           autoGenerateErrorText={null}
@@ -349,8 +427,8 @@ export function TimetableModulePage() {
             toast.info('Use Publish', 'Publish the draft from the page header to make it active.');
           }}
           completePending={false}
-          viewVersion={viewKey === 'PUBLISHED' ? latestPublished : null}
-          readOnly={viewKey === 'PUBLISHED'}
+          viewVersion={schedulePublishedViewer || viewKey === 'PUBLISHED' ? latestPublished : null}
+          readOnly={schedulePublishedViewer || viewKey === 'PUBLISHED'}
         />
       )}
 

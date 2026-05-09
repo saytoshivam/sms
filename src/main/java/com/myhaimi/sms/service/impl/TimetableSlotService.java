@@ -10,6 +10,7 @@ import com.myhaimi.sms.repository.LectureRepo;
 import com.myhaimi.sms.repository.SchoolRepo;
 import com.myhaimi.sms.repository.StaffRepo;
 import com.myhaimi.sms.repository.TimetableSlotRepo;
+import com.myhaimi.sms.utils.LectureRowIdEncoding;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -121,6 +122,7 @@ public class TimetableSlotService {
                                 ? slot.getStaff().getFullName()
                                 : Optional.ofNullable(slot.getTeacherDisplayName()).orElse("—");
                 String cgName = slot.getClassGroup().getDisplayName();
+                int rowId = LectureRowIdEncoding.legacyWeeklySlotSurrogate(slot.getId());
                 out.add(new TimetableOccurrenceDTO(
                         d,
                         slot.getStartTime(),
@@ -129,7 +131,9 @@ public class TimetableSlotService {
                         teacher,
                         slot.getRoom(),
                         cgName,
-                        "RECURRING"));
+                        "RECURRING",
+                        slot.getClassGroup().getId(),
+                        rowId));
             }
         }
 
@@ -150,7 +154,9 @@ public class TimetableSlotService {
                     Optional.ofNullable(lec.getTeacherName()).orElse("—"),
                     lec.getRoom(),
                     lec.getClassGroup().getDisplayName(),
-                    "AD_HOC"));
+                    "AD_HOC",
+                    lec.getClassGroup().getId(),
+                    lec.getId()));
         }
 
         out.sort(Comparator.comparing(TimetableOccurrenceDTO::date).thenComparing(TimetableOccurrenceDTO::startTime));
@@ -187,6 +193,7 @@ public class TimetableSlotService {
                                 ? slot.getStaff().getFullName()
                                 : Optional.ofNullable(slot.getTeacherDisplayName()).orElse("—");
                 String cgName = slot.getClassGroup().getDisplayName();
+                int rowIdInner = LectureRowIdEncoding.legacyWeeklySlotSurrogate(slot.getId());
                 out.add(new TimetableOccurrenceDTO(
                         d,
                         slot.getStartTime(),
@@ -195,7 +202,9 @@ public class TimetableSlotService {
                         teacher,
                         slot.getRoom(),
                         cgName,
-                        "RECURRING"));
+                        "RECURRING",
+                        slot.getClassGroup().getId(),
+                        rowIdInner));
             }
         }
 
@@ -208,7 +217,9 @@ public class TimetableSlotService {
                     Optional.ofNullable(lec.getTeacherName()).orElse("—"),
                     lec.getRoom(),
                     lec.getClassGroup().getDisplayName(),
-                    "AD_HOC"));
+                    "AD_HOC",
+                    lec.getClassGroup().getId(),
+                    lec.getId()));
         }
 
         out.sort(Comparator.comparing(TimetableOccurrenceDTO::date).thenComparing(TimetableOccurrenceDTO::startTime));

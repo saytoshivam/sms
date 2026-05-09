@@ -1,0 +1,267 @@
+/* Shared enterprise ERP dashboard shell — warm theme, compact density */
+
+.school-admin-erp.workspace-page {
+  max-width: 1440px;
+}
+
+.erp-dash-shell.workspace-page {
+  width: 100%;
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.operations-hub-erp {
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.school-admin-erp {
+  --erp-ink: var(--color-text, #0f172a);
+  --erp-muted: var(--color-text-muted, #64748b);
+  --erp-surface: #ffffff;
+  --erp-wash: #f8fafc;
+  --erp-line: rgba(15, 23, 42, 0.07);
+  --erp-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 4px 14px rgba(15, 23, 42, 0.06);
+  --erp-sev-red: #b91c1c;
+  --erp-sev-red-bg: rgba(254, 242, 242, 0.85);
+  --erp-sev-amber: #c2410c;
+  --erp-sev-amber-bg: rgba(255, 247, 237, 0.9);
+  --erp-sev-green: #15803d;
+  --erp-sev-green-bg: rgba(240, 253, 244, 0.85);
+  --erp-sev-blue: #1d4ed8;
+  --erp-sev-blue-bg: rgba(239, 246, 255, 0.92);
+}
+
+/* Compact hero (school admin + hubs) */
+.workspace-hero--erp-compact {
+  padding: 12px 14px 11px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 4px 14px rgba(15, 23, 42, 0.06);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+.workspace-hero--erp-compact .workspace-hero__title {
+  margin-bottom: 4px;
+  font-size: clamp(1.2rem, 3vw, 1.5rem);
+}
+
+.workspace-hero--erp-compact .workspace-hero__subtitle {
+  font-size: 13px;
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+/* Sticky command strip */
+.erp-command-strip {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary) 6%, #fffefb);
+  border: 1px solid var(--erp-line);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(8px);
+}
+
+.erp-command-strip__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.erp-cmd-search-wrap {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--erp-line);
+}
+
+.erp-cmd-search-wrap svg {
+  flex-shrink: 0;
+  color: var(--erp-muted);
+}
+
+.erp-cmd-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--erp-ink);
+  outline: none;
+}
+
+.erp-cmd-search-input::placeholder {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.erp-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.erp-quick-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+  color: var(--erp-ink);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--erp-line);
+  white-space: nowrap;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.erp-quick-actions a:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  box-shadow: 0 2px 8px rgba(251, 146, 60, 0.12);
+}
+
+.erp-quick-actions a svg {
+  width: 13px;
+  height: 13px;
+  opacity: 0.85;
+}
+
+/* Operations Hub cards */
+.erp-hub-section-title {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--erp-muted);
+}
+
+.erp-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.erp-hub-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  padding: 10px 11px;
+  border-radius: 11px;
+  text-decoration: none;
+  color: var(--erp-ink);
+  background: linear-gradient(180deg, #fffefb 0%, #fafafa 100%);
+  border: 1px solid var(--erp-line);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.erp-hub-card:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  box-shadow: var(--erp-shadow);
+}
+
+.erp-hub-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.erp-hub-card__icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: var(--color-primary);
+}
+
+.erp-hub-card__title {
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.erp-hub-card__primary {
+  font-size: 12px;
+  font-weight: 750;
+  color: var(--erp-ink);
+  line-height: 1.35;
+}
+
+.erp-hub-card__secondary {
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--erp-muted);
+  line-height: 1.35;
+}
+
+.erp-hub-card__cta {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 900;
+  color: var(--color-primary, #c2410c);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* NBA cards tighter */
+.erp-nba-card {
+  padding: 10px 11px;
+  border-radius: 11px;
+  text-decoration: none;
+  color: var(--erp-ink);
+}
+
+/* Hub page header search row */
+.erp-hub-page-head {
+  padding: 11px 13px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-primary) 12%, #ffffff),
+    color-mix(in srgb, var(--color-accent) 10%, #fffefb)
+  );
+  border: 1px solid var(--erp-line);
+  box-shadow: var(--erp-shadow);
+}
+
+.erp-hub-page-head__title-block h1 {
+  margin: 2px 0 0;
+  font-size: clamp(1.15rem, 2.6vw, 1.45rem);
+  font-weight: 950;
+  letter-spacing: -0.03em;
+  color: var(--erp-ink);
+}
+
+.erp-hub-page-head__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}

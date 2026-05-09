@@ -7,6 +7,7 @@ import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.Instant;
+import java.time.LocalTime;
 import java.util.Set;
 
 @Data
@@ -68,6 +69,18 @@ public class School {
     @Enumerated(EnumType.STRING)
     @Column(name = "attendance_mode", nullable = false, length = 32)
     private AttendanceMode attendanceMode = AttendanceMode.LECTURE_WISE;
+
+    /**
+     * When set, daily section attendance not locked by this local time triggers admin alerts (server default zone).
+     */
+    @Column(name = "attendance_daily_cutoff")
+    private LocalTime attendanceDailyCutoff;
+
+    /**
+     * Minutes after each lecture’s end time during which subject teachers may mark attendance ({@link AttendanceMode#LECTURE_WISE}).
+     */
+    @Column(name = "attendance_lecture_grace_minutes", nullable = false)
+    private int attendanceLectureGraceMinutes = 15;
 
     /**
      * Onboarding progress tracker for the tenant setup wizard.

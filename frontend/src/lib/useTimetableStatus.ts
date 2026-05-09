@@ -35,6 +35,8 @@ export type UseTimetableStatusResult = {
   setupError: unknown;
   version: Version | null;
   versionLoading: boolean;
+  /** Latest published version row (if any). */
+  latestPublishedVersion: Version | null;
   entries: EntryRef[];
   entriesLoading: boolean;
   /** Versions list or published peek still loading — wait before hub “not started” decisions. */
@@ -47,6 +49,8 @@ export type UseTimetableStatusResult = {
   hasEntries: boolean;
   /** School has at least one non-empty timetable version marked PUBLISHED (not tied to workspace pointer). */
   hasPublishedTimetable: boolean;
+  /** Entry count for latest published version (if it differs from workspace). */
+  latestPublishedEntriesCount: number | null;
   status: TimetableStatus;
   versionLabel: string | null;
 };
@@ -96,6 +100,7 @@ export function useTimetableStatus(): UseTimetableStatusResult {
 
   const setup = setupQuery.data ?? null;
   const entries = entriesQuery.data ?? [];
+  const publishedEntriesCount = needPublishedPeek ? (publishedPeekQuery.data?.length ?? 0) : entries.length;
 
   const conflictsList = useMemo(
     () => [
@@ -176,6 +181,17 @@ export function useTimetableStatus(): UseTimetableStatusResult {
         hint: 'Advisory — publish allowed.',
       };
     }
+
+    // Workspace may be empty while the school still has a published timetable.
+    // In that case, report the published posture for operational dashboards.
+    if (!hasEntries && hasPublishedTimetable && latestPublishedVersion) {
+      const v = latestPublishedVersion.version != null ? `v${latestPublishedVersion.version}` : 'v?';
+      return {
+        level: 'ok',
+        label: `Published ${v}`,
+        hint: `${publishedEntriesCount} entries live`,
+      };
+    }
     if (!hasEntries) {
       return { level: 'idle', label: 'No draft yet', hint: 'Generate a draft to populate.' };
     }
@@ -195,6 +211,9 @@ export function useTimetableStatus(): UseTimetableStatusResult {
     conflicts.soft,
     hasEntries,
     versionStatus,
+    hasPublishedTimetable,
+    latestPublishedVersion,
+    publishedEntriesCount,
   ]);
 
   const versionLabel: string | null = useMemo(() => {
@@ -217,6 +236,7 @@ export function useTimetableStatus(): UseTimetableStatusResult {
     setupError: setupQuery.isError ? setupQuery.error : null,
     version: draftQuery.data ?? null,
     versionLoading: draftQuery.isLoading,
+    latestPublishedVersion,
     entries,
     entriesLoading: entriesQuery.isLoading,
     timetableHealthExtrasLoading,
@@ -227,6 +247,7 @@ export function useTimetableStatus(): UseTimetableStatusResult {
     publishBlockedReason,
     hasEntries,
     hasPublishedTimetable,
+    latestPublishedEntriesCount: latestPublishedId == null ? null : publishedEntriesCount,
     status,
     versionLabel,
   };

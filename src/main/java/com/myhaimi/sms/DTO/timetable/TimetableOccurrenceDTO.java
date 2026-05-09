@@ -14,4 +14,10 @@ public record TimetableOccurrenceDTO(
         String room,
         String classGroupDisplayName,
         /** {@code RECURRING} from weekly slots; {@code AD_HOC} from scheduled lecture rows. */
-        String source) {}
+        String source,
+        Integer classGroupId,
+        /**
+         * When non-null: same encoding as lecture-day rows — positive {@link com.myhaimi.sms.entity.Lecture#getId()};
+         * negative −{@link com.myhaimi.sms.entity.TimetableEntry#getId()} from published timetable, or −(base+slot id) for legacy weekly slots.
+         */
+        Integer lectureRowId) {}
