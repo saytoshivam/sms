@@ -664,7 +664,7 @@ export function SchoolAdminCommandCenter({
         <div className="sacc-section-title">Academics · app launcher</div>
         <p className="sacc-launch-hint">Dense shortcuts · primary workflows live above in Action center.</p>
         <div className="sacc-launch-grid">
-          <ModLauncher to="/app" Icon={LayoutDashboard} label="Operations hub" />
+          <ModLauncher to="/app/operations-hub" Icon={LayoutDashboard} label="Operations hub" />
           <ModLauncher to={attendanceMonitorHref} Icon={ClipboardCheck} label="Attendance" />
           <ModLauncher to="/app/timetable?scope=published" Icon={CalendarRange} label="Timetable" />
           <ModLauncher to="/app/teachers" Icon={GraduationCap} label="Teachers" />

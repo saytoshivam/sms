@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { formatApiError } from '../../lib/errors';
-import { useAuth } from '../../lib/auth';
 import type { MeProfile } from './SuperAdminDashboard';
 import { StudentDayScheduleTable } from '../../components/StudentDayScheduleTable';
 import type { TimetableOccurrence } from '../../pages/TeacherTimetablePage';
@@ -26,17 +25,6 @@ type SubjAtt = {
   deliveredSessions?: number;
 };
 
-function initialsFrom(displayName: string | null | undefined, email: string) {
-  const s = (displayName ?? '').trim();
-  if (s) {
-    const parts = s.split(/\s+/).filter(Boolean);
-    const a = parts[0]?.[0] ?? '';
-    const b = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? '' : parts[0]?.[1] ?? '';
-    return (a + b).toUpperCase() || email.slice(0, 2).toUpperCase();
-  }
-  return email.slice(0, 2).toUpperCase();
-}
-
 function todayYmd() {
   const d = new Date();
   const y = d.getFullYear();
@@ -46,9 +34,6 @@ function todayYmd() {
 }
 
 export function StudentDashboard({ profile }: { profile: MeProfile }) {
-  const { logout } = useAuth();
-  const navigate = useNavigate();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [tileOrder, setTileOrder] = useState<StudentTileId[]>(() => loadStudentTileOrder());
 
@@ -145,87 +130,26 @@ export function StudentDashboard({ profile }: { profile: MeProfile }) {
   }
 
   return (
-    <div className="student-mobile-page">
-      {menuOpen ? (
-        <button
-          type="button"
-          className="student-menu-backdrop"
-          aria-label="Close menu"
-          onClick={() => setMenuOpen(false)}
-        />
-      ) : null}
-      <aside className={menuOpen ? 'student-menu-drawer student-menu-drawer--open' : 'student-menu-drawer'}>
-        <div className="student-drawer-inner">
-          <div className="student-drawer-profile">
-            <div className="student-drawer-avatar-wrap">
-              {profile.linkedStudentPhotoUrl ? (
-                <img src={profile.linkedStudentPhotoUrl} alt="" className="student-drawer-avatar" />
-              ) : (
-                <div className="student-drawer-avatar student-drawer-avatar--placeholder" aria-hidden>
-                  {initialsFrom(profile.linkedStudentDisplayName, profile.email)}
-                </div>
-              )}
-            </div>
-            <div className="student-drawer-name">{profile.linkedStudentDisplayName ?? profile.email}</div>
-            <div className="student-drawer-meta">{profile.linkedStudentAdmissionNo ?? '—'}</div>
-            {profile.linkedStudentClassLabel ? (
-              <div className="student-drawer-program">{profile.linkedStudentClassLabel}</div>
+    <div className="student-mobile-page student-dash-erp">
+      <div className="student-dash-erp__intro muted" style={{ fontSize: 13, margin: '0 0 14px', lineHeight: 1.5 }}>
+        {profile.linkedStudentClassLabel ? (
+          <>
+            <strong style={{ color: 'var(--color-text, #0f172a)' }}>{profile.linkedStudentDisplayName ?? 'Student'}</strong>
+            <span aria-hidden> · </span>
+            {profile.linkedStudentClassLabel}
+            {profile.linkedStudentAdmissionNo ? (
+              <>
+                <span aria-hidden> · </span>
+                {profile.linkedStudentAdmissionNo}
+              </>
             ) : null}
-          </div>
-          <nav className="student-drawer-nav">
-            <Link className="student-drawer-link" to="/app/student/announcements" onClick={() => setMenuOpen(false)}>
-              Announcements
-            </Link>
-            <Link className="student-drawer-link" to="/app/student/schedule" onClick={() => setMenuOpen(false)}>
-              Schedule
-            </Link>
-            <Link className="student-drawer-link" to="/app/student/marks" onClick={() => setMenuOpen(false)}>
-              View marks
-            </Link>
-            <Link className="student-drawer-link" to="/app/student/results" onClick={() => setMenuOpen(false)}>
-              Results & TGPA
-            </Link>
-            <Link className="student-drawer-link" to="/app/student/exams" onClick={() => setMenuOpen(false)}>
-              Exams available
-            </Link>
-            <Link className="student-drawer-link" to="/app/student/attendance" onClick={() => setMenuOpen(false)}>
-              Attendance (this term)
-            </Link>
-            <Link className="student-drawer-link" to="/app/students/me/performance" onClick={() => setMenuOpen(false)}>
-              Performance charts
-            </Link>
-            <Link className="student-drawer-link" to="/app/student/fees" onClick={() => setMenuOpen(false)}>
-              Fee statement
-            </Link>
-          </nav>
-          <div className="student-drawer-footer">
-            <button
-              type="button"
-              className="student-drawer-logout"
-              onClick={() => {
-                setMenuOpen(false);
-                logout();
-                navigate('/login');
-              }}
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      <header className="student-m-header">
-        <button type="button" className="student-m-hamburger" aria-label="Open menu" onClick={() => setMenuOpen(true)}>
-          ☰
-        </button>
-        <span className="student-m-header-title">Dashboard</span>
-        <Link to="/app/student/announcements" className="student-m-bell" aria-label="Unread announcements">
-          🔔
-          {(unreadAnnouncements.data?.count ?? 0) > 0 ? (
-            <span className="student-m-bell-badge">{Math.min(99, unreadAnnouncements.data?.count ?? 0)}</span>
-          ) : null}
-        </Link>
-      </header>
+          </>
+        ) : (
+          <>
+            Signed in as <strong style={{ color: 'var(--color-text, #0f172a)' }}>{profile.email}</strong>
+          </>
+        )}
+      </div>
 
       <section className="student-tt-section" id="student-today-timetable">
         <div className="student-tt-head">

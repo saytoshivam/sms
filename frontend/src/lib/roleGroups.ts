@@ -19,5 +19,6 @@ export function hasTeachingRole(roles: string[]): boolean {
 export function defaultAppHomePath(roles: string[]): '/app' | '/app/dashboard' {
   if (hasSchoolLeadershipRole(roles)) return '/app/dashboard';
   if (hasTeachingRole(roles) && !hasSchoolLeadershipRole(roles)) return '/app/dashboard';
+  if (roles.includes('STUDENT')) return '/app/dashboard';
   return '/app';
 }

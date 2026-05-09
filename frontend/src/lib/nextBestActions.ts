@@ -71,7 +71,7 @@ export function computeNextBestActions(input: NextBestActionInput): Nba[] {
       level: 'warn',
       title: `Finish setup: ${firstMissing.replace(/_/g, ' ').toLowerCase()}`,
       detail: `${completedDone}/${REQUIRED_STEPS.length} required steps complete`,
-      to: '/app',
+      to: '/app/operations-hub',
       cta: 'Open checklist',
       priority: PRI_SETUP_BLOCKER,
     });

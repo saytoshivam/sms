@@ -45,6 +45,7 @@ import { SchoolManagementPage } from './pages/SchoolManagementPage';
 import { UserAccessManagementPage } from './pages/UserAccessManagementPage';
 import { SchoolOnboardingWizardPage } from './pages/SchoolOnboardingWizardPage';
 import { AppHomeRoute } from './pages/AppHomeRoute';
+import { OperationsHubPage } from './pages/OperationsHubPage';
 import { AcademicModulePage } from './pages/modules/AcademicModulePage';
 import { SubjectsModulePage } from './pages/modules/SubjectsModulePage';
 import { TeachersModulePage } from './pages/modules/TeachersModulePage';
@@ -76,6 +77,7 @@ export default function App() {
         }
       >
         <Route index element={<AppHomeRoute />} />
+        <Route path="operations-hub" element={<OperationsHubPage />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="classes-sections" element={<ClassesSectionsModulePage />} />
         <Route path="academic" element={<AcademicModulePage />} />

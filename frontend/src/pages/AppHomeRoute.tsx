@@ -5,7 +5,8 @@ import { defaultAppHomePath } from '../lib/roleGroups';
 import { OperationsHubPage } from './OperationsHubPage';
 
 /**
- * `/app` index: operations hub for most roles; school leadership lands on `/app/dashboard`.
+ * `/app` index: redirects roles with a persona dashboard there; otherwise shows {@link OperationsHubPage}.
+ * The hub is always available at `/app/operations-hub` (sidebar «Operations hub» / «School hub»).
  */
 export function AppHomeRoute() {
   const me = useQuery({

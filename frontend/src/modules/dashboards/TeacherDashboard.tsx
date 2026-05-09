@@ -322,7 +322,7 @@ export function TeacherDashboard({ profile }: { profile: MeProfile }) {
   const staffMissing = profile.linkedStaffId == null && !isLeader;
 
   return (
-    <div className="workspace-page tdash">
+    <div className="workspace-page tdash tdash--erp">
       {/* 1. Compact hero */}
       <header className="tdash-hero">
         <div>

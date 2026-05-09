@@ -7,6 +7,12 @@
   max-width: 920px;
 }
 
+/** Inside {@link ErpWorkspaceChrome} outlet — use full main column like school admin dashboard. */
+.tdash.tdash--erp {
+  max-width: none;
+  width: 100%;
+}
+
 .tdash-hero {
   display: grid;
   grid-template-columns: 1fr auto;
