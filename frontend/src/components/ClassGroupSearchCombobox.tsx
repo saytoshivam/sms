@@ -4,7 +4,13 @@ import { api } from '../lib/api';
 import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 
-export type ClassGroupRow = { id: number; code: string; displayName: string };
+export type ClassGroupRow = {
+  id: number;
+  code: string;
+  displayName: string;
+  gradeLevel?: number | null;
+  section?: string | null;
+};
 type ClassGroupPage = { content: ClassGroupRow[]; totalElements: number };
 
 export function useClassGroupsCatalog() {

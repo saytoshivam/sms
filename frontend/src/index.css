@@ -3913,6 +3913,18 @@ textarea:disabled {
   border-color: color-mix(in srgb, #ea580c 45%, #cbd5e1);
 }
 
+.date-keeper--disabled .date-keeper__trigger,
+.date-keeper__trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.date-keeper__trigger-label--empty {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
 .date-keeper__trigger-icon {
   display: flex;
   color: #ea580c;
@@ -4030,7 +4042,26 @@ textarea:disabled {
   padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.date-keeper__clear {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.date-keeper__clear:hover {
+  color: #b91c1c;
 }
 
 .date-keeper__today {
@@ -4043,6 +4074,7 @@ textarea:disabled {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
+  margin-left: auto;
 }
 
 /* TimeKeeper — themed popover (no native blue time picker) */

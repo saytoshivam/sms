@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { hasSchoolLeadershipRole } from '../lib/roleGroups';
 import { SelectKeeper } from '../components/SelectKeeper';
+import { DateKeeper } from '../components/DateKeeper';
 
 type MeLite = { roles: string[] };
 
@@ -472,13 +473,13 @@ export function TeacherTimetablePage() {
 
       <div className="card stack" style={{ gap: 12 }}>
         <div className="row" style={{ flexWrap: 'wrap', alignItems: 'end' }}>
-        <div className="stack" style={{ gap: 6, minWidth: 160 }}>
-          <label>From</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <div className="stack" style={{ gap: 6, minWidth: 200 }}>
+          <label htmlFor="teacher-tt-from">From</label>
+          <DateKeeper id="teacher-tt-from" value={from} onChange={(v) => setFrom(v)} />
         </div>
-        <div className="stack" style={{ gap: 6, minWidth: 160 }}>
-          <label>To</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        <div className="stack" style={{ gap: 6, minWidth: 200 }}>
+          <label htmlFor="teacher-tt-to">To</label>
+          <DateKeeper id="teacher-tt-to" value={to} onChange={(v) => setTo(v)} />
         </div>
         <div className="row" style={{ gap: 10 }}>
           <button

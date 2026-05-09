@@ -63,8 +63,13 @@ import com.myhaimi.sms.entity.RoomType;
 import com.myhaimi.sms.entity.SubjectAllocation;
 import com.myhaimi.sms.entity.ClassSubjectConfig;
 import com.myhaimi.sms.entity.StaffTeachableSubject;
+import com.myhaimi.sms.entity.AcademicYear;
 import com.myhaimi.sms.entity.Student;
 import com.myhaimi.sms.entity.Guardian;
+import com.myhaimi.sms.entity.StudentAcademicEnrollment;
+import com.myhaimi.sms.entity.StudentGuardian;
+import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
+import com.myhaimi.sms.repository.AcademicYearRepo;
 import com.myhaimi.sms.repository.ClassGroupRepo;
 import com.myhaimi.sms.repository.BuildingRepo;
 import com.myhaimi.sms.repository.FloorRepo;
@@ -78,6 +83,8 @@ import com.myhaimi.sms.repository.RoomRepo;
 import com.myhaimi.sms.repository.RoleRepo;
 import com.myhaimi.sms.repository.StaffRepo;
 import com.myhaimi.sms.repository.StudentRepo;
+import com.myhaimi.sms.repository.StudentGuardianRepo;
+import com.myhaimi.sms.repository.StudentAcademicEnrollmentRepo;
 import com.myhaimi.sms.repository.GuardianRepo;
 import com.myhaimi.sms.repository.StaffTeachableSubjectRepository;
 import com.myhaimi.sms.repository.SubjectAllocationRepo;
@@ -89,12 +96,14 @@ import com.myhaimi.sms.entity.User;
 import com.myhaimi.sms.security.RoleNames;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.Authentication;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -130,6 +139,9 @@ public class SchoolOnboardingService {
     private final ObjectMapper objectMapper;
     private final StudentRepo studentRepo;
     private final GuardianRepo guardianRepo;
+    private final AcademicYearRepo academicYearRepo;
+    private final StudentAcademicEnrollmentRepo studentAcademicEnrollmentRepo;
+    private final StudentGuardianRepo studentGuardianRepo;
     private final SubjectAllocationRepo subjectAllocationRepo;
     private final ClassSubjectConfigRepo classSubjectConfigRepo;
     private final StaffTeachableSubjectRepository staffTeachableSubjectRepository;
@@ -1264,6 +1276,11 @@ public class SchoolOnboardingService {
                 continue;
             }
 
+            String gPreview = dto.guardianName() == null ? "" : dto.guardianName().trim();
+            if (gPreview.isBlank()) {
+                throw new IllegalArgumentException("Guardian name is required for each student row.");
+            }
+
             Student s = new Student();
             s.setSchool(school);
             s.setAdmissionNo(admissionNo);
@@ -1277,31 +1294,55 @@ public class SchoolOnboardingService {
                 String code = dto.classGroupCode().trim().toUpperCase();
                 cg = classGroupRepo.findByCodeAndSchool_Id(code, schoolId).orElse(null);
             }
-            if (cg != null) s.setClassGroup(cg);
+            if (cg == null) {
+                throw new IllegalArgumentException(
+                        "Class group (id or code) is required for each student row (" + admissionNo + ").");
+            }
+            s.setClassGroup(cg);
 
             Student saved = studentRepo.save(s);
             studentsCreated += 1;
 
-            String gName = dto.guardianName() == null ? "" : dto.guardianName().trim();
-            if (!gName.isBlank()) {
-                Guardian g = new Guardian();
-                g.setSchool(school);
-                g.setStudent(saved);
-                g.setFullName(gName);
-                if (dto.guardianRelation() != null && !dto.guardianRelation().isBlank()) {
-                    g.setRelation(dto.guardianRelation().trim());
-                } else {
-                    g.setRelation("Parent");
-                }
-                if (dto.guardianPhone() != null && !dto.guardianPhone().isBlank()) {
-                    g.setPhone(dto.guardianPhone().trim());
-                }
-                if (dto.guardianEmail() != null && !dto.guardianEmail().isBlank()) {
-                    g.setEmail(dto.guardianEmail().trim());
-                }
-                guardianRepo.save(g);
-                guardiansCreated += 1;
+            AcademicYear ay = academicYearRepo
+                    .findFirstBySchool_Id(schoolId, Sort.by(Sort.Direction.DESC, "startsOn", "id"))
+                    .orElseGet(() -> academicYearRepo.save(rollingAcademicYear(school)));
+
+            StudentAcademicEnrollment en = new StudentAcademicEnrollment();
+            en.setStudent(saved);
+            en.setAcademicYear(ay);
+            en.setClassGroup(cg);
+            en.setAdmissionDate(LocalDate.now());
+            en.setJoiningDate(LocalDate.now());
+            en.setStatus(StudentAcademicEnrollmentStatus.ACTIVE);
+            studentAcademicEnrollmentRepo.save(en);
+
+            Guardian g = new Guardian();
+            g.setSchool(school);
+            g.setName(gPreview);
+            String phone =
+                    dto.guardianPhone() != null && !dto.guardianPhone().isBlank()
+                            ? dto.guardianPhone().trim()
+                            : "-";
+            g.setPhone(phone);
+            if (dto.guardianEmail() != null && !dto.guardianEmail().isBlank()) {
+                g.setEmail(dto.guardianEmail().trim());
             }
+            guardianRepo.save(g);
+
+            String rel =
+                    dto.guardianRelation() != null && !dto.guardianRelation().isBlank()
+                            ? dto.guardianRelation().trim()
+                            : "Parent";
+            StudentGuardian sg = new StudentGuardian();
+            sg.setStudent(saved);
+            sg.setGuardian(g);
+            sg.setRelation(rel);
+            sg.setPrimaryGuardian(true);
+            sg.setCanLogin(false);
+            sg.setReceivesNotifications(true);
+            studentGuardianRepo.save(sg);
+
+            guardiansCreated += 1;
         }
 
         markCompleted(school, OnboardingStatus.STUDENTS);
@@ -1311,6 +1352,18 @@ public class SchoolOnboardingService {
         schoolRepo.save(school);
 
         return new OnboardingStudentsSetupResultDTO(studentsCreated, guardiansCreated, skipped);
+    }
+
+    private AcademicYear rollingAcademicYear(School school) {
+        LocalDate today = LocalDate.now();
+        int startY = today.getMonthValue() >= 4 ? today.getYear() : today.getYear() - 1;
+        int endY = startY + 1;
+        AcademicYear ay = new AcademicYear();
+        ay.setSchool(school);
+        ay.setLabel(startY + "-" + endY);
+        ay.setStartsOn(LocalDate.of(startY, 4, 1));
+        ay.setEndsOn(LocalDate.of(endY, 3, 31));
+        return ay;
     }
 
     @Transactional(readOnly = true)

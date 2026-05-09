@@ -1,0 +1,11 @@
+---
+description: Use themed SelectKeeper dropdowns instead of native select in React UI
+globs: frontend/**/*.tsx
+alwaysApply: false
+---
+
+# Frontend dropdowns
+
+- Prefer **`SelectKeeper`** (`frontend/src/components/SelectKeeper.tsx`) for single-choice dropdowns so styling matches the app theme (`select-keeper` styles in `index.css`: primary tint, orange hovers).
+- Use **`MultiSelectKeeper`** when multiple selections are needed.
+- Avoid raw **`<select>`** on new screens unless there is a strong accessibility or platform reason; if you must use native controls, isolate them and align spacing with neighbouring `SelectKeeper` triggers.

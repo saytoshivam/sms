@@ -1,6 +1,7 @@
 package com.myhaimi.sms.config;
 
 import com.myhaimi.sms.entity.*;
+import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
 import com.myhaimi.sms.theme.AppThemeDefaults;
 import com.myhaimi.sms.modules.subscription.domain.SubscriptionPlan;
 import com.myhaimi.sms.modules.subscription.domain.SubscriptionStatus;
@@ -45,6 +46,9 @@ public class DummySchoolDemoSeeder implements CommandLineRunner {
     private final StaffRepo staffRepo;
     private final StudentRepo studentRepo;
     private final GuardianRepo guardianRepo;
+    private final AcademicYearRepo academicYearRepo;
+    private final StudentAcademicEnrollmentRepo studentAcademicEnrollmentRepo;
+    private final StudentGuardianRepo studentGuardianRepo;
     private final LectureRepo lectureRepo;
     private final AttendanceSessionRepo attendanceSessionRepo;
     private final StudentAttendanceRepo studentAttendanceRepo;
@@ -85,6 +89,15 @@ public class DummySchoolDemoSeeder implements CommandLineRunner {
         school.setNavTextColor(AppThemeDefaults.NAV_TEXT);
         school = schoolRepo.save(school);
         Integer sid = school.getId();
+
+        LocalDate todaySeed = LocalDate.now();
+        int startY = todaySeed.getMonthValue() >= 4 ? todaySeed.getYear() : todaySeed.getYear() - 1;
+        AcademicYear demoYear = new AcademicYear();
+        demoYear.setSchool(school);
+        demoYear.setLabel(startY + "-" + (startY + 1));
+        demoYear.setStartsOn(LocalDate.of(startY, 4, 1));
+        demoYear.setEndsOn(LocalDate.of(startY + 1, 3, 31));
+        demoYear = academicYearRepo.save(demoYear);
 
         final ClassGroup c10a = classGroupRepo.save(cg(school, "10-A", "Grade 10 — Section A"));
         final ClassGroup c10b = classGroupRepo.save(cg(school, "10-B", "Grade 10 — Section B"));
@@ -134,12 +147,28 @@ public class DummySchoolDemoSeeder implements CommandLineRunner {
         for (Student s : students) {
             Guardian g = new Guardian();
             g.setSchool(school);
-            g.setStudent(s);
-            g.setFullName("Parent of " + s.getFirstName());
-            g.setRelation("Father");
+            g.setName("Parent of " + s.getFirstName());
             g.setPhone("9" + String.format("%09d", s.getId() * 997 % 1_000_000_000));
             g.setEmail(GreenwoodDemoAccounts.guardianEmail(s.getAdmissionNo().toLowerCase()));
             guardianRepo.save(g);
+
+            StudentGuardian sg = new StudentGuardian();
+            sg.setStudent(s);
+            sg.setGuardian(g);
+            sg.setRelation("Father");
+            sg.setPrimaryGuardian(true);
+            sg.setCanLogin(false);
+            sg.setReceivesNotifications(true);
+            studentGuardianRepo.save(sg);
+
+            StudentAcademicEnrollment en = new StudentAcademicEnrollment();
+            en.setStudent(s);
+            en.setAcademicYear(demoYear);
+            en.setClassGroup(s.getClassGroup());
+            en.setAdmissionDate(LocalDate.now());
+            en.setJoiningDate(LocalDate.now());
+            en.setStatus(StudentAcademicEnrollmentStatus.ACTIVE);
+            studentAcademicEnrollmentRepo.save(en);
         }
 
         LocalDate today = LocalDate.now();

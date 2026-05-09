@@ -19,6 +19,8 @@ import { PlatformRuntimeFlagsPage } from './pages/platform/PlatformRuntimeFlagsP
 import { PlatformSchoolEditPage } from './pages/platform/PlatformSchoolEditPage';
 import { PlatformSchoolsDirectoryPage } from './pages/platform/PlatformSchoolsDirectoryPage';
 import { StudentsPage } from './pages/StudentsPage';
+import { StudentProfilePage } from './pages/StudentProfilePage';
+import { StudentOnboardWizardPage } from './pages/students/StudentOnboardWizardPage';
 import { AttendancePage } from './pages/AttendancePage';
 import { AdminDailyAttendanceMonitorPage } from './pages/AdminDailyAttendanceMonitorPage';
 import { FeesPage } from './pages/FeesPage';
@@ -111,6 +113,7 @@ export default function App() {
         {/* Legacy shortcuts; roster is its own module. */}
         <Route path="class-groups" element={<Navigate to="/app/classes-sections" replace />} />
         <Route path="students" element={<StudentsPage />} />
+        <Route path="students/add" element={<StudentOnboardWizardPage />} />
         <Route path="students/me/performance" element={<StudentMyPerformancePage />} />
         <Route path="student/academics" element={<StudentAcademicsPage />} />
         <Route path="student/schedule" element={<StudentSchedulePage />} />
@@ -125,6 +128,7 @@ export default function App() {
         <Route path="teacher/announcements/new" element={<ComposeTeacherAnnouncementPage />} />
         <Route path="student/fees" element={<StudentFeeStatementPage />} />
         <Route path="students/:studentId/performance" element={<StudentPerformancePage />} />
+        <Route path="students/:studentId" element={<StudentProfilePage />} />
         <Route
           path="attendance/daily-monitor"
           element={

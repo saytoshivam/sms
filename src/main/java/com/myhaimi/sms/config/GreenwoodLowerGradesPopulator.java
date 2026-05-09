@@ -1,10 +1,12 @@
 package com.myhaimi.sms.config;
 
 import com.myhaimi.sms.entity.*;
+import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.service.impl.TimetableSlotService;
 import com.myhaimi.sms.utils.AttendanceDedupeKeys;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +29,9 @@ public class GreenwoodLowerGradesPopulator {
     private final ClassGroupRepo classGroupRepo;
     private final StudentRepo studentRepo;
     private final GuardianRepo guardianRepo;
+    private final AcademicYearRepo academicYearRepo;
+    private final StudentAcademicEnrollmentRepo studentAcademicEnrollmentRepo;
+    private final StudentGuardianRepo studentGuardianRepo;
     private final LectureRepo lectureRepo;
     private final AttendanceSessionRepo attendanceSessionRepo;
     private final StudentAttendanceRepo studentAttendanceRepo;
@@ -74,15 +79,35 @@ public class GreenwoodLowerGradesPopulator {
         extra.add(stu(school, c8b, "GW2026-806", "Tara", "Bose", LocalDate.of(2012, 8, 14)));
         extra = studentRepo.saveAll(extra);
 
+        AcademicYear ay = academicYearRepo
+                .findFirstBySchool_Id(sid, Sort.by(Sort.Direction.DESC, "startsOn", "id"))
+                .orElseThrow(() -> new IllegalStateException("Demo school missing academic year row."));
+
         for (Student s : extra) {
             Guardian g = new Guardian();
             g.setSchool(school);
-            g.setStudent(s);
-            g.setFullName("Parent of " + s.getFirstName());
-            g.setRelation("Father");
+            g.setName("Parent of " + s.getFirstName());
             g.setPhone("9" + String.format("%09d", s.getId() * 991 % 1_000_000_000));
             g.setEmail(GreenwoodDemoAccounts.guardianEmail(s.getAdmissionNo().toLowerCase()));
             guardianRepo.save(g);
+
+            StudentGuardian sg = new StudentGuardian();
+            sg.setStudent(s);
+            sg.setGuardian(g);
+            sg.setRelation("Father");
+            sg.setPrimaryGuardian(true);
+            sg.setCanLogin(false);
+            sg.setReceivesNotifications(true);
+            studentGuardianRepo.save(sg);
+
+            StudentAcademicEnrollment en = new StudentAcademicEnrollment();
+            en.setStudent(s);
+            en.setAcademicYear(ay);
+            en.setClassGroup(s.getClassGroup());
+            en.setAdmissionDate(LocalDate.now());
+            en.setJoiningDate(LocalDate.now());
+            en.setStatus(StudentAcademicEnrollmentStatus.ACTIVE);
+            studentAcademicEnrollmentRepo.save(en);
         }
 
         for (int d = 0; d < 14; d++) {

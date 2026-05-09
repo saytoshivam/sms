@@ -4,6 +4,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { StudentDayScheduleTable } from '../components/StudentDayScheduleTable';
+import { DateKeeper } from '../components/DateKeeper';
 import { formatDayHeading, type TimetableOccurrence } from './TeacherTimetablePage';
 
 function toYmd(d: Date) {
@@ -358,13 +359,13 @@ export function StudentSchedulePage() {
               <strong>Weekly</strong> = your regular class from the school’s published timetable for your section.
             </div>
             <div className="row" style={{ flexWrap: 'wrap', alignItems: 'end' }}>
-              <div className="stack" style={{ gap: 6, minWidth: 160 }}>
-                <label>From</label>
-                <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+              <div className="stack" style={{ gap: 6, minWidth: 200 }}>
+                <label htmlFor="student-sched-from">From</label>
+                <DateKeeper id="student-sched-from" value={from} onChange={(v) => setFrom(v)} />
               </div>
-              <div className="stack" style={{ gap: 6, minWidth: 160 }}>
-                <label>To</label>
-                <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              <div className="stack" style={{ gap: 6, minWidth: 200 }}>
+                <label htmlFor="student-sched-to">To</label>
+                <DateKeeper id="student-sched-to" value={to} onChange={(v) => setTo(v)} />
               </div>
               <button type="button" className="btn secondary" onClick={() => setTo(addDaysYmd(from, 13))}>
                 Two weeks from “From”
