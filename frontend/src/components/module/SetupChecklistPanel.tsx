@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { OPTIONAL_STEPS, REQUIRED_STEPS, WIZARD_STEPS, type WizardStepId } from '../../lib/onboardingWizardMeta';
+import { REQUIRED_STEPS, WIZARD_STEPS, type WizardStepId } from '../../lib/onboardingWizardMeta';
 
 type OnboardingProgress = {
   /** Slug of current step (server enum). */
@@ -61,8 +61,9 @@ export function SetupChecklistPanel({ open, onClose }: Props) {
   const completed = new Set(progress.data?.completedSteps ?? []);
   const requiredDone = REQUIRED_STEPS.filter((s) => completed.has(s)).length;
   const requiredTotal = REQUIRED_STEPS.length;
-  const optionalDone = OPTIONAL_STEPS.filter((s) => completed.has(s)).length;
-  const optionalTotal = OPTIONAL_STEPS.length;
+  const checklistOptional = WIZARD_STEPS.filter((s) => s.optional);
+  const optionalDone = checklistOptional.filter((s) => completed.has(s.id)).length;
+  const optionalTotal = checklistOptional.length;
   const pct = Math.round((requiredDone / Math.max(1, requiredTotal)) * 100);
 
   return (
@@ -88,7 +89,8 @@ export function SetupChecklistPanel({ open, onClose }: Props) {
           <div>
             <div style={{ fontWeight: 950, fontSize: 16 }}>Setup checklist</div>
             <div className="muted" style={{ fontSize: 12 }}>
-              {requiredDone}/{requiredTotal} required · {optionalDone}/{optionalTotal} optional
+              {requiredDone}/{requiredTotal} required
+              {optionalTotal > 0 ? ` · ${optionalDone}/${optionalTotal} optional` : ''}
             </div>
           </div>
           <button type="button" className="btn secondary" onClick={onClose}>

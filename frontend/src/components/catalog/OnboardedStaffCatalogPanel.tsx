@@ -25,7 +25,7 @@ type StaffLoginCredential = {
 /**
  * “Onboarded staff” table + filters + edit/delete (same as onboarding Staff step).
  */
-export function OnboardedStaffCatalogPanel() {
+export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: boolean }) {
   const invalidate = useApiTags();
   const queryClient = useQueryClient();
 
@@ -273,16 +273,18 @@ export function OnboardedStaffCatalogPanel() {
                 Reset
               </button>
 
-              <RowActionsMenu
-                actions={[
-                  {
-                    id: 'staff-delete-all',
-                    label: 'Delete all staff',
-                    danger: true,
-                    onSelect: () => setStaffDeleteAllModal({ open: true, busy: false }),
-                  },
-                ]}
-              />
+              {!readOnly ? (
+                <RowActionsMenu
+                  actions={[
+                    {
+                      id: 'staff-delete-all',
+                      label: 'Delete all staff',
+                      danger: true,
+                      onSelect: () => setStaffDeleteAllModal({ open: true, busy: false }),
+                    },
+                  ]}
+                />
+              ) : null}
             </div>
 
             {(() => {
@@ -342,7 +344,8 @@ export function OnboardedStaffCatalogPanel() {
                 });
               };
 
-              const actionMenu = (s: OnboardedStaffRow) => (
+              const actionMenu = (s: OnboardedStaffRow) =>
+                readOnly ? null : (
                 <RowActionsMenu
                   actions={[
                     { id: `staff-${s.staffId}-edit`, label: 'Edit', onSelect: () => openEdit(s) },
@@ -461,7 +464,7 @@ export function OnboardedStaffCatalogPanel() {
                               <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Role</th>
                               <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Phone</th>
                               <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Status</th>
-                              <th className="w-12 px-3 py-3" />
+                              {readOnly ? null : <th className="w-12 px-3 py-3" />}
                             </tr>
                           </thead>
                           <tbody>
@@ -487,11 +490,11 @@ export function OnboardedStaffCatalogPanel() {
                                     </td>
                                     <td className="px-4 py-3 font-semibold text-slate-800">{s.phone ?? '—'}</td>
                                     <td className="px-4 py-3">{statusBadge(!!s.hasLoginAccount)}</td>
-                                    <td className="px-3 py-3 text-right">{actionMenu(s)}</td>
+                                    {readOnly ? null : <td className="px-3 py-3 text-right">{actionMenu(s)}</td>}
                                   </tr>
                                   {open ? (
                                     <tr className="bg-white">
-                                      <td colSpan={5} className="px-4 pb-4">
+                                      <td colSpan={readOnly ? 4 : 5} className="px-4 pb-4">
                                         <div className="rounded-xl border border-slate-200 bg-white p-4">
                                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                             <div>
@@ -540,7 +543,7 @@ export function OnboardedStaffCatalogPanel() {
                               <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Roles</th>
                               <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Subjects</th>
                               <th className="px-4 py-3 text-left text-xs font-black tracking-wide text-slate-600">Login</th>
-                              <th className="w-12 px-3 py-3" />
+                              {readOnly ? null : <th className="w-12 px-3 py-3" />}
                             </tr>
                           </thead>
                           <tbody>
@@ -567,7 +570,7 @@ export function OnboardedStaffCatalogPanel() {
                                   </div>
                                 </td>
                                 <td className="px-4 py-3">{statusBadge(!!s.hasLoginAccount)}</td>
-                                <td className="px-3 py-3 text-right">{actionMenu(s)}</td>
+                                {readOnly ? null : <td className="px-3 py-3 text-right">{actionMenu(s)}</td>}
                               </tr>
                             ))}
                           </tbody>

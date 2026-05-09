@@ -12,6 +12,7 @@ import { onboardingStepHref } from '../../lib/onboardingWizardMeta';
 import { SavedSubjectsCatalogPanel } from '../../components/catalog/SavedSubjectsCatalogPanel';
 import { formatCompatibleRoomTypesList, schoolHasAnyCompatibleRoom } from '../../lib/roomVenueCompatibility';
 import { parseSubjectVenueRequirement, SUBJECT_VENUE_LABELS, SUBJECT_VENUE_REQUIREMENTS } from '../../lib/subjectVenueRequirement';
+import { isWorkspaceReadOnly, WorkspaceReadOnlyRibbon } from '../../lib/workspaceViewMode';
 
 type Subject = {
   id: number;
@@ -55,9 +56,19 @@ const EMPTY_DRAFT: CreateDraft = {
 
 export function SubjectsModulePage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabFromUrl = (searchParams.get('tab') ?? 'browse') as 'browse' | 'add';
+  const readOnly = isWorkspaceReadOnly(searchParams);
+
+  const tabFromUrlRaw = searchParams.get('tab') ?? 'browse';
+  const tabFromUrl = (readOnly && tabFromUrlRaw === 'add' ? 'browse' : tabFromUrlRaw) as 'browse' | 'add';
   const [tab, setTab] = useState<'browse' | 'add'>(tabFromUrl);
   useEffect(() => setTab(tabFromUrl), [tabFromUrl]);
+
+  useEffect(() => {
+    if (!readOnly || tabFromUrlRaw !== 'add') return;
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('tab');
+    setSearchParams(sp, { replace: true });
+  }, [readOnly, tabFromUrlRaw, searchParams, setSearchParams]);
 
   const [createDraft, setCreateDraft] = useState<CreateDraft>(EMPTY_DRAFT);
 
@@ -137,28 +148,44 @@ export function SubjectsModulePage() {
 
   const headerActions = (
     <>
-      <Link to="/app" className="btn secondary">
+      <Link to="/app/operations-hub" className="btn secondary">
         Back to hub
       </Link>
-      <button type="button" className="btn" onClick={() => setTabUrl('add')}>
-        + Add subject
-      </button>
+      {readOnly ? null : (
+        <button type="button" className="btn" onClick={() => setTabUrl('add')}>
+          + Add subject
+        </button>
+      )}
     </>
   );
+
+  const tabHrefBase = readOnly ? '/app/subjects?view=1' : '/app/subjects';
 
   return (
     <ModulePage
       title="Subjects"
-      subtitle="Catalog of subjects taught at this school. Edit weekly frequency or rename codes; the timetable will flag affected sections."
+      subtitle={
+        readOnly ? (
+          <span>Browse subjects on file (read-only).</span>
+        ) : (
+          'Catalog of subjects taught at this school. Edit weekly frequency or rename codes; the timetable will flag affected sections.'
+        )
+      }
       status={status}
       headerActions={headerActions}
-      tabs={[
-        { id: 'browse', label: 'Browse', badge: list.length || null },
-        { id: 'add', label: 'Add new' },
-      ]}
+      impact={readOnly ? null : undefined}
+      tabs={
+        readOnly
+          ? [{ id: 'browse', label: 'Browse', badge: list.length || null }]
+          : [
+              { id: 'browse', label: 'Browse', badge: list.length || null },
+              { id: 'add', label: 'Add new' },
+            ]
+      }
       activeTabId={tab}
-      tabHrefBase="/app/subjects"
+      tabHrefBase={tabHrefBase}
     >
+      {readOnly ? <WorkspaceReadOnlyRibbon title="Subjects — browse only" /> : null}
       {tab === 'add' ? (
         <AddSubjectCard
           draft={createDraft}
@@ -169,7 +196,7 @@ export function SubjectsModulePage() {
         />
       ) : null}
 
-      {tab === 'browse' ? (
+      {tab === 'browse' && !readOnly ? (
         <div
           className="card"
           style={{
@@ -205,7 +232,7 @@ export function SubjectsModulePage() {
               </div>
             </div>
           ) : null}
-          <SavedSubjectsCatalogPanel />
+          <SavedSubjectsCatalogPanel readOnly={readOnly} />
         </div>
       ) : null}
     </ModulePage>

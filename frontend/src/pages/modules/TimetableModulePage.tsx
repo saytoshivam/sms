@@ -5,6 +5,7 @@ import Step7TimetableWorkspace from '../../components/Step7TimetableWorkspace';
 import { ModulePage } from '../../components/module/ModulePage';
 import { ConflictsPanel } from '../../components/timetable/ConflictsPanel';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { isWorkspaceReadOnly, withWorkspaceReadOnly, WorkspaceReadOnlyRibbon } from '../../lib/workspaceViewMode';
 import { api } from '../../lib/api';
 import { toast } from '../../lib/toast';
 import { useTimetableLifecycle } from '../../lib/useTimetableLifecycle';
@@ -32,8 +33,13 @@ export function TimetableModulePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  /** From Academic management tile: show only the live published timetable, read-only. */
-  const schedulePublishedViewer = searchParams.get('scope') === 'published';
+  /** Sidebar / launcher browse (`view=1`) or explicit published scope → read-only viewer. Hub opens without these for full drafting. */
+  const readOnlyBrowse = isWorkspaceReadOnly(searchParams);
+  const schedulePublishedViewer = searchParams.get('scope') === 'published' || readOnlyBrowse;
+  /** Preserve `view=1` on tab navigations while browsing from sidebar/laucher. */
+  const publishedTabHrefBase = readOnlyBrowse
+    ? withWorkspaceReadOnly('/app/timetable?scope=published')
+    : '/app/timetable?scope=published';
 
   const tabParam = searchParams.get('tab') as TimetableTab | null;
   const [tab, setTab] = useState<TimetableTab>(TABS.includes(tabParam as TimetableTab) ? (tabParam as TimetableTab) : 'workspace');
@@ -106,8 +112,10 @@ export function TimetableModulePage() {
   useEffect(() => {
     if (!schedulePublishedViewer) return;
     if (tab !== 'conflicts') return;
-    navigate('/app/timetable?scope=published&tab=workspace', { replace: true });
-  }, [schedulePublishedViewer, tab, navigate]);
+    navigate(readOnlyBrowse ? `${publishedTabHrefBase}&tab=workspace` : '/app/timetable?scope=published&tab=workspace', {
+      replace: true,
+    });
+  }, [schedulePublishedViewer, tab, navigate, readOnlyBrowse, publishedTabHrefBase]);
 
   const versionLabel = useMemo(() => {
     if (!lc.version) return null;
@@ -374,8 +382,9 @@ export function TimetableModulePage() {
             ]
       }
       activeTabId={tab}
-      tabHrefBase={schedulePublishedViewer ? '/app/timetable?scope=published' : '/app/timetable'}
+      tabHrefBase={schedulePublishedViewer ? publishedTabHrefBase : '/app/timetable'}
     >
+      {readOnlyBrowse ? <WorkspaceReadOnlyRibbon title="Timetable — browse only (published snapshot)" /> : null}
       {!schedulePublishedViewer &&
       lc.publishBlockedReason &&
       lc.versionStatus !== 'PUBLISHED' &&

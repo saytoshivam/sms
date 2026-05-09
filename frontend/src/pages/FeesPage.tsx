@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { pageContent, pageTotalElements, type SpringPage } from '../lib/apiData';
 import { SchoolBusinessKpis } from '../components/SchoolBusinessKpis';
 import { SmartSelect } from '../components/SmartSelect';
+import { isWorkspaceReadOnly, WorkspaceReadOnlyRibbon } from '../lib/workspaceViewMode';
 
 const ONLINE_FEES = 'fees.online_payments';
 
@@ -19,6 +21,9 @@ type Invoice = {
 type Student = { id: number; firstName: string; lastName?: string | null; admissionNo: string };
 
 export function FeesPage() {
+  const [searchParams] = useSearchParams();
+  const readOnly = isWorkspaceReadOnly(searchParams);
+
   const qc = useQueryClient();
   const [studentId, setStudentId] = useState('');
   const [amountDue, setAmountDue] = useState('');
@@ -88,13 +93,18 @@ export function FeesPage() {
     <div className="workspace-feature-page stack">
       <h2 className="workspace-feature-page__title">Fees & invoices</h2>
       <p className="workspace-feature-page__lead">
-        Create invoices, track collection, and (with the right plan) start online payment intents.
+        {readOnly
+          ? 'Browse invoices (read-only). Open Operations hub — Fees module to create invoices and post payments.'
+          : 'Create invoices, track collection, and (with the right plan) start online payment intents.'}
       </p>
+
+      {readOnly ? <WorkspaceReadOnlyRibbon title="Fees — browse only" /> : null}
 
       <div className="card stack" style={{ margin: 0 }}>
         <SchoolBusinessKpis compact />
       </div>
 
+      {!readOnly ? (
       <div className="card">
         <form
           className="stack"
@@ -134,6 +144,7 @@ export function FeesPage() {
           ) : null}
         </form>
       </div>
+      ) : null}
 
       <div className="card">
         {invoices.isLoading ? (
@@ -162,7 +173,7 @@ export function FeesPage() {
                 </div>
                 <div className="row" style={{ gap: 8 }}>
                   <span className="muted">ID: {inv.id}</span>
-                  {canPayOnline && (inv.status === 'DUE' || inv.status === 'PARTIAL') ? (
+                  {!readOnly && canPayOnline && (inv.status === 'DUE' || inv.status === 'PARTIAL') ? (
                     <button
                       type="button"
                       className="btn secondary"

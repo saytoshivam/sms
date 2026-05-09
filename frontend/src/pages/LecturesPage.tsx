@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { draftOverlapsBusy, LectureDayTimeline, type TimelineBusyBlock } from '../components/LectureDayTimeline';
@@ -10,6 +11,7 @@ import { WorkspaceHero } from '../components/workspace/WorkspaceKit';
 import { ClassGroupSearchCombobox, useClassGroupsCatalog } from '../components/ClassGroupSearchCombobox';
 import { SubjectSearchCombobox } from '../components/SubjectSearchCombobox';
 import type { MeProfile } from '../modules/dashboards/SuperAdminDashboard';
+import { isWorkspaceReadOnly, WorkspaceReadOnlyRibbon } from '../lib/workspaceViewMode';
 
 function todayYmd() {
   const d = new Date();
@@ -20,6 +22,9 @@ function todayYmd() {
 }
 
 export function LecturesPage() {
+  const [searchParams] = useSearchParams();
+  const readOnly = isWorkspaceReadOnly(searchParams);
+
   const qc = useQueryClient();
   const [classGroupId, setClassGroupId] = useState('');
   const [date, setDate] = useState(() => todayYmd());
@@ -126,10 +131,14 @@ export function LecturesPage() {
         title="Lectures"
         tag="One-off"
         subtitle={
-          <>
-            Book a session for a class on a chosen day. The timeline shows what is already scheduled (busy blocks). If
-            your login is linked to a staff profile, the lecture is always booked for you only.
-          </>
+          readOnly ? (
+            <>Browse mode — lecture booking is locked. Use Operations hub → Lectures to schedule.</>
+          ) : (
+            <>
+              Book a session for a class on a chosen day. The timeline shows what is already scheduled (busy blocks).
+              If your login is linked to a staff profile, the lecture is always booked for you only.
+            </>
+          )
         }
       />
       {classGroupsCatalog.isError ? (
@@ -141,6 +150,11 @@ export function LecturesPage() {
           </p>
         </div>
       ) : null}
+      {readOnly ? (
+        <div className="card stack" style={{ padding: 16 }}>
+          <WorkspaceReadOnlyRibbon title="Lectures — scheduling disabled here" />
+        </div>
+      ) : (
       <div className="workspace-panel lecture-schedule-panel">
         <form
           className="stack lecture-schedule-form theme-form"
@@ -269,6 +283,7 @@ export function LecturesPage() {
           </div>
         </form>
       </div>
+      )}
       {createSuccess
         ? createPortal(
             <div

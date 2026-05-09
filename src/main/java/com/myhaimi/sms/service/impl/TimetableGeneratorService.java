@@ -115,7 +115,7 @@ public class TimetableGeneratorService {
 
         List<Slot> allSlots = new ArrayList<>(days.size() * slots.size());
         for (SchoolTimeSlot ts : slots) {
-            for (DayOfWeek d : days) {
+        for (DayOfWeek d : days) {
                 allSlots.add(new Slot(d, ts.getId(), ts.getSlotOrder()));
             }
         }
@@ -472,8 +472,8 @@ public class TimetableGeneratorService {
                         Session s = cand.session();
                         Integer tId = s.teacherId();
                         Integer homeroomRid = s.homeroomRoomId();
-                        Set<String> classBusy = classOcc.getOrDefault(cgId, Set.of());
-                        Set<String> teacherBusy = teacherOcc.getOrDefault(tId, Set.of());
+            Set<String> classBusy = classOcc.getOrDefault(cgId, Set.of());
+            Set<String> teacherBusy = teacherOcc.getOrDefault(tId, Set.of());
                         Set<String> roomBusy = homeroomRid == null ? Set.of() : roomOcc.getOrDefault(homeroomRid, Set.of());
                         if (classBusy.contains(cell)) continue;
                         if (teacherBusy.contains(cell)) continue;
@@ -482,8 +482,8 @@ public class TimetableGeneratorService {
                     }
 
                     if (valid.isEmpty()) {
-                        continue;
-                    }
+                    continue;
+                }
 
                     boolean existsDiffFromPrev = false;
                     if (prevSubj != null) {
@@ -529,8 +529,8 @@ public class TimetableGeneratorService {
 
                     if (nodesLeft[0]-- <= 0) {
                         lastReject.put(bucket.getFirst().session(), "Node budget exhausted");
-                        return false;
-                    }
+                return false;
+            }
 
                     Session s = best.session();
                     Integer tId = s.teacherId();
@@ -545,12 +545,12 @@ public class TimetableGeneratorService {
                         return false;
                     }
 
-                    TimetableEntry e = new TimetableEntry();
-                    e.setSchool(school);
-                    e.setTimetableVersion(version);
-                    e.setClassGroup(cg);
-                    e.setSubject(subj);
-                    e.setStaff(teacher);
+            TimetableEntry e = new TimetableEntry();
+            e.setSchool(school);
+            e.setTimetableVersion(version);
+            e.setClassGroup(cg);
+            e.setSubject(subj);
+            e.setStaff(teacher);
                     e.setDayOfWeek(slot.day());
                     e.setTimeSlot(slotById.get(slot.timeSlotId()));
                     Room hr = homeroomRoomByClassGroupId.get(cgId);
@@ -559,7 +559,7 @@ public class TimetableGeneratorService {
                     }
 
                     place(e, cgId, tId, homeroomRid, slot, classOcc, teacherOcc, roomOcc, existingByCell,
-                            preferredPeriodByBundle, classDayFilledOrders, classDaySubjectCount, bundleKey(s));
+                    preferredPeriodByBundle, classDayFilledOrders, classDaySubjectCount, bundleKey(s));
 
                     subjectAtSlot
                             .computeIfAbsent(cgId, k -> new EnumMap<>(DayOfWeek.class))
@@ -571,7 +571,7 @@ public class TimetableGeneratorService {
                             .put(subjId, po);
 
                     schoolDayLoad.merge(day, 1, Integer::sum);
-                    placedOut.addLast(e);
+            placedOut.addLast(e);
 
                     bucket.remove(best);
                 }
@@ -1081,7 +1081,7 @@ public class TimetableGeneratorService {
                     sharesByIdx, anchor, pruneStack,
                     classOcc, teacherOcc, roomOcc, existingByCell, preferredPeriodByBundle, classDayFilledOrders, classDaySubjectCount,
                     schoolDayLoad, classTeacherStaffIdByClassGroupId, workingDays, lastReject, nodesLeft)) {
-                return true;
+                    return true;
             }
 
             while (pruneStack.size() > prunedMark) {

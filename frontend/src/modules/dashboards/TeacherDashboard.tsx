@@ -346,7 +346,7 @@ export function TeacherDashboard({ profile }: { profile: MeProfile }) {
               <strong>Next class:</strong> <span className="tdash-muted" style={{ display: 'inline' }}>—</span>
             </p>
           )}
-        </div>
+          </div>
         <div className="tdash-hero-aside">
           <span className="tdash-pill">Teacher</span>
           <span className="tdash-meta-line">AY {academicYearLabel()}</span>
@@ -417,7 +417,7 @@ export function TeacherDashboard({ profile }: { profile: MeProfile }) {
               <div className="tdash-nn-main">Classes haven&apos;t started</div>
               <div className="tdash-nn-sub">
                 First block {todayRows[0] ? formatTimeShort(todayRows[0].startTime) : ''}
-              </div>
+            </div>
             </>
           ) : operational.afterDay ? (
             <>

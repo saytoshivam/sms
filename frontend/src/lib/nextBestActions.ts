@@ -58,13 +58,26 @@ const PRI_REGEN_AFTER_IMPACT = 300;
 const PRI_TIMETABLE_FIRST_GEN = 250;
 const PRI_TIMETABLE_OPEN = 100;
 
+/**
+ * Wizard `completedSteps` is only updated inside the onboarding flow; publishing from the Timetable module
+ * does not automatically tick TIMETABLE. For recommendations, treat a published timetable as satisfying that step.
+ */
+function effectiveCompletedSteps(completedSteps: string[] | undefined, hasPublishedTimetable?: boolean): string[] {
+  const s = [...(completedSteps ?? [])];
+  if (hasPublishedTimetable && !s.includes('TIMETABLE')) {
+    s.push('TIMETABLE');
+  }
+  return s;
+}
+
 export function computeNextBestActions(input: NextBestActionInput): Nba[] {
   const out: Nba[] = [];
-  const completedDone = REQUIRED_STEPS.filter((s) => input.completedSteps.includes(s)).length;
+  const steps = effectiveCompletedSteps(input.completedSteps, input.hasPublishedTimetable);
+  const completedDone = REQUIRED_STEPS.filter((s) => steps.includes(s)).length;
   const setupComplete = completedDone === REQUIRED_STEPS.length;
 
-  // Setup blockers
-  const firstMissing = firstIncompleteWizardStepId(input.completedSteps);
+  // Setup blockers (uses operational timetable truth so “Finish setup: timetable” doesn’t nag after publish)
+  const firstMissing = firstIncompleteWizardStepId(steps);
   if (firstMissing) {
     out.push({
       id: `setup-${firstMissing}`,
@@ -166,25 +179,29 @@ export function computeNextBestActions(input: NextBestActionInput): Nba[] {
     });
   }
 
-  // First-time generation: setup is ready but no entries / not published yet.
-  if (
-    setupComplete &&
-    input.impact.total === 0 &&
-    hardConflicts === 0 &&
-    (input.hasTimetableEntries === false || input.hasPublishedTimetable === false)
-  ) {
-    const firstRun = input.hasTimetableEntries === false;
-    out.push({
-      id: 'timetable-first-gen',
-      level: 'info',
-      title: firstRun ? 'Generate the first timetable' : 'Publish the current draft',
-      detail: firstRun
-        ? 'Setup looks complete — kick off the engine.'
-        : 'Draft has no conflicts and is ready to publish.',
-      to: '/app/timetable',
-      cta: 'Open Timetable',
-      priority: PRI_TIMETABLE_FIRST_GEN,
-    });
+  // First-time generation or publish draft — not when already live on published with an empty edit workspace (steady state).
+  if (setupComplete && input.impact.total === 0 && hardConflicts === 0) {
+    if (!input.hasPublishedTimetable && !input.hasTimetableEntries) {
+      out.push({
+        id: 'timetable-first-gen',
+        level: 'info',
+        title: 'Generate the first timetable',
+        detail: 'Setup looks complete — kick off the engine.',
+        to: '/app/timetable',
+        cta: 'Open Timetable',
+        priority: PRI_TIMETABLE_FIRST_GEN,
+      });
+    } else if (!input.hasPublishedTimetable && input.hasTimetableEntries) {
+      out.push({
+        id: 'timetable-publish-draft',
+        level: 'info',
+        title: 'Publish the current draft',
+        detail: 'Draft has no conflicts and is ready to publish.',
+        to: '/app/timetable',
+        cta: 'Open Timetable',
+        priority: PRI_TIMETABLE_FIRST_GEN,
+      });
+    }
   }
 
   // Soft conflicts in the draft — advisory.

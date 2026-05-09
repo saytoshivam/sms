@@ -26,12 +26,7 @@ import {
 import { runAutoAssignClassTeachers } from '../lib/classTeacherAutoAssign';
 import type { AssignmentSlotMeta } from '../lib/academicStructureSmartAssign';
 import { assignHomeroomsGreedy, classGroupsToHomeroomSections, roomsToHomeroomInputs } from '../lib/homeroomAssignment';
-import {
-  OPTIONAL_STEPS,
-  REQUIRED_STEPS,
-  WIZARD_STEPS,
-  statusToStepIndex,
-} from '../lib/onboardingWizardMeta';
+import { REQUIRED_STEPS, WIZARD_STEPS, statusToStepIndex } from '../lib/onboardingWizardMeta';
 import {
   basicInfoApiToDraft,
   draftToBasicInfoPutPayload,
@@ -1678,7 +1673,8 @@ export function SchoolOnboardingWizardPage() {
           <div style={{ minWidth: 200 }}>
             <div style={{ fontWeight: 800, fontSize: 16 }}>Progress</div>
             <div className="muted" style={{ fontSize: 13 }}>
-              Required: {REQUIRED_STEPS.length} steps · Optional: {OPTIONAL_STEPS.length} steps
+              Required: {REQUIRED_STEPS.length} steps · Optional in wizard:{' '}
+              {WIZARD_STEPS.filter((s) => s.optional).length} steps
             </div>
             <div style={{ fontWeight: 700, marginTop: 10, fontSize: 15 }}>
               {currentWizardStep.title}

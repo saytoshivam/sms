@@ -35,6 +35,7 @@ import {
 import { api } from '../../lib/api';
 import { erpAttendancePath } from '../../lib/erpAttendancePath';
 import { hasTeachingRole } from '../../lib/roleGroups';
+import { withWorkspaceReadOnly } from '../../lib/workspaceViewMode';
 import '../../styles/erpShell.css';
 
 export type ErpMe = {
@@ -92,11 +93,22 @@ function buildLeaderNavGroups(attendancePath: string, roles: string[]): NavGroup
       label: 'Academics',
       items: [
         { to: attendancePath, label: 'Attendance', icon: ClipboardCheck, prefix: '/app/attendance' },
-        { to: '/app/timetable', label: 'Timetable', icon: CalendarRange, prefix: '/app/timetable' },
-        { to: '/app/students', label: 'Students', icon: Users, prefix: '/app/students' },
-        { to: '/app/teachers', label: 'Teachers', icon: GraduationCap, prefix: '/app/teachers' },
-        { to: '/app/academic', label: 'Academic structure', icon: Network, prefix: '/app/academic' },
-        { to: '/app/fees', label: 'Fees', icon: IndianRupee, prefix: '/app/fees' },
+        {
+          to: withWorkspaceReadOnly('/app/timetable?scope=published'),
+          label: 'Timetable',
+          icon: CalendarRange,
+          prefix: '/app/timetable',
+        },
+        {
+          to: withWorkspaceReadOnly('/app/students'),
+          label: 'Students',
+          icon: Users,
+          prefix: '/app/students',
+        },
+        { to: withWorkspaceReadOnly('/app/teachers'), label: 'Teachers', icon: GraduationCap, prefix: '/app/teachers' },
+        { to: withWorkspaceReadOnly('/app/subjects'), label: 'Subjects', icon: BookOpen, prefix: '/app/subjects' },
+        { to: withWorkspaceReadOnly('/app/academic'), label: 'Academic structure', icon: Network, prefix: '/app/academic' },
+        { to: withWorkspaceReadOnly('/app/fees'), label: 'Fees', icon: IndianRupee, prefix: '/app/fees' },
       ],
     },
     {
@@ -151,7 +163,7 @@ function buildTeacherNavGroups(attendancePath: string): NavGroup[] {
         { to: '/app/teacher/timetable', label: 'My timetable', icon: CalendarRange, prefix: '/app/teacher/timetable' },
         { to: '/app/teacher/classes', label: 'My classes', icon: Users, prefix: '/app/teacher/classes' },
         { to: '/app/lectures', label: 'Lectures', icon: Presentation, prefix: '/app/lectures' },
-        { to: '/app/students', label: 'Students', icon: Users, prefix: '/app/students' },
+        { to: withWorkspaceReadOnly('/app/students'), label: 'Students', icon: Users, prefix: '/app/students' },
       ],
     },
     {

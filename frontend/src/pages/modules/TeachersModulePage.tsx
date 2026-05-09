@@ -9,6 +9,7 @@ import { useApiTags } from '../../lib/apiTags';
 import { useImpactStore } from '../../lib/impactStore';
 import { onboardingStepHref } from '../../lib/onboardingWizardMeta';
 import { OnboardedStaffCatalogPanel } from '../../components/catalog/OnboardedStaffCatalogPanel';
+import { isWorkspaceReadOnly, WorkspaceReadOnlyRibbon } from '../../lib/workspaceViewMode';
 import {
   buildEffectiveAllocRows,
   type ClassSubjectConfigRow,
@@ -96,9 +97,19 @@ const EMPTY_CREATE: CreateDraft = {
 
 export function TeachersModulePage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabFromUrl = (searchParams.get('tab') ?? 'browse') as 'browse' | 'add';
+  const readOnly = isWorkspaceReadOnly(searchParams);
+
+  const tabFromUrlRaw = searchParams.get('tab') ?? 'browse';
+  const tabFromUrl = (readOnly && tabFromUrlRaw === 'add' ? 'browse' : tabFromUrlRaw) as 'browse' | 'add';
   const [tab, setTab] = useState<'browse' | 'add'>(tabFromUrl);
   useEffect(() => setTab(tabFromUrl), [tabFromUrl]);
+
+  useEffect(() => {
+    if (!readOnly || tabFromUrlRaw !== 'add') return;
+    const sp = new URLSearchParams(searchParams);
+    sp.delete('tab');
+    setSearchParams(sp, { replace: true });
+  }, [readOnly, tabFromUrlRaw, searchParams, setSearchParams]);
 
   const [createDraft, setCreateDraft] = useState<CreateDraft>(EMPTY_CREATE);
 
@@ -220,28 +231,42 @@ export function TeachersModulePage() {
 
   const headerActions = (
     <>
-      <Link to="/app" className="btn secondary">
+      <Link to="/app/operations-hub" className="btn secondary">
         Back to hub
       </Link>
-      <button type="button" className="btn" onClick={() => setTabUrl('add')}>
-        + Add teacher
-      </button>
+      {readOnly ? null : (
+        <button type="button" className="btn" onClick={() => setTabUrl('add')}>
+          + Add teacher
+        </button>
+      )}
     </>
   );
+
+  const tabHrefBase = readOnly ? '/app/teachers?view=1' : '/app/teachers';
 
   return (
     <ModulePage
       title="Teachers"
-      subtitle="Roster from onboarding API — same onboarded staff browser as the setup wizard (search, filters, edit, CSV note)."
+      subtitle={
+        readOnly
+          ? 'Browse staff roster (read-only — search and filters ok).'
+          : 'Roster from onboarding API — same onboarded staff browser as the setup wizard (search, filters, edit, CSV note).'
+      }
       status={status}
       headerActions={headerActions}
-      tabs={[
-        { id: 'browse', label: 'Browse', badge: list.length || null },
-        { id: 'add', label: 'Add new' },
-      ]}
+      impact={readOnly ? null : undefined}
+      tabs={
+        readOnly
+          ? [{ id: 'browse', label: 'Browse', badge: list.length || null }]
+          : [
+              { id: 'browse', label: 'Browse', badge: list.length || null },
+              { id: 'add', label: 'Add new' },
+            ]
+      }
       activeTabId={tab}
-      tabHrefBase="/app/teachers"
+      tabHrefBase={tabHrefBase}
     >
+      {readOnly ? <WorkspaceReadOnlyRibbon title="Teachers — browse only" /> : null}
       {tab === 'add' ? (
         <AddTeacherCard
           draft={createDraft}
@@ -252,7 +277,7 @@ export function TeachersModulePage() {
         />
       ) : null}
 
-      {tab === 'browse' ? (
+      {tab === 'browse' && !readOnly ? (
         <div
           className="card"
           style={{
@@ -278,7 +303,7 @@ export function TeachersModulePage() {
 
       {tab === 'browse' ? (
         <div className="card stack" style={{ gap: 12, padding: 12, marginTop: 12, border: '1px solid rgba(15,23,42,0.10)', borderRadius: 12 }}>
-          <OnboardedStaffCatalogPanel />
+          <OnboardedStaffCatalogPanel readOnly={readOnly} />
         </div>
       ) : null}
     </ModulePage>

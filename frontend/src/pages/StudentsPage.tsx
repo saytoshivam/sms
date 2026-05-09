@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { ClassGroupSearchCombobox } from '../components/ClassGroupSearchCombobox';
+import { isWorkspaceReadOnly, WorkspaceReadOnlyRibbon } from '../lib/workspaceViewMode';
 
 type Student = {
   id: number;
@@ -24,6 +25,9 @@ type Page<T> = {
 };
 
 export function StudentsPage() {
+  const [searchParams] = useSearchParams();
+  const readOnly = isWorkspaceReadOnly(searchParams);
+
   const qc = useQueryClient();
   const [admissionNo, setAdmissionNo] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -61,9 +65,14 @@ export function StudentsPage() {
     <div className="workspace-feature-page stack">
       <h2 className="workspace-feature-page__title">Students</h2>
       <p className="workspace-feature-page__lead">
-        Add learners, assign them to class groups, and open performance charts per student.
+        {readOnly
+          ? 'Browse learners and open charts (read-only). Add enrolments via Operations hub or your roster workflow.'
+          : 'Add learners, assign them to class groups, and open performance charts per student.'}
       </p>
 
+      {readOnly ? <WorkspaceReadOnlyRibbon title="Students — browse only" /> : null}
+
+      {!readOnly ? (
       <div className="card">
         <form
           className="stack"
@@ -111,6 +120,7 @@ export function StudentsPage() {
           ) : null}
         </form>
       </div>
+      ) : null}
 
       <div className="card">
         {students.isLoading ? (

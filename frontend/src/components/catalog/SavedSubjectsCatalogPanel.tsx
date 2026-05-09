@@ -44,7 +44,7 @@ function isValidSubjectCode(code: string) {
 }
 
 /** Saved subjects table + edit/delete flows (same as onboarding Subjects step) */
-export function SavedSubjectsCatalogPanel() {
+export function SavedSubjectsCatalogPanel({ readOnly = false }: { readOnly?: boolean }) {
   const invalidate = useApiTags();
   const recordChange = useImpactStore((s) => s.recordChange);
 
@@ -180,7 +180,11 @@ export function SavedSubjectsCatalogPanel() {
                   <th style={{ textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
                     Freq/wk
                   </th>
-                  <th style={{ textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>Actions</th>
+                  {readOnly ? null : (
+                    <th style={{ textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                      Actions
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -210,48 +214,50 @@ export function SavedSubjectsCatalogPanel() {
                       <td style={{ padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.06)', textAlign: 'right' }}>
                         <span style={{ fontWeight: 900 }}>{s.weeklyFrequency ?? '—'}</span>
                       </td>
-                      <td style={{ padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.06)', textAlign: 'right' }}>
-                        <RowActionsMenu
-                          ariaLabel={`Actions for ${s.name}`}
-                          actions={[
-                            {
-                              id: 'edit',
-                              label: 'Edit',
-                              onSelect: () => {
-                                setSubjectEditModal({
-                                  open: true,
-                                  subjectId: s.id,
-                                  name: s.name,
-                                  code: s.code,
-                                  weeklyFrequency: s.weeklyFrequency ?? null,
-                                  allocationVenueRequirement: parseSubjectVenueRequirement(s.allocationVenueRequirement),
-                                  specializedVenueType: s.specializedVenueType ?? '',
-                                  busy: false,
-                                });
+                      {readOnly ? null : (
+                        <td style={{ padding: '10px 12px', borderBottom: '1px solid rgba(15,23,42,0.06)', textAlign: 'right' }}>
+                          <RowActionsMenu
+                            ariaLabel={`Actions for ${s.name}`}
+                            actions={[
+                              {
+                                id: 'edit',
+                                label: 'Edit',
+                                onSelect: () => {
+                                  setSubjectEditModal({
+                                    open: true,
+                                    subjectId: s.id,
+                                    name: s.name,
+                                    code: s.code,
+                                    weeklyFrequency: s.weeklyFrequency ?? null,
+                                    allocationVenueRequirement: parseSubjectVenueRequirement(s.allocationVenueRequirement),
+                                    specializedVenueType: s.specializedVenueType ?? '',
+                                    busy: false,
+                                  });
+                                },
                               },
-                            },
-                            {
-                              id: 'delete',
-                              label: 'Delete',
-                              danger: true,
-                              disabled: subjectDeleteInfoCache[s.id]?.canDelete === false,
-                              disabledReason: subjectDeleteInfoCache[s.id]?.reasons?.join(' ') || undefined,
-                              onSelect: async () => {
-                                const info = await ensureSubjectDeleteInfo(s.id);
-                                setSubjectDeleteModal({
-                                  open: true,
-                                  subjectId: s.id,
-                                  subjectName: s.name,
-                                  subjectCode: s.code,
-                                  canDelete: info.canDelete,
-                                  reasons: info.reasons ?? [],
-                                  busy: false,
-                                });
+                              {
+                                id: 'delete',
+                                label: 'Delete',
+                                danger: true,
+                                disabled: subjectDeleteInfoCache[s.id]?.canDelete === false,
+                                disabledReason: subjectDeleteInfoCache[s.id]?.reasons?.join(' ') || undefined,
+                                onSelect: async () => {
+                                  const info = await ensureSubjectDeleteInfo(s.id);
+                                  setSubjectDeleteModal({
+                                    open: true,
+                                    subjectId: s.id,
+                                    subjectName: s.name,
+                                    subjectCode: s.code,
+                                    canDelete: info.canDelete,
+                                    reasons: info.reasons ?? [],
+                                    busy: false,
+                                  });
+                                },
                               },
-                            },
-                          ]}
-                        />
-                      </td>
+                            ]}
+                          />
+                        </td>
+                      )}
                     </tr>
                   ))}
               </tbody>

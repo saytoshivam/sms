@@ -10,6 +10,8 @@ import {
   Network,
   Search,
   Users,
+  UsersRound,
+  Wallet,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api } from '../lib/api';
@@ -22,7 +24,7 @@ import { ImpactPill, StatusChip, type StatusLevel } from '../components/module/M
 import { useImpactSummary } from '../lib/impactStore';
 import { computeNextBestActions, type Nba } from '../lib/nextBestActions';
 import { useTimetableStatus } from '../lib/useTimetableStatus';
-import { REQUIRED_STEPS, OPTIONAL_STEPS } from '../lib/onboardingWizardMeta';
+import { REQUIRED_STEPS } from '../lib/onboardingWizardMeta';
 import {
   buildEffectiveAllocRows,
   computeSectionHealth,
@@ -31,6 +33,7 @@ import {
   type ClassSubjectConfigRow,
   type SectionSubjectOverrideRow,
 } from '../lib/academicStructureUtils';
+import { pageTotalElements, type SpringPage } from '../lib/apiData';
 
 type Me = { roles: string[]; schoolName?: string | null };
 
@@ -63,6 +66,11 @@ type AcademicStructure = {
 type SubjectsPage = { content?: { id: number; name: string; code: string }[] } | { id: number; name: string; code: string }[];
 type StaffPage = { content?: StaffRow[] } | StaffRow[];
 type RoomsPage = { content?: { id: number; isSchedulable?: boolean }[] } | { id: number; isSchedulable?: boolean }[];
+type StudentIdRow = { id: number };
+type FeesSetupLite = {
+  classFees: { classGroupId: number; totalAmount: number }[];
+  installments: { label: string; dueDateIso: string; percent: number }[];
+};
 
 type StaffRow = {
   id: number;
@@ -183,14 +191,24 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     queryKey: ['rooms'],
     queryFn: async () => (await api.get<RoomsPage>('/api/rooms?size=500')).data,
   });
+  const studentsPage = useQuery({
+    queryKey: ['students-hub-page'],
+    queryFn: async () =>
+      (await api.get<SpringPage<StudentIdRow> | StudentIdRow[]>('/api/students?size=500')).data,
+  });
+  const feesOnboarding = useQuery({
+    queryKey: ['onboarding-fees'],
+    queryFn: async () => {
+      const res = await api.get<FeesSetupLite>('/api/v1/onboarding/fees', { validateStatus: () => true });
+      return res.status === 200 ? res.data : null;
+    },
+  });
 
   const ttStatus = useTimetableStatus();
 
   const completed = new Set(progress.data?.completedSteps ?? []);
   const requiredDone = REQUIRED_STEPS.filter((s) => completed.has(s)).length;
   const setupComplete = requiredDone === REQUIRED_STEPS.length;
-  const requiredTotal = REQUIRED_STEPS.length + OPTIONAL_STEPS.length;
-  const setupCount = completed.size;
 
   const slotsPerWeek = useMemo(() => estimateSlotsPerWeek(basicInfo.data ?? null), [basicInfo.data]);
 
@@ -343,10 +361,15 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     }
     if (!ttStatus.hasEntries) {
       if (ttStatus.hasPublishedTimetable) {
+        /** Normal steady state: the live schedule is the published version; draft workspace can stay empty until you edit. */
+        const n = ttStatus.latestPublishedEntriesCount;
         return {
-          level: 'warn',
+          level: 'ok',
           primary: 'Published timetable active',
-          secondary: 'Editing workspace has no draft rows — open Timetable to rebuild or copy from published.',
+          secondary:
+            n != null && n > 0
+              ? `${n} slot${n === 1 ? '' : 's'} on the live timetable · open Timetable to start a draft when you need changes.`
+              : 'Live schedule is published · open Timetable to start a draft when you need changes.',
         };
       }
       return { level: 'warn', primary: 'No draft yet', secondary: 'Generate the first draft.' };
@@ -388,6 +411,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     ttStatus.entriesLoading,
     ttStatus.timetableHealthExtrasLoading,
     ttStatus.hasPublishedTimetable,
+    ttStatus.latestPublishedEntriesCount,
     ttStatus.hasEntries,
     ttStatus.conflicts.hard,
     ttStatus.conflicts.soft,
@@ -396,6 +420,47 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     ttStatus.entries.length,
     impact.total,
   ]);
+
+  const studentsReadiness = useMemo<{ level: StatusLevel; primary: string; secondary?: string }>(() => {
+    if (studentsPage.isLoading) return { level: 'idle', primary: 'Loading…', secondary: 'Fetching roster.' };
+    const n = pageTotalElements(studentsPage.data ?? null);
+    if (n === 0) {
+      return {
+        level: 'warn',
+        primary: 'No students yet',
+        secondary: 'Add records and section placements in Students.',
+      };
+    }
+    return {
+      level: 'ok',
+      primary: `${n} student${n === 1 ? '' : 's'}`,
+      secondary: 'Roster & placements.',
+    };
+  }, [studentsPage.data, studentsPage.isLoading]);
+
+  const feesReadiness = useMemo<{ level: StatusLevel; primary: string; secondary?: string }>(() => {
+    if (feesOnboarding.isLoading && feesOnboarding.data === undefined) {
+      return { level: 'idle', primary: 'Loading…', secondary: 'Reading fee setup.' };
+    }
+    const d = feesOnboarding.data;
+    if (d == null) {
+      return { level: 'idle', primary: 'Fee setup', secondary: 'Open Fees to configure or review.' };
+    }
+    const nClass = d.classFees?.length ?? 0;
+    const nInst = d.installments?.length ?? 0;
+    if (nClass === 0 && nInst === 0) {
+      return {
+        level: 'warn',
+        primary: 'Fee structure not set',
+        secondary: 'Define class fees and installments.',
+      };
+    }
+    return {
+      level: 'ok',
+      primary: `${nClass} class tier${nClass === 1 ? '' : 's'} · ${nInst} installment${nInst === 1 ? '' : 's'}`,
+      secondary: 'Billing configured.',
+    };
+  }, [feesOnboarding.data, feesOnboarding.isLoading]);
 
   // ---- next best actions ----
   const allNbas: Nba[] = useMemo(
@@ -438,6 +503,9 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
       teachersReadiness.level,
       roomsReadiness.level,
       timeReadiness.level,
+      timetableReadiness.level,
+      studentsReadiness.level,
+      feesReadiness.level,
     ];
     if (levels.includes('error')) return 'error';
     if (levels.includes('warn')) return 'warn';
@@ -450,6 +518,9 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     teachersReadiness.level,
     roomsReadiness.level,
     timeReadiness.level,
+    timetableReadiness.level,
+    studentsReadiness.level,
+    feesReadiness.level,
   ]);
 
   return (
@@ -475,7 +546,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
                 }
               />
               <span className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
-                Setup {setupCount}/{requiredTotal}
+                Setup {requiredDone}/{REQUIRED_STEPS.length} required
               </span>
               <ImpactPill
                 changes={impact.total}
@@ -530,7 +601,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
         </h2>
         <div className="erp-hub-grid">
           {/*
-            Time → Classes & sections (roster) → catalog resources → Academic (mapping) → Timetable.
+            Time → roster & catalogs → Academic → Timetable → Students → Fees.
           */}
           <HubCard icon={Clock} title="Time slots" level={timeReadiness.level} primary={timeReadiness.primary} secondary={timeReadiness.secondary} to="/app/time" />
           <HubCard
@@ -546,6 +617,15 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
           <HubCard icon={GraduationCap} title="Teachers" level={teachersReadiness.level} primary={teachersReadiness.primary} secondary={teachersReadiness.secondary} to="/app/teachers" />
           <HubCard icon={Network} title="Academic structure" level={academicReadiness.level} primary={academicReadiness.primary} secondary={academicReadiness.secondary} to="/app/academic" />
           <HubCard icon={CalendarDays} title="Timetable" level={timetableReadiness.level} primary={timetableReadiness.primary} secondary={timetableReadiness.secondary} to="/app/timetable" />
+          <HubCard
+            icon={UsersRound}
+            title="Students"
+            level={studentsReadiness.level}
+            primary={studentsReadiness.primary}
+            secondary={studentsReadiness.secondary}
+            to="/app/students"
+          />
+          <HubCard icon={Wallet} title="Fees" level={feesReadiness.level} primary={feesReadiness.primary} secondary={feesReadiness.secondary} to="/app/fees" />
         </div>
       </section>
 

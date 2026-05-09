@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
+  BookOpen,
   Building2,
   CalendarRange,
   CheckCircle2,
@@ -26,6 +27,7 @@ import type { SchoolAdminDashboardShellProps } from './schoolAdmin/dashboardPers
 import type { SchoolAdminOperationalSnapshot } from './schoolAdmin/useSchoolAdminOperationalData';
 import { inr } from './schoolAdmin/useSchoolAdminOperationalData';
 import { formatApiError } from '../../lib/errors';
+import { withWorkspaceReadOnly } from '../../lib/workspaceViewMode';
 import './schoolAdminCommandCenter.css';
 
 function KpiShell({
@@ -666,12 +668,13 @@ export function SchoolAdminCommandCenter({
         <div className="sacc-launch-grid">
           <ModLauncher to="/app/operations-hub" Icon={LayoutDashboard} label="Operations hub" />
           <ModLauncher to={attendanceMonitorHref} Icon={ClipboardCheck} label="Attendance" />
-          <ModLauncher to="/app/timetable?scope=published" Icon={CalendarRange} label="Timetable" />
-          <ModLauncher to="/app/teachers" Icon={GraduationCap} label="Teachers" />
-          <ModLauncher to="/app/fees" Icon={Wallet} label="Fees" />
-          <ModLauncher to="/app/students" Icon={Users} label="Students" />
-          <ModLauncher to="/app/academic" Icon={Network} label="Structure" />
-          <ModLauncher to="/app/lectures" Icon={Presentation} label="Lectures" />
+          <ModLauncher to={withWorkspaceReadOnly('/app/timetable?scope=published')} Icon={CalendarRange} label="Timetable" />
+          <ModLauncher to={withWorkspaceReadOnly('/app/teachers')} Icon={GraduationCap} label="Teachers" />
+          <ModLauncher to={withWorkspaceReadOnly('/app/fees')} Icon={Wallet} label="Fees" />
+          <ModLauncher to={withWorkspaceReadOnly('/app/students')} Icon={Users} label="Students" />
+          <ModLauncher to={withWorkspaceReadOnly('/app/academic')} Icon={Network} label="Structure" />
+          <ModLauncher to={withWorkspaceReadOnly('/app/subjects')} Icon={BookOpen} label="Subjects" />
+          <ModLauncher to={withWorkspaceReadOnly('/app/lectures')} Icon={Presentation} label="Lectures" />
         </div>
 
         <div className="sacc-section-title">System</div>

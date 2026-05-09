@@ -2,28 +2,32 @@
  * Single source of truth for onboarding steps — keep in sync with
  * `/api/v1/onboarding` server expectations.
  */
+/** Required onboarding — same order as {@link WIZARD_STEPS} where applicable. */
 export const REQUIRED_STEPS = [
   'BASIC_INFO',
   'CLASSES',
   'SUBJECTS',
+  'ROOMS',
   'STAFF',
   'ACADEMIC_STRUCTURE',
   'TIMETABLE',
   'STUDENTS',
+  'FEES',
 ] as const;
 
-export const OPTIONAL_STEPS = ['ROOMS', 'FEES', 'NOTIFICATIONS', 'BRANDING'] as const;
+/** Platform steps not shown as separate wizard rows — legacy / future toggles only. */
+export const OPTIONAL_STEPS = ['NOTIFICATIONS', 'BRANDING'] as const;
 
 export const WIZARD_STEPS = [
   { id: 'BASIC_INFO', title: 'Basic setup', optional: false },
   { id: 'CLASSES', title: 'Classes & sections', optional: false },
   { id: 'SUBJECTS', title: 'Subjects', optional: false },
-  { id: 'ROOMS', title: 'Rooms', optional: true },
+  { id: 'ROOMS', title: 'Rooms', optional: false },
   { id: 'STAFF', title: 'Staff & roles', optional: false },
   { id: 'ACADEMIC_STRUCTURE', title: 'Academic structure', optional: false },
   { id: 'TIMETABLE', title: 'Timetable', optional: false },
   { id: 'STUDENTS', title: 'Students', optional: false },
-  { id: 'FEES', title: 'Fees', optional: true },
+  { id: 'FEES', title: 'Fees', optional: false },
 ] as const;
 
 export type WizardStepId = (typeof WIZARD_STEPS)[number]['id'];
