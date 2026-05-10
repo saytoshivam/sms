@@ -2,6 +2,9 @@ package com.myhaimi.sms.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
+import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
+import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -25,11 +28,23 @@ public class StudentDocument {
     @Column(name = "document_type", nullable = false, length = 64)
     private String documentType;
 
-    @Column(name = "file_url", nullable = false, length = 1024)
+    @Column(name = "file_url", nullable = true, length = 1024)
     private String fileUrl;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 32)
+    @Column(name = "collection_status", nullable = false, length = 32)
+    private StudentDocumentCollectionStatus collectionStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "upload_status", nullable = false, length = 32)
+    private StudentDocumentUploadStatus uploadStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_status", nullable = false, length = 32)
+    private StudentDocumentVerificationStatus verificationStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = true, length = 32)
     private StudentDocumentStatus status;
 
     @Column(name = "verified_by")

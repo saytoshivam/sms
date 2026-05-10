@@ -151,5 +151,97 @@ public class StudentController {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
     }
+
+    // === Document Lifecycle Endpoints ===
+
+    @PostMapping("/{studentId}/documents/{docId}/collect")
+    public ResponseEntity<?> collectDocument(
+            @PathVariable Integer studentId,
+            @PathVariable Integer docId,
+            @RequestBody(required = false) StudentDocumentActionDTO dto) {
+        try {
+            String remarks = (dto != null) ? dto.getRemarks() : null;
+            return ResponseEntity.ok(studentService.collectDocument(studentId, docId, remarks));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/{studentId}/documents/{docId}/mark-pending")
+    public ResponseEntity<?> markDocumentPending(
+            @PathVariable Integer studentId,
+            @PathVariable Integer docId) {
+        try {
+            return ResponseEntity.ok(studentService.markDocumentPending(studentId, docId));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/{studentId}/documents/{docId}/mark-not-required")
+    public ResponseEntity<?> markDocumentNotRequired(
+            @PathVariable Integer studentId,
+            @PathVariable Integer docId) {
+        try {
+            return ResponseEntity.ok(studentService.markDocumentNotRequired(studentId, docId));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/{studentId}/documents/{docId}/verify")
+    public ResponseEntity<?> verifyDocument(
+            @PathVariable Integer studentId,
+            @PathVariable Integer docId,
+            @RequestBody(required = false) StudentDocumentActionDTO dto) {
+        try {
+            String remarks = (dto != null) ? dto.getRemarks() : null;
+            return ResponseEntity.ok(studentService.verifyDocument(studentId, docId, remarks));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/{studentId}/documents/{docId}/reject")
+    public ResponseEntity<?> rejectDocument(
+            @PathVariable Integer studentId,
+            @PathVariable Integer docId,
+            @Valid @RequestBody StudentDocumentActionDTO dto,
+            BindingResult result) {
+        ResponseEntity<?> res = CommonUtil.dtoBindingResults(result);
+        if (res.getStatusCode().is4xxClientError()) return res;
+        try {
+            return ResponseEntity.ok(studentService.rejectDocument(studentId, docId, dto.getRemarks()));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    @PatchMapping("/{studentId}/documents/{docId}")
+    public ResponseEntity<?> updateDocument(
+            @PathVariable Integer studentId,
+            @PathVariable Integer docId,
+            @Valid @RequestBody StudentDocumentUpdateDTO dto,
+            BindingResult result) {
+        ResponseEntity<?> res = CommonUtil.dtoBindingResults(result);
+        if (res.getStatusCode().is4xxClientError()) return res;
+        try {
+            return ResponseEntity.ok(studentService.updateDocument(studentId, docId, dto));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        }
+    }
 }
 

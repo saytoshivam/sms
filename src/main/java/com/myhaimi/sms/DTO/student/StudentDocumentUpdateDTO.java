@@ -1,26 +1,21 @@
 package com.myhaimi.sms.DTO.student;
 
-import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
-import java.time.Instant;
-
+/**
+ * DTO for PATCH /api/students/{studentId}/documents/{docId}
+ * Allows partial updates to document fields.
+ */
 @Data
-public class StudentDocumentSummaryDTO {
-    private Integer id;
-    private String documentType;
-    private String fileUrl;
+public class StudentDocumentUpdateDTO {
     private StudentDocumentCollectionStatus collectionStatus;
     private StudentDocumentUploadStatus uploadStatus;
     private StudentDocumentVerificationStatus verificationStatus;
-    /** @deprecated Use collectionStatus, uploadStatus, verificationStatus instead. */
-    @Deprecated
-    private StudentDocumentStatus status;
-    private Integer verifiedByStaffId;
-    private Instant verifiedAt;
+
+    @Size(max = 1024)
     private String remarks;
-    private Instant createdAt;
 }

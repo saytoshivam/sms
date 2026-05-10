@@ -6,6 +6,9 @@ import com.myhaimi.sms.DTO.student.*;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
+import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
+import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import com.myhaimi.sms.entity.enums.GuardianLoginStatus;
 import com.myhaimi.sms.repository.*;
@@ -20,9 +23,11 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -47,6 +52,19 @@ public class StudentService {
     private final StudentDocumentRepo documentRepo;
     private final UserRepo userRepo;
     private final StudentAccessGuard accessGuard;
+
+    /**
+     * Default document types required during student onboarding.
+     * These are created as checklist rows with PENDING_COLLECTION status.
+     */
+    private static final List<String> DEFAULT_DOCUMENT_TYPES = Arrays.asList(
+            "BIRTH_CERTIFICATE",
+            "AADHAAR_CARD",
+            "TRANSFER_CERTIFICATE",
+            "PREVIOUS_MARKSHEET",
+            "PARENT_ID_PROOF",
+            "ADDRESS_PROOF"
+    );
 
     private Integer requireSchoolId() {
         Integer schoolId = TenantContext.getSchoolId();
@@ -145,6 +163,9 @@ public class StudentService {
         mapCoreCreate(s, dto.getCore());
         s.setStatus(StudentLifecycleStatus.ACTIVE);
         s = studentRepo.save(s);
+
+        // Create default document checklist rows
+        ensureDefaultDocumentsExist(s);
 
         AcademicYear year = resolveAcademicYear(schoolId, dto.getEnrollment().getAcademicYearId());
         ClassGroup cg =
@@ -588,6 +609,243 @@ public class StudentService {
         return byStudent;
     }
 
+    /**
+     * Ensures default document checklist rows exist for a student.
+     * Creates missing default documents with PENDING_COLLECTION / NOT_UPLOADED / NOT_VERIFIED status.
+     * This method handles its own transaction for writes.
+     */
+    @Transactional
+    public void ensureDefaultDocumentsExistForStudent(Integer studentId) {
+        Student student = studentRepo.findById(studentId).orElse(null);
+        if (student == null) return;
+        ensureDefaultDocumentsExist(student);
+    }
+
+    /**
+     * Internal helper that ensures default document checklist rows exist for a student.
+     * Caller must ensure transaction is available for writes.
+     */
+    private void ensureDefaultDocumentsExist(Student student) {
+        Set<String> existingTypes = documentRepo.findByStudent_IdOrderByCreatedAtDesc(student.getId())
+                .stream()
+                .map(StudentDocument::getDocumentType)
+                .collect(Collectors.toSet());
+
+        for (String docType : DEFAULT_DOCUMENT_TYPES) {
+            if (!existingTypes.contains(docType)) {
+                StudentDocument doc = new StudentDocument();
+                doc.setStudent(student);
+                doc.setDocumentType(docType);
+                doc.setFileUrl(null);
+                doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
+                doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
+                doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+                doc.setStatus(null);
+                doc.setVerifiedByStaffId(null);
+                doc.setVerifiedAt(null);
+                doc.setRemarks(null);
+                documentRepo.save(doc);
+            }
+        }
+    }
+
+    /**
+     * Collect a physical document for a student.
+     * Sets collectionStatus=COLLECTED_PHYSICAL.
+     */
+    @Transactional
+    public StudentDocumentSummaryDTO collectDocument(Integer studentId, Integer docId, String remarks) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException("You do not have permission to update student documents.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        StudentDocument doc = documentRepo.findById(docId)
+                .filter(d -> d.getStudent().getId().equals(student.getId()))
+                .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
+
+        doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
+        if (remarks != null && !remarks.isBlank()) {
+            doc.setRemarks(remarks.trim());
+        }
+        documentRepo.save(doc);
+
+        return toDocumentSummaryDTO(doc);
+    }
+
+    /**
+     * Mark a document collection as pending.
+     * Sets collectionStatus=PENDING_COLLECTION.
+     */
+    @Transactional
+    public StudentDocumentSummaryDTO markDocumentPending(Integer studentId, Integer docId) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException("You do not have permission to update student documents.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        StudentDocument doc = documentRepo.findById(docId)
+                .filter(d -> d.getStudent().getId().equals(student.getId()))
+                .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
+
+        doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
+        documentRepo.save(doc);
+
+        return toDocumentSummaryDTO(doc);
+    }
+
+    /**
+     * Mark a document as not required.
+     * Sets collectionStatus=NOT_REQUIRED.
+     */
+    @Transactional
+    public StudentDocumentSummaryDTO markDocumentNotRequired(Integer studentId, Integer docId) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException("You do not have permission to update student documents.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        StudentDocument doc = documentRepo.findById(docId)
+                .filter(d -> d.getStudent().getId().equals(student.getId()))
+                .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
+
+        doc.setCollectionStatus(StudentDocumentCollectionStatus.NOT_REQUIRED);
+        documentRepo.save(doc);
+
+        return toDocumentSummaryDTO(doc);
+    }
+
+    /**
+     * Verify a document.
+     * Sets verificationStatus=VERIFIED and verifiedAt timestamp.
+     * Optionally captures remarks.
+     */
+    @Transactional
+    public StudentDocumentSummaryDTO verifyDocument(Integer studentId, Integer docId, String remarks) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException("You do not have permission to verify student documents.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        StudentDocument doc = documentRepo.findById(docId)
+                .filter(d -> d.getStudent().getId().equals(student.getId()))
+                .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
+
+        doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
+        doc.setVerifiedAt(Instant.now());
+        if (remarks != null && !remarks.isBlank()) {
+            doc.setRemarks(remarks.trim());
+        }
+        documentRepo.save(doc);
+
+        return toDocumentSummaryDTO(doc);
+    }
+
+    /**
+     * Reject a document.
+     * Sets verificationStatus=REJECTED and captures remarks (required).
+     */
+    @Transactional
+    public StudentDocumentSummaryDTO rejectDocument(Integer studentId, Integer docId, String remarks) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException("You do not have permission to reject student documents.");
+        }
+
+        if (remarks == null || remarks.isBlank()) {
+            throw new IllegalArgumentException("Rejection remarks are required.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        StudentDocument doc = documentRepo.findById(docId)
+                .filter(d -> d.getStudent().getId().equals(student.getId()))
+                .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
+
+        doc.setVerificationStatus(StudentDocumentVerificationStatus.REJECTED);
+        doc.setRemarks(remarks.trim());
+        documentRepo.save(doc);
+
+        return toDocumentSummaryDTO(doc);
+    }
+
+    /**
+     * Update document fields (PATCH operation).
+     * Allows partial updates to collection status, upload status, verification status, and remarks.
+     */
+    @Transactional
+    public StudentDocumentSummaryDTO updateDocument(Integer studentId, Integer docId, StudentDocumentUpdateDTO dto) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException("You do not have permission to update student documents.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        StudentDocument doc = documentRepo.findById(docId)
+                .filter(d -> d.getStudent().getId().equals(student.getId()))
+                .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
+
+        if (dto.getCollectionStatus() != null) {
+            doc.setCollectionStatus(dto.getCollectionStatus());
+        }
+        if (dto.getUploadStatus() != null) {
+            doc.setUploadStatus(dto.getUploadStatus());
+        }
+        if (dto.getVerificationStatus() != null) {
+            doc.setVerificationStatus(dto.getVerificationStatus());
+            // Auto-set verifiedAt when status changes to VERIFIED
+            if (dto.getVerificationStatus() == StudentDocumentVerificationStatus.VERIFIED && doc.getVerifiedAt() == null) {
+                doc.setVerifiedAt(Instant.now());
+            }
+        }
+        if (dto.getRemarks() != null) {
+            doc.setRemarks(dto.getRemarks().isBlank() ? null : dto.getRemarks().trim());
+        }
+
+        documentRepo.save(doc);
+        return toDocumentSummaryDTO(doc);
+    }
+
+    /**
+     * Convert StudentDocument entity to DTO.
+     */
+    private StudentDocumentSummaryDTO toDocumentSummaryDTO(StudentDocument doc) {
+        StudentDocumentSummaryDTO dto = new StudentDocumentSummaryDTO();
+        dto.setId(doc.getId());
+        dto.setDocumentType(doc.getDocumentType());
+        dto.setFileUrl(doc.getFileUrl());
+        dto.setCollectionStatus(doc.getCollectionStatus());
+        dto.setUploadStatus(doc.getUploadStatus());
+        dto.setVerificationStatus(doc.getVerificationStatus());
+        dto.setStatus(doc.getStatus());
+        dto.setVerifiedByStaffId(doc.getVerifiedByStaffId());
+        dto.setVerifiedAt(doc.getVerifiedAt());
+        dto.setRemarks(doc.getRemarks());
+        dto.setCreatedAt(doc.getCreatedAt());
+        return dto;
+    }
+
     private StudentProfileSummaryDTO buildProfile(Student s) {
         StudentProfileSummaryDTO out = new StudentProfileSummaryDTO();
         out.setId(s.getId());
@@ -660,6 +918,9 @@ public class StudentService {
             dd.setId(d.getId());
             dd.setDocumentType(d.getDocumentType());
             dd.setFileUrl(d.getFileUrl());
+            dd.setCollectionStatus(d.getCollectionStatus());
+            dd.setUploadStatus(d.getUploadStatus());
+            dd.setVerificationStatus(d.getVerificationStatus());
             dd.setStatus(d.getStatus());
             dd.setVerifiedByStaffId(d.getVerifiedByStaffId());
             dd.setVerifiedAt(d.getVerifiedAt());
