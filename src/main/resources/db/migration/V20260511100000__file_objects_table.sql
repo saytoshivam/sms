@@ -23,15 +23,22 @@ CREATE TABLE IF NOT EXISTS file_objects (
     INDEX idx_fo_status  (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Link student_documents to file_objects (nullable; old rows keep file_url)
-ALTER TABLE student_documents
-    ADD COLUMN IF NOT EXISTS file_id BIGINT NULL,
-    ADD COLUMN IF NOT EXISTS profile_photo_file_id BIGINT NULL;
+-- Add file_id to student_documents (safe for MySQL 5.7+ — IF NOT EXISTS not supported before 8.0.3)
+SET @col_sd_file_id := (
+    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'student_documents' AND COLUMN_NAME = 'file_id'
+);
+SET @sql := IF(@col_sd_file_id = 0,
+    'ALTER TABLE student_documents ADD COLUMN file_id BIGINT NULL',
+    'SELECT 1 -- file_id already exists, skip');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
--- Remove the profile_photo_file_id from student_documents (it belongs on students)
-ALTER TABLE student_documents DROP COLUMN IF EXISTS profile_photo_file_id;
-
--- Add profile photo FK column to students table
-ALTER TABLE students
-    ADD COLUMN IF NOT EXISTS profile_photo_file_id BIGINT NULL;
-
+-- Add profile_photo_file_id to students (safe for MySQL 5.7+)
+SET @col_stu_photo := (
+    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students' AND COLUMN_NAME = 'profile_photo_file_id'
+);
+SET @sql := IF(@col_stu_photo = 0,
+    'ALTER TABLE students ADD COLUMN profile_photo_file_id BIGINT NULL',
+    'SELECT 1 -- profile_photo_file_id already exists, skip');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
