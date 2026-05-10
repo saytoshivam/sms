@@ -1,5 +1,6 @@
 package com.myhaimi.sms.repository;
 
+import com.myhaimi.sms.entity.Student;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
