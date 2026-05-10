@@ -1,0 +1,620 @@
+/* ─── Bulk Import Students workspace ────────────────────────────────────────── */
+
+.bi-page {
+  max-width: 1100px;
+  padding-bottom: 48px;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────────── */
+
+.bi-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.bi-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ── Step indicator ──────────────────────────────────────────────────────────── */
+
+.bi-steps {
+  display: flex;
+  gap: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.bi-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-text) 35%, transparent);
+  padding: 8px 16px 8px 0;
+  position: relative;
+}
+
+.bi-step:not(:last-child)::after {
+  content: '›';
+  position: absolute;
+  right: 4px;
+  color: color-mix(in srgb, var(--color-text) 20%, transparent);
+  font-size: 16px;
+}
+
+.bi-step--done {
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.bi-step--active {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.bi-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.bi-step--done .bi-step-num {
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  color: var(--color-primary);
+}
+
+.bi-step--active .bi-step-num {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+/* ── Section card ────────────────────────────────────────────────────────────── */
+
+.bi-section {
+  padding: 0;
+}
+
+.bi-section-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px;
+}
+
+.bi-section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+/* ── Drop zone ───────────────────────────────────────────────────────────────── */
+
+.bi-dropzone {
+  border: 2px dashed color-mix(in srgb, var(--color-primary) 35%, #cbd5e1);
+  border-radius: 16px;
+  padding: 48px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+  background: color-mix(in srgb, var(--color-primary) 2%, transparent);
+}
+
+.bi-dropzone:hover,
+.bi-dropzone--over {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+
+.bi-dropzone-icon {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.bi-dropzone-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.bi-dropzone-link {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bi-dropzone-hint {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 40%, transparent);
+}
+
+.bi-dropzone-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* ── Spinner ─────────────────────────────────────────────────────────────────── */
+
+.bi-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: bi-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.bi-spinner--sm {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+@keyframes bi-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Upload actions ──────────────────────────────────────────────────────────── */
+
+.bi-upload-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Format helper (collapsible) ─────────────────────────────────────────────── */
+
+.bi-format-helper {
+  border: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent);
+  border-radius: 12px;
+  padding: 0;
+  background: color-mix(in srgb, #fff 80%, transparent);
+}
+
+.bi-format-helper > summary {
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+  list-style: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bi-format-helper > summary::before {
+  content: '▶';
+  font-size: 10px;
+  transition: transform 0.15s;
+  color: var(--color-primary);
+}
+
+.bi-format-helper[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.bi-format-table-wrap {
+  overflow-x: auto;
+  padding: 0 16px 16px;
+}
+
+.bi-format-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  min-width: 480px;
+}
+
+.bi-format-table th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
+.bi-format-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 5%, transparent);
+  vertical-align: top;
+}
+
+/* ── Alerts ──────────────────────────────────────────────────────────────────── */
+
+.bi-alert {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.bi-alert--danger {
+  background: color-mix(in srgb, #dc2626 8%, #fff);
+  border: 1px solid color-mix(in srgb, #dc2626 22%, transparent);
+  color: #991b1b;
+}
+
+.bi-alert--warn {
+  background: color-mix(in srgb, #f59e0b 10%, #fff);
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+  color: #78350f;
+}
+
+.bi-alert--success {
+  background: color-mix(in srgb, #16a34a 8%, #fff);
+  border: 1px solid color-mix(in srgb, #16a34a 22%, transparent);
+  color: #14532d;
+}
+
+.bi-alert--info {
+  background: color-mix(in srgb, #2563eb 6%, #fff);
+  border: 1px solid color-mix(in srgb, #2563eb 18%, transparent);
+  color: #1e3a8a;
+}
+
+/* ── Summary cards ───────────────────────────────────────────────────────────── */
+
+.bi-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr));
+  gap: 12px;
+}
+
+.bi-summary-card {
+  background: linear-gradient(145deg, rgba(255,255,255,0.96) 0%, rgba(255,247,237,0.35) 100%);
+  border: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.8) inset;
+}
+
+.bi-summary-card--success {
+  background: linear-gradient(145deg, color-mix(in srgb, #16a34a 6%, #fff) 0%, rgba(255,255,255,0.95) 100%);
+  border-color: color-mix(in srgb, #16a34a 20%, transparent);
+}
+
+.bi-summary-card--danger {
+  background: linear-gradient(145deg, color-mix(in srgb, #dc2626 6%, #fff) 0%, rgba(255,255,255,0.95) 100%);
+  border-color: color-mix(in srgb, #dc2626 18%, transparent);
+}
+
+.bi-summary-card--warn {
+  background: linear-gradient(145deg, color-mix(in srgb, #f59e0b 8%, #fff) 0%, rgba(255,255,255,0.95) 100%);
+  border-color: color-mix(in srgb, #f59e0b 22%, transparent);
+}
+
+.bi-summary-card__value {
+  font-size: 2rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  color: var(--color-text);
+}
+
+.bi-summary-card__label {
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
+/* ── Actions row ─────────────────────────────────────────────────────────────── */
+
+.bi-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ── Preview card / table section ────────────────────────────────────────────── */
+
+.bi-preview-card {
+  padding: 20px 0 0;
+  overflow: hidden;
+}
+
+.bi-table-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.bi-table-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent);
+  padding: 0 20px;
+  flex-wrap: wrap;
+}
+
+.bi-table-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.bi-table-tab:hover {
+  color: var(--color-text);
+}
+
+.bi-table-tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+.bi-table-tab-count {
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  text-align: center;
+}
+
+.bi-table-tab--active .bi-table-tab-count {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  color: var(--color-primary);
+}
+
+.bi-table-wrap {
+  overflow-x: auto;
+}
+
+.bi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 680px;
+}
+
+.bi-table thead tr {
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+.bi-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent);
+  white-space: nowrap;
+}
+
+.bi-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 5%, transparent);
+  vertical-align: top;
+}
+
+.bi-table tbody tr:hover {
+  background: color-mix(in srgb, var(--color-primary) 3%, transparent);
+}
+
+/* Row highlight by status */
+.bi-row--invalid {
+  background: color-mix(in srgb, #dc2626 3%, transparent) !important;
+}
+
+.bi-row--invalid:hover {
+  background: color-mix(in srgb, #dc2626 6%, transparent) !important;
+}
+
+.bi-row--dup {
+  background: color-mix(in srgb, #f59e0b 4%, transparent) !important;
+}
+
+.bi-row--dup:hover {
+  background: color-mix(in srgb, #f59e0b 7%, transparent) !important;
+}
+
+.bi-table-empty {
+  text-align: center;
+  padding: 32px 12px !important;
+  color: color-mix(in srgb, var(--color-text) 35%, transparent);
+  font-size: 13px;
+}
+
+.bi-table-footer {
+  padding: 14px 20px;
+  border-top: 1px solid color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+/* ── Status badges ───────────────────────────────────────────────────────────── */
+
+.bi-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.bi-badge--valid {
+  background: color-mix(in srgb, #16a34a 12%, transparent);
+  color: #14532d;
+}
+
+.bi-badge--invalid {
+  background: color-mix(in srgb, #dc2626 12%, transparent);
+  color: #991b1b;
+}
+
+.bi-badge--dup {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #78350f;
+}
+
+/* ── Error list in table cell ─────────────────────────────────────────────────── */
+
+.bi-error-list {
+  margin: 0;
+  padding: 0 0 0 14px;
+  font-size: 12px;
+  color: #991b1b;
+  line-height: 1.5;
+  list-style: disc;
+}
+
+/* ── Misc helpers ────────────────────────────────────────────────────────────── */
+
+.bi-td-mono {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  font-size: 12.5px;
+}
+
+.bi-td-num {
+  text-align: right;
+  color: color-mix(in srgb, var(--color-text) 35%, transparent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  width: 44px;
+}
+
+.bi-td-center {
+  text-align: center;
+}
+
+.bi-muted {
+  color: color-mix(in srgb, var(--color-text) 40%, transparent);
+  font-size: 12px;
+}
+
+.bi-empty {
+  color: color-mix(in srgb, var(--color-text) 25%, transparent);
+}
+
+/* ── Result view ─────────────────────────────────────────────────────────────── */
+
+.bi-result {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.bi-result-banner {
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.bi-result-banner--success {
+  background: color-mix(in srgb, #16a34a 8%, #fff);
+  border: 1px solid color-mix(in srgb, #16a34a 22%, transparent);
+}
+
+.bi-result-banner--warn {
+  background: color-mix(in srgb, #f59e0b 10%, #fff);
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+}
+
+.bi-result-banner--danger {
+  background: color-mix(in srgb, #dc2626 8%, #fff);
+  border: 1px solid color-mix(in srgb, #dc2626 22%, transparent);
+}
+
+.bi-result-icon {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  color: #16a34a;
+  flex-shrink: 0;
+}
+
+.bi-result-icon--warn {
+  color: #d97706;
+}
+
+.bi-result-icon--danger {
+  color: #dc2626;
+}
+
+.bi-result-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.bi-result-fails {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Responsive tweaks ───────────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .bi-dropzone {
+    padding: 32px 16px;
+  }
+
+  .bi-section-inner {
+    padding: 16px;
+  }
+
+  .bi-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .bi-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bi-actions .btn {
+    width: 100%;
+    text-align: center;
+  }
+}
+
