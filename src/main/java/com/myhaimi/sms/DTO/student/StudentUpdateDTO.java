@@ -31,6 +31,12 @@ public class StudentUpdateDTO {
     @Size(max = 512)
     private String photoUrl;
 
+    @Size(max = 32)
+    private String phone;
+
+    @Size(max = 256)
+    private String address;
+
     /** When set to ACTIVE, an active enrollment must already exist for the learner. */
     private StudentLifecycleStatus status;
 }

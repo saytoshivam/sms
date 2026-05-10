@@ -1,11 +1,13 @@
 package com.myhaimi.sms.service.impl;
 
+import com.myhaimi.sms.DTO.student.StudentRosterHealthDTO;
 import com.myhaimi.sms.DTO.StudentViewDTO;
 import com.myhaimi.sms.DTO.student.*;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
+import com.myhaimi.sms.entity.enums.GuardianLoginStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -14,16 +16,21 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -38,6 +45,8 @@ public class StudentService {
     private final StudentAcademicEnrollmentRepo enrollmentRepo;
     private final StudentMedicalInfoRepo medicalRepo;
     private final StudentDocumentRepo documentRepo;
+    private final UserRepo userRepo;
+    private final StudentAccessGuard accessGuard;
 
     private Integer requireSchoolId() {
         Integer schoolId = TenantContext.getSchoolId();
@@ -51,30 +60,78 @@ public class StudentService {
             StudentLifecycleStatus status,
             Integer gradeLevel,
             String section,
-            String search) {
+            String search,
+            boolean noGuardian,
+            boolean noSection) {
         Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+
         Specification<Student> spec = Specification.where(StudentSpecs.forSchool(schoolId))
                 .and(StudentSpecs.classGroup(classGroupId))
                 .and(StudentSpecs.classGroupGradeLevel(gradeLevel))
                 .and(StudentSpecs.classGroupSection(section))
                 .and(StudentSpecs.lifecycleStatus(status))
                 .and(StudentSpecs.studentListSearch(search));
+
+        if (noGuardian) spec = spec.and(StudentSpecs.hasNoGuardian());
+        if (noSection)  spec = spec.and(StudentSpecs.hasNoSection());
+
+        // Apply row-level visibility based on caller role
+        if (ctx.isParent()) {
+            if (ctx.linkedGuardianId() == null) return Page.empty(pageable);
+            Set<Integer> childIds = studentGuardianRepo.findByGuardian_Id(ctx.linkedGuardianId())
+                    .stream().map(sg -> sg.getStudent().getId())
+                    .collect(Collectors.toSet());
+            spec = spec.and(StudentSpecs.studentIdIn(childIds));
+        } else if (ctx.isStudent()) {
+            if (ctx.linkedStudentId() == null) return Page.empty(pageable);
+            spec = spec.and(StudentSpecs.studentIdIn(Set.of(ctx.linkedStudentId())));
+        } else if (!ctx.canViewAnyStudent()) {
+            spec = spec.and(StudentSpecs.restrictedToClassGroups(ctx.allowedClassGroupIds()));
+        }
+
         Page<Student> page = studentRepo.findAll(spec, pageable);
         List<StudentViewDTO> rows = enrichListRows(page.getContent(), schoolId);
         return new PageImpl<>(rows, page.getPageable(), page.getTotalElements());
     }
 
+    /** Aggregate dashboard counts for the student module landing page. */
+    public StudentRosterHealthDTO rosterHealth() {
+        Integer schoolId = requireSchoolId();
+        // Anyone with school access can see aggregate counts (no personal data exposed)
+        java.time.Instant startOfMonth = LocalDate.now()
+                .withDayOfMonth(1)
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant();
+        return StudentRosterHealthDTO.builder()
+                .activeCount(studentRepo.countBySchool_IdAndStatus(schoolId, StudentLifecycleStatus.ACTIVE))
+                .newThisMonthCount(studentRepo.countCreatedBetween(schoolId, startOfMonth,
+                        java.time.Instant.now().plusSeconds(86_400)))
+                .missingGuardianCount(studentRepo.countBySchool_IdAndNoGuardian(schoolId))
+                .noSectionCount(studentRepo.countBySchool_IdAndNoSection(schoolId))
+                .inactiveCount(studentRepo.countBySchool_IdAndStatus(schoolId, StudentLifecycleStatus.INACTIVE))
+                .transferredCount(studentRepo.countBySchool_IdAndStatus(schoolId, StudentLifecycleStatus.TRANSFERRED))
+                .alumniCount(studentRepo.countBySchool_IdAndStatus(schoolId, StudentLifecycleStatus.ALUMNI))
+                .build();
+    }
+
     public StudentProfileSummaryDTO getProfile(Integer studentId) {
         Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        requireCanAccessStudent(ctx, studentId, schoolId);
         Student s = studentRepo
                 .findByIdAndSchool_Id(studentId, schoolId)
                 .orElseThrow(() -> new IllegalArgumentException("Student not found."));
-        return buildProfile(s);
+        return buildAndRedactProfile(s, ctx);
     }
 
     @Transactional
     public StudentProfileSummaryDTO onboard(StudentOnboardingCreateDTO dto) {
         Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canCreateStudents()) {
+            throw new AccessDeniedException("You do not have permission to create student records.");
+        }
         School school = schoolRepo.findById(schoolId).orElseThrow();
 
         validateGuardianPayload(dto.getGuardians());
@@ -126,6 +183,8 @@ public class StudentService {
     @Transactional
     public StudentProfileSummaryDTO updateProfile(Integer studentId, StudentUpdateDTO dto) {
         Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) throw new AccessDeniedException("You do not have permission to edit student profiles.");
         Student s = studentRepo.findByIdAndSchool_Id(studentId, schoolId).orElseThrow();
 
         s.setFirstName(dto.getFirstName().trim());
@@ -139,6 +198,8 @@ public class StudentService {
         } else {
             s.setPhotoUrl(null);
         }
+        s.setPhone(blankToNull(dto.getPhone()));
+        s.setAddress(blankToNull(dto.getAddress()));
 
         if (dto.getStatus() != null) {
             if (dto.getStatus() == StudentLifecycleStatus.ACTIVE) {
@@ -155,6 +216,118 @@ public class StudentService {
         }
 
         studentRepo.save(s);
+        return buildProfile(s);
+    }
+
+    @Transactional
+    public StudentProfileSummaryDTO upsertMedical(Integer studentId, StudentMedicalUpsertPayload dto) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canViewMedical()) {
+            throw new AccessDeniedException("You do not have permission to update medical information.");
+        }
+        Student s = studentRepo.findByIdAndSchool_Id(studentId, schoolId).orElseThrow();
+        StudentMedicalInfo m = medicalRepo.findByStudent_Id(studentId).orElseGet(() -> {
+            StudentMedicalInfo fresh = new StudentMedicalInfo();
+            fresh.setStudent(s);
+            return fresh;
+        });
+        m.setAllergies(blankToNull(dto.getAllergies()));
+        m.setMedicalConditions(blankToNull(dto.getMedicalConditions()));
+        m.setEmergencyContactName(blankToNull(dto.getEmergencyContactName()));
+        m.setEmergencyContactPhone(blankToNull(dto.getEmergencyContactPhone()));
+        m.setDoctorContact(blankToNull(dto.getDoctorContact()));
+        m.setMedicationNotes(blankToNull(dto.getMedicationNotes()));
+        medicalRepo.save(m);
+        return buildProfile(s);
+    }
+
+    @Transactional
+    public StudentProfileSummaryDTO updateGuardian(Integer studentId, Integer guardianId, GuardianUpdateDTO dto) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) throw new AccessDeniedException("You do not have permission to edit guardian details.");
+        Student s = studentRepo.findByIdAndSchool_Id(studentId, schoolId).orElseThrow();
+        Guardian g = guardianRepo.findById(guardianId)
+                .filter(gu -> gu.getSchool().getId().equals(schoolId))
+                .orElseThrow(() -> new IllegalArgumentException("Guardian not found."));
+        StudentGuardian link = studentGuardianRepo.findByStudent_IdOrderByPrimaryGuardianDescIdAsc(studentId)
+                .stream().filter(sg -> sg.getGuardian().getId().equals(guardianId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Guardian not linked to student."));
+
+        g.setName(dto.getName().trim());
+        g.setPhone(dto.getPhone().trim());
+        g.setEmail(blankToNull(dto.getEmail()));
+        g.setOccupation(blankToNull(dto.getOccupation()));
+        guardianRepo.save(g);
+
+        link.setRelation(dto.getRelation().trim());
+        link.setReceivesNotifications(dto.isReceivesNotifications());
+        link.setCanLogin(dto.isCanLogin());
+        studentGuardianRepo.save(link);
+
+        return buildProfile(s);
+    }
+
+    @Transactional
+    public StudentProfileSummaryDTO setPrimaryGuardian(Integer studentId, Integer guardianId) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) throw new AccessDeniedException("You do not have permission to set primary guardian.");
+        Student s = studentRepo.findByIdAndSchool_Id(studentId, schoolId).orElseThrow();
+        List<StudentGuardian> links = studentGuardianRepo
+                .findByStudent_IdOrderByPrimaryGuardianDescIdAsc(studentId);
+        boolean found = false;
+        for (StudentGuardian link : links) {
+            boolean isTarget = link.getGuardian().getId().equals(guardianId);
+            link.setPrimaryGuardian(isTarget);
+            if (isTarget) found = true;
+        }
+        if (!found) throw new IllegalArgumentException("Guardian not linked to student.");
+        studentGuardianRepo.saveAll(links);
+        return buildProfile(s);
+    }
+
+    @Transactional
+    public StudentProfileSummaryDTO transferSection(Integer studentId, SectionTransferDTO dto) {
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canTransfer()) throw new AccessDeniedException("You do not have permission to transfer students.");
+        Student s = studentRepo.findByIdAndSchool_Id(studentId, schoolId).orElseThrow();
+        AcademicYear year = academicYearRepo.findByIdAndSchool_Id(dto.getAcademicYearId(), schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Academic year not found."));
+        ClassGroup newCg = classGroupRepo.findByIdAndSchool_Id(dto.getNewClassGroupId(), schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Target class-section not found."));
+
+        String roll = blankToNull(dto.getRollNo());
+        if (roll != null && enrollmentRepo.existsByAcademicYear_IdAndClassGroup_IdAndRollNo(
+                year.getId(), newCg.getId(), roll)) {
+            throw new IllegalArgumentException(
+                    "Roll number " + roll + " is already taken in the target class for this academic year.");
+        }
+
+        StudentAcademicEnrollment active = enrollmentRepo
+                .findFirstByStudent_IdAndAcademicYear_Id(studentId, year.getId())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "No enrollment found for this student in the selected academic year."));
+        if (active.getStatus() != StudentAcademicEnrollmentStatus.ACTIVE) {
+            throw new IllegalArgumentException(
+                    "Enrollment is not ACTIVE; cannot transfer.");
+        }
+        if (active.getClassGroup().getId().equals(newCg.getId())) {
+            throw new IllegalArgumentException("Student is already in the selected class-section.");
+        }
+
+        active.setClassGroup(newCg);
+        if (roll != null) active.setRollNo(roll);
+        if (dto.getEffectiveDate() != null) active.setJoiningDate(dto.getEffectiveDate());
+        enrollmentRepo.save(active);
+
+        // Sync denormalised reference on student
+        s.setClassGroup(newCg);
+        studentRepo.save(s);
+
         return buildProfile(s);
     }
 
@@ -456,6 +629,14 @@ public class StudentService {
             gd.setPrimaryGuardian(sg.isPrimaryGuardian());
             gd.setCanLogin(sg.isCanLogin());
             gd.setReceivesNotifications(sg.isReceivesNotifications());
+            // Populate login status
+            userRepo.findFirstByLinkedGuardian_Id(g.getId()).ifPresentOrElse(
+                    u -> {
+                        gd.setParentUserId(u.getId());
+                        gd.setLoginStatus(GuardianLoginStatus.ACTIVE);
+                    },
+                    () -> gd.setLoginStatus(GuardianLoginStatus.NOT_CREATED)
+            );
             gRows.add(gd);
         }
         out.setGuardians(gRows);
@@ -488,6 +669,52 @@ public class StudentService {
         }
         out.setDocuments(docs);
         return out;
+    }
+
+    /**
+     * Builds the full profile then redacts fields the caller cannot see
+     * and appends the viewer-permission flags.
+     */
+    private StudentProfileSummaryDTO buildAndRedactProfile(Student s, StudentCallerContext ctx) {
+        StudentProfileSummaryDTO profile = buildProfile(s);
+        if (!ctx.canViewGuardians()) profile.setGuardians(null);
+        if (!ctx.canViewMedical())   profile.setMedical(null);
+        if (!ctx.canViewDocuments()) profile.setDocuments(null);
+        profile.setViewerPermissions(StudentAccessGuard.toPermissionsDTO(ctx));
+        return profile;
+    }
+
+    /**
+     * Throws {@link AccessDeniedException} if the current caller cannot view the given student.
+     */
+    private void requireCanAccessStudent(StudentCallerContext ctx, Integer studentId, Integer schoolId) {
+        if (ctx.canViewAnyStudent()) return;
+
+        if (ctx.isParent()) {
+            if (ctx.linkedGuardianId() == null)
+                throw new AccessDeniedException("No linked guardian for this parent account.");
+            studentGuardianRepo.findByStudent_IdAndGuardian_Id(studentId, ctx.linkedGuardianId())
+                    .orElseThrow(() -> new AccessDeniedException("Access denied: student is not linked to your account."));
+            return;
+        }
+
+        if (ctx.isStudent()) {
+            if (!studentId.equals(ctx.linkedStudentId()))
+                throw new AccessDeniedException("Access denied: you can only view your own profile.");
+            return;
+        }
+
+        // Class teacher / subject teacher: check student is in an allowed class group
+        Set<Integer> allowed = ctx.allowedClassGroupIds();
+        if (allowed != null) {
+            Student s = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                    .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+            if (s.getClassGroup() == null || !allowed.contains(s.getClassGroup().getId()))
+                throw new AccessDeniedException("Access denied: student is not in your assigned class.");
+            return;
+        }
+
+        throw new AccessDeniedException("Access denied.");
     }
 
     private static StudentEnrollmentSummaryDTO pickCurrentEnrollment(List<StudentAcademicEnrollment> ens) {

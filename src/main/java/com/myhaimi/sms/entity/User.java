@@ -31,6 +31,11 @@ public class User {
     @JoinColumn(name = "linked_staff_id")
     private Staff linkedStaff;
 
+    /** When set, this login belongs to a parent/guardian. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "linked_guardian_id")
+    private Guardian linkedGuardian;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "user_roles",

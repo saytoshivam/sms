@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public interface StudentAcademicEnrollmentRepo extends JpaRepository<StudentAcademicEnrollment, Integer> {
 
@@ -33,4 +34,14 @@ public interface StudentAcademicEnrollmentRepo extends JpaRepository<StudentAcad
             Integer studentId, Integer academicYearId, StudentAcademicEnrollmentStatus status);
 
     boolean existsByAcademicYear_IdAndClassGroup_IdAndRollNo(Integer academicYearId, Integer classGroupId, String rollNo);
+
+    @Query("""
+            SELECT e.rollNo FROM StudentAcademicEnrollment e
+            WHERE e.classGroup.id = :classGroupId
+              AND e.academicYear.id = :academicYearId
+              AND e.rollNo IS NOT NULL
+            """)
+    Set<String> findRollNosForClassAndYear(
+            @Param("classGroupId") Integer classGroupId,
+            @Param("academicYearId") Integer academicYearId);
 }

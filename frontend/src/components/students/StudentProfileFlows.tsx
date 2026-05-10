@@ -18,7 +18,6 @@ import type { StudentLifecycleStatus } from './studentListTypes';
 import type {
   StudentProfilePayload,
   GuardianSummary,
-  StudentMedicalSummary,
 } from '../../pages/StudentProfilePage';
 
 // ─── Shared style atoms ───────────────────────────────────────────────────────
@@ -460,13 +459,13 @@ export function TransferSectionDrawer({
     queryKey: ['academic-years-list'],
     staleTime: 60_000,
     queryFn: async () =>
-      (await api.get<{ content: AcademicYearOption[] }>('/api/academic-years?size=50&sort=startsOn,desc')).data.content,
+      (await api.get<AcademicYearOption[]>('/api/academic-years')).data,
   });
 
   // Load class groups
   const classCatalog = useClassGroupsCatalog();
   const classOptions = classCatalog.data?.content ?? [];
-  const yearOptions = yearsQuery.data ?? [];
+  const yearOptions: AcademicYearOption[] = yearsQuery.data ?? [];
 
   const selectedClass = classOptions.find((c) => String(c.id) === newClassGroupId);
 
@@ -620,4 +619,150 @@ function ConfirmRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
+// ─── 4. Create Parent Login Modal ─────────────────────────────────────────────
+
+type ParentLoginResult = {
+  outcome: 'CREATED' | 'LINKED';
+  parentUserId: number;
+  username: string;
+  temporaryPassword?: string | null;
+  message: string;
+};
+
+type CreateParentLoginModalProps = {
+  studentId: number;
+  guardian: GuardianSummary;
+  onClose: () => void;
+  onDone: () => void;
+};
+
+export function CreateParentLoginModal({ studentId, guardian, onClose, onDone }: CreateParentLoginModalProps) {
+  const [result, setResult] = useState<ParentLoginResult | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const create = useMutation({
+    mutationFn: (): Promise<ParentLoginResult> =>
+      api.post<ParentLoginResult>(`/api/students/${studentId}/guardians/${guardian.id}/create-login`)
+        .then((r) => r.data),
+    onSuccess: (data) => setResult(data),
+  });
+
+  function handleCopy(text: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="sw-drawer-backdrop" onClick={result ? undefined : onClose}>
+      <div
+        className="sw-drawer"
+        style={{ maxWidth: 440 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DrawerHeader
+          title={result ? 'Login Ready' : `Create Login — ${guardian.name}`}
+          onClose={result ? onDone : onClose}
+        />
+
+        <div className="sw-drawer-body" style={{ display: 'grid', gap: 16 }}>
+
+          {/* — Pre-confirm state — */}
+          {!result && !create.isPending && (
+            <>
+              <div style={{ fontSize: 14, color: 'rgba(15,23,42,0.72)', lineHeight: 1.6 }}>
+                This will create a <strong>parent login account</strong> for:
+                <br />
+                <strong>{guardian.name}</strong>
+                {guardian.email && <> &nbsp;·&nbsp; {guardian.email}</>}
+                {!guardian.email && guardian.phone && <> &nbsp;·&nbsp; {guardian.phone}</>}
+              </div>
+              <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#78350f', lineHeight: 1.55 }}>
+                {guardian.email
+                  ? 'A temporary password will be generated. Share it securely with the guardian.'
+                  : 'No email on file — a phone-based username will be used. Make sure you share the credentials safely.'}
+              </div>
+              <InlineError msg={create.error ? formatApiError(create.error) : null} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className="btn secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
+                <button type="button" className="btn" onClick={() => create.mutate()} style={{ flex: 1 }}>
+                  Confirm & Create
+                </button>
+              </div>
+            </>
+          )}
+
+          {create.isPending && (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: 'rgba(15,23,42,0.5)', fontSize: 14 }}>
+              Creating login…
+            </div>
+          )}
+
+          {/* — Result state — */}
+          {result && (
+            <>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                background: result.outcome === 'CREATED' ? 'rgba(22,163,74,0.08)' : 'rgba(59,130,246,0.08)',
+                border: `1px solid ${result.outcome === 'CREATED' ? 'rgba(22,163,74,0.3)' : 'rgba(59,130,246,0.3)'}`,
+                borderRadius: 10, padding: '12px 14px',
+              }}>
+                <span style={{ fontSize: 22 }}>{result.outcome === 'CREATED' ? '✅' : '🔗'}</span>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: result.outcome === 'CREATED' ? '#166534' : '#1e40af' }}>
+                    {result.message}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', marginTop: 2 }}>
+                    {result.outcome === 'CREATED' ? 'New account created with PARENT role.' : 'Existing parent account is now linked to this student.'}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 8, fontSize: 13 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ fontWeight: 700, minWidth: 120, color: 'rgba(15,23,42,0.52)' }}>Username</span>
+                  <span style={{ wordBreak: 'break-all' }}>{result.username}</span>
+                </div>
+              </div>
+
+              {result.temporaryPassword && (
+                <div style={{ background: 'rgba(15,23,42,0.04)', border: '1px solid rgba(15,23,42,0.10)', borderRadius: 8, padding: '10px 14px' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(15,23,42,0.4)', marginBottom: 6 }}>
+                    Temporary Password — shown once only
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <code style={{ flex: 1, fontSize: 16, fontWeight: 800, letterSpacing: '0.08em', color: 'rgba(15,23,42,0.88)', wordBreak: 'break-all' }}>
+                      {result.temporaryPassword}
+                    </code>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      style={{ fontSize: 12, padding: '5px 10px', flexShrink: 0 }}
+                      onClick={() => handleCopy(result.temporaryPassword!)}
+                    >
+                      {copied ? 'Copied ✓' : 'Copy'}
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#b45309', marginTop: 8 }}>
+                    Share this password securely. It will not be shown again.
+                  </div>
+                </div>
+              )}
+
+              <button type="button" className="btn" onClick={onDone} style={{ width: '100%' }}>
+                Done
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+
 

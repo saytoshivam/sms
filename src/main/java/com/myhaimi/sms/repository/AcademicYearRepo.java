@@ -13,4 +13,6 @@ public interface AcademicYearRepo extends JpaRepository<AcademicYear, Integer> {
     Optional<AcademicYear> findByIdAndSchool_Id(Integer id, Integer schoolId);
 
     List<AcademicYear> findBySchool_Id(Integer schoolId, Sort sort);
+
+    Optional<AcademicYear> findByLabelIgnoreCaseAndSchool_Id(String label, Integer schoolId);
 }

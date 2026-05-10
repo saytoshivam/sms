@@ -1,14 +1,42 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { SelectKeeper } from '../components/SelectKeeper';
-import { DateKeeper } from '../components/DateKeeper';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import type { StudentLifecycleStatus } from '../components/students/studentListTypes';
+import {
+  EditProfileDrawer,
+  GuardianFlowDrawer,
+  TransferSectionDrawer,
+  CreateParentLoginModal,
+} from '../components/students/StudentProfileFlows';
 import '../components/students/studentsWorkspace.css';
 
 // ─── Types matching StudentProfileSummaryDTO ─────────────────────────────────
+
+export type ViewerPermissions = {
+  canEdit: boolean;
+  canTransfer: boolean;
+  canCreateStudents: boolean;
+  canViewGuardians: boolean;
+  canViewMedical: boolean;
+  canViewDocuments: boolean;
+  canViewFees: boolean;
+  canManageParentLogin: boolean;
+};
+
+/** Default permissions — used when the API doesn't return them (should not happen in practice). */
+const FULL_PERMS: ViewerPermissions = {
+  canEdit: true, canTransfer: true, canCreateStudents: true,
+  canViewGuardians: true, canViewMedical: true, canViewDocuments: true,
+  canViewFees: true, canManageParentLogin: true,
+};
+
+const NO_PERMS: ViewerPermissions = {
+  canEdit: false, canTransfer: false, canCreateStudents: false,
+  canViewGuardians: false, canViewMedical: false, canViewDocuments: false,
+  canViewFees: false, canManageParentLogin: false,
+};
 
 export type GuardianSummary = {
   id: number;
@@ -19,6 +47,8 @@ export type GuardianSummary = {
   primaryGuardian: boolean;
   canLogin: boolean;
   receivesNotifications: boolean;
+  loginStatus?: 'NOT_CREATED' | 'INVITED' | 'ACTIVE' | null;
+  parentUserId?: number | null;
 };
 
 export type StudentEnrollmentSummary = {
@@ -76,6 +106,7 @@ export type StudentProfilePayload = {
   guardians?: GuardianSummary[];
   medical?: StudentMedicalSummary | null;
   documents?: StudentDocumentSummary[];
+  viewerPermissions?: ViewerPermissions | null;
 };
 
 // ─── Tiny helpers ─────────────────────────────────────────────────────────────
@@ -185,13 +216,13 @@ function FeatureFlag({ on, label }: { on: boolean; label: string }) {
 
 type TabKey = 'overview' | 'guardians' | 'academic' | 'attendance' | 'documents' | 'fees' | 'activity';
 
-const TABS: { key: TabKey; label: string }[] = [
+const ALL_TABS: { key: TabKey; label: string; requiresPerm?: keyof ViewerPermissions }[] = [
   { key: 'overview',    label: 'Overview' },
-  { key: 'guardians',   label: 'Guardians' },
+  { key: 'guardians',   label: 'Guardians',    requiresPerm: 'canViewGuardians' },
   { key: 'academic',    label: 'Academic' },
   { key: 'attendance',  label: 'Attendance' },
-  { key: 'documents',   label: 'Documents' },
-  { key: 'fees',        label: 'Fees' },
+  { key: 'documents',   label: 'Documents',    requiresPerm: 'canViewDocuments' },
+  { key: 'fees',        label: 'Fees',         requiresPerm: 'canViewFees' },
   { key: 'activity',    label: 'Activity Log' },
 ];
 
@@ -285,15 +316,52 @@ function OverviewTab({ p }: { p: StudentProfilePayload }) {
 
 // ─── Guardians tab ────────────────────────────────────────────────────────────
 
-function GuardiansTab({ p }: { p: StudentProfilePayload }) {
+const LOGIN_STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+  NOT_CREATED: { bg: 'rgba(15,23,42,0.07)',  color: 'rgba(15,23,42,0.5)',  label: 'No Login' },
+  INVITED:     { bg: 'rgba(234,179,8,0.12)', color: '#854d0e',             label: 'Invited' },
+  ACTIVE:      { bg: 'rgba(22,163,74,0.12)', color: '#166534',             label: 'Active' },
+};
+
+function LoginStatusBadge({ status }: { status: string | null | undefined }) {
+  const s = LOGIN_STATUS_STYLE[status ?? 'NOT_CREATED'] ?? LOGIN_STATUS_STYLE['NOT_CREATED'];
+  return (
+    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: s.bg, color: s.color }}>
+      {s.label}
+    </span>
+  );
+}
+
+function GuardiansTab({
+  p,
+  studentId,
+  onAdd,
+  onEdit,
+  onSetPrimary,
+  onCreateLogin,
+  onRefresh,
+  canEdit,
+  canManageParentLogin,
+}: {
+  p: StudentProfilePayload;
+  studentId: number;
+  onAdd: () => void;
+  onEdit: (g: GuardianSummary) => void;
+  onSetPrimary: (g: GuardianSummary) => void;
+  onCreateLogin: (g: GuardianSummary) => void;
+  onRefresh: () => void;
+  canEdit: boolean;
+  canManageParentLogin: boolean;
+}) {
   const guardians = p.guardians ?? [];
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontWeight: 800, fontSize: 15 }}>Linked Guardians ({guardians.length})</div>
-        <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '7px 12px', opacity: 0.6, cursor: 'not-allowed' }} disabled>
-          + Add Guardian
-        </button>
+        {canEdit && (
+          <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '7px 12px' }} onClick={onAdd}>
+            + Add Guardian
+          </button>
+        )}
       </div>
 
       {guardians.length === 0 && (
@@ -314,12 +382,16 @@ function GuardiansTab({ p }: { p: StudentProfilePayload }) {
               </div>
               <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.5)', marginTop: 2 }}>{g.relation || 'Guardian'}</div>
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '5px 10px', opacity: 0.6, cursor: 'not-allowed' }} disabled>Edit</button>
-              {!g.primaryGuardian && (
-                <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '5px 10px', opacity: 0.6, cursor: 'not-allowed' }} disabled>Set Primary</button>
-              )}
-            </div>
+            {canEdit && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => onEdit(g)}>Edit</button>
+                {!g.primaryGuardian && (
+                  <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => onSetPrimary(g)}>
+                    Set Primary
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'grid', gap: 6, gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))' }}>
@@ -327,9 +399,36 @@ function GuardiansTab({ p }: { p: StudentProfilePayload }) {
             <InfoRow label="Email" value={g.email} />
           </div>
 
-          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', paddingTop: 4, borderTop: '1px solid rgba(15,23,42,0.06)' }}>
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', paddingTop: 6, borderTop: '1px solid rgba(15,23,42,0.06)', alignItems: 'center' }}>
             <FeatureFlag on={g.receivesNotifications} label="Receives Notifications" />
             <FeatureFlag on={g.canLogin} label="Portal Login Access" />
+            {canManageParentLogin && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.42)' }}>Login</span>
+                <LoginStatusBadge status={g.loginStatus} />
+                {(!g.loginStatus || g.loginStatus === 'NOT_CREATED') && (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ fontSize: 11, padding: '4px 10px' }}
+                    onClick={() => onCreateLogin(g)}
+                  >
+                    Create Login
+                  </button>
+                )}
+                {g.loginStatus === 'ACTIVE' && (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    style={{ fontSize: 11, padding: '4px 10px', color: 'rgba(15,23,42,0.5)', cursor: 'not-allowed', opacity: 0.6 }}
+                    disabled
+                    title="Invite sending coming soon"
+                  >
+                    Send Invite
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </Card>
       ))}
@@ -468,97 +567,6 @@ function ProfileAvatar({ p, size = 80 }: { p: StudentProfilePayload; size?: numb
   );
 }
 
-// ─── Edit Profile Drawer ──────────────────────────────────────────────────────
-
-const labelCss: React.CSSProperties = {
-  display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-  letterSpacing: '0.04em', color: 'rgba(15,23,42,0.52)', marginBottom: 5,
-};
-
-function EditProfileDrawer({ p, onClose }: { p: StudentProfilePayload; onClose: () => void }) {
-  const id = p.id;
-  const qc = useQueryClient();
-
-  const [firstName, setFirstName]   = useState(p.firstName ?? '');
-  const [middleName, setMiddleName] = useState(p.middleName ?? '');
-  const [lastName, setLastName]     = useState(p.lastName ?? '');
-  const [dob, setDob]               = useState(p.dateOfBirth ?? '');
-  const [gender, setGender]         = useState(p.gender ?? '');
-  const [bloodGroup, setBloodGroup] = useState(p.bloodGroup ?? '');
-  const [photoUrl, setPhotoUrl]     = useState(p.photoUrl ?? '');
-  const [status, setStatus]         = useState<StudentLifecycleStatus | ''>(p.status ?? '');
-  const [phone, setPhone]           = useState(p.phone ?? '');
-  const [address, setAddress]       = useState(p.address ?? '');
-
-  const save = useMutation({
-    mutationFn: async () =>
-      (await api.put<StudentProfilePayload>(`/api/students/${id}`, {
-        firstName: firstName.trim(),
-        middleName: middleName.trim() || null,
-        lastName: lastName.trim() || null,
-        dateOfBirth: dob || null,
-        gender: gender.trim() || null,
-        bloodGroup: bloodGroup.trim() || null,
-        photoUrl: photoUrl.trim() || null,
-        phone: phone.trim() || null,
-        address: address.trim() || null,
-        ...(status ? { status } : {}),
-      })).data,
-    onSuccess: async (updated) => {
-      qc.setQueryData(['student-profile', id], updated);
-      await qc.invalidateQueries({ queryKey: ['students'], exact: false });
-      onClose();
-    },
-  });
-
-  return (
-    <div className="sw-drawer-backdrop" onClick={onClose}>
-      <div className="sw-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="sw-drawer-head">
-          <h3>Edit Profile</h3>
-          <button type="button" className="btn secondary sw-drawer-close" onClick={onClose}>✕</button>
-        </div>
-        <div className="sw-drawer-body" style={{ display: 'grid', gap: 12 }}>
-          <div><label style={labelCss}>First name *</label><input value={firstName} onChange={(e) => setFirstName(e.target.value)} /></div>
-          <div><label style={labelCss}>Middle name</label><input value={middleName} onChange={(e) => setMiddleName(e.target.value)} /></div>
-          <div><label style={labelCss}>Last name</label><input value={lastName} onChange={(e) => setLastName(e.target.value)} /></div>
-          <div>
-            <label style={labelCss} htmlFor="ep-dob">Date of birth</label>
-            <DateKeeper id="ep-dob" value={dob} onChange={setDob} emptyLabel="Not set" clearable />
-          </div>
-          <div><label style={labelCss}>Gender</label><input value={gender} onChange={(e) => setGender(e.target.value)} placeholder="e.g. Male / Female / Other" /></div>
-          <div><label style={labelCss}>Blood group</label><input value={bloodGroup} onChange={(e) => setBloodGroup(e.target.value)} placeholder="e.g. O+" /></div>
-          <div><label style={labelCss}>Phone</label><input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
-          <div><label style={labelCss}>Address</label><textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} style={{ resize: 'vertical' }} /></div>
-          <div><label style={labelCss}>Photo URL</label><input type="url" value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} placeholder="https://…" /></div>
-          <div>
-            <label style={labelCss} htmlFor="ep-status">Status</label>
-            <SelectKeeper
-              id="ep-status"
-              value={status}
-              onChange={(v) => setStatus(v as StudentLifecycleStatus | '')}
-              options={[
-                { value: 'ACTIVE', label: 'Active' },
-                { value: 'INACTIVE', label: 'Inactive' },
-                { value: 'TRANSFERRED', label: 'Transferred' },
-                { value: 'ALUMNI', label: 'Alumni' },
-              ]}
-              emptyValueLabel="Unchanged"
-            />
-          </div>
-          {save.error && <div className="sw-inline-error">{formatApiError(save.error)}</div>}
-          <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
-            <button type="button" className="btn secondary" onClick={onClose} disabled={save.isPending} style={{ flex: 1 }}>Cancel</button>
-            <button type="button" className="btn" disabled={save.isPending || !firstName.trim()} onClick={() => save.mutate()} style={{ flex: 1 }}>
-              {save.isPending ? 'Saving…' : 'Save Changes'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function StudentProfilePage() {
@@ -567,7 +575,11 @@ export function StudentProfilePage() {
   const id = Number(studentId);
 
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
-  const [editOpen, setEditOpen] = useState(false);
+  const [editOpen, setEditOpen]           = useState(false);
+  const [transferOpen, setTransferOpen]   = useState(false);
+  const [guardianAdd, setGuardianAdd]     = useState(false);
+  const [guardianEdit, setGuardianEdit]   = useState<GuardianSummary | null>(null);
+  const [createLoginGuardian, setCreateLoginGuardian] = useState<GuardianSummary | null>(null);
 
   const profile = useQuery({
     queryKey: ['student-profile', id],
@@ -580,8 +592,11 @@ export function StudentProfilePage() {
   // Sync ?tab= query param → tab state
   useEffect(() => {
     const t = searchParams.get('tab') as TabKey | null;
-    if (t && TABS.some((x) => x.key === t)) setActiveTab(t);
-  }, [searchParams]);
+    if (t) {
+      const visibleTabs = ALL_TABS.filter(tab => !tab.requiresPerm || perms[tab.requiresPerm]);
+      if (visibleTabs.some((x) => x.key === t)) setActiveTab(t);
+    }
+  }, [searchParams]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!Number.isFinite(id) || id <= 0) {
     return (
@@ -593,6 +608,8 @@ export function StudentProfilePage() {
   }
 
   const p = profile.data;
+  const perms: ViewerPermissions = p?.viewerPermissions ?? (profile.isLoading ? NO_PERMS : FULL_PERMS);
+  const visibleTabs = ALL_TABS.filter(tab => !tab.requiresPerm || perms[tab.requiresPerm]);
   const name = p ? fullName(p) : '…';
   const primaryG = p?.guardians?.find((g) => g.primaryGuardian) ?? p?.guardians?.[0];
 
@@ -614,7 +631,9 @@ export function StudentProfilePage() {
       {/* Error */}
       {profile.error && (
         <div className="card" style={{ color: '#991b1b', marginBottom: 16 }}>
-          {formatApiError(profile.error)}
+          {(profile.error as any)?.response?.status === 403
+            ? '🔒 You do not have permission to view this student profile.'
+            : formatApiError(profile.error)}
           <div style={{ marginTop: 10 }}>
             <button type="button" className="btn secondary" onClick={() => profile.refetch()}>Retry</button>
           </div>
@@ -674,20 +693,38 @@ export function StudentProfilePage() {
 
             {/* Quick Actions */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-              <button type="button" className="btn" style={{ fontSize: 13, padding: '8px 14px' }} onClick={() => setEditOpen(true)}>
-                Edit Profile
-              </button>
-              <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '8px 12px', opacity: 0.6, cursor: 'not-allowed' }} disabled>Change Section</button>
-              <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '8px 12px', opacity: 0.6, cursor: 'not-allowed' }} disabled>Parent Login</button>
+              {perms.canEdit && (
+                <button type="button" className="btn" style={{ fontSize: 13, padding: '8px 14px' }} onClick={() => setEditOpen(true)}>
+                  Edit Profile
+                </button>
+              )}
+              {perms.canTransfer && (
+                <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '8px 12px' }} onClick={() => setTransferOpen(true)}>
+                  Change Section
+                </button>
+              )}
+              {perms.canManageParentLogin && (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ fontSize: 13, padding: '8px 12px' }}
+                  onClick={() => { handleTabClick('guardians'); }}
+                  title="Go to Guardians tab to create parent logins"
+                >
+                  Parent Login
+                </button>
+              )}
               <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '8px 12px', opacity: 0.6, cursor: 'not-allowed' }} disabled>Upload Doc</button>
-              <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '8px 12px', opacity: 0.6, cursor: 'not-allowed', color: '#991b1b' }} disabled>Deactivate</button>
+              {perms.canEdit && (
+                <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '8px 12px', opacity: 0.6, cursor: 'not-allowed', color: '#991b1b' }} disabled>Deactivate</button>
+              )}
               <Link className="btn secondary" to={`/app/students/${id}/performance`} style={{ fontSize: 13, padding: '8px 12px', textDecoration: 'none' }}>Performance</Link>
             </div>
           </div>
 
           {/* ── Tabs ── */}
           <div style={{ display: 'flex', overflowX: 'auto', paddingBottom: 0, marginBottom: 16, borderBottom: '2px solid rgba(15,23,42,0.07)' }}>
-            {TABS.map((t) => (
+            {visibleTabs.map((t) => (
               <button
                 key={t.key}
                 type="button"
@@ -714,7 +751,24 @@ export function StudentProfilePage() {
 
           {/* ── Tab Content ── */}
           {activeTab === 'overview'   && <OverviewTab   p={p} />}
-          {activeTab === 'guardians'  && <GuardiansTab  p={p} />}
+          {activeTab === 'guardians'  && (
+            <GuardiansTab
+              p={p}
+              studentId={id}
+              onAdd={() => { setGuardianAdd(true); setActiveTab('guardians'); }}
+              onEdit={(g) => setGuardianEdit(g)}
+              onSetPrimary={async (g) => {
+                try {
+                  await api.post(`/api/students/${id}/guardians/${g.id}/set-primary`);
+                  profile.refetch();
+                } catch { /* handled inline by toast if needed */ }
+              }}
+              onCreateLogin={(g) => setCreateLoginGuardian(g)}
+              onRefresh={() => profile.refetch()}
+              canEdit={perms.canEdit}
+              canManageParentLogin={perms.canManageParentLogin}
+            />
+          )}
           {activeTab === 'academic'   && <AcademicTab   p={p} />}
           {activeTab === 'attendance' && (
             <PlaceholderState icon="📋" title="Attendance not yet recorded" body="Attendance records will appear here once attendance has been recorded for this student. No data has been fabricated." />
@@ -731,6 +785,48 @@ export function StudentProfilePage() {
 
       {/* Edit Drawer */}
       {editOpen && p && <EditProfileDrawer p={p} onClose={() => setEditOpen(false)} />}
+
+      {/* Transfer Section Drawer */}
+      {transferOpen && p && (
+        <TransferSectionDrawer
+          studentId={id}
+          currentClassGroupDisplayName={p.classGroupDisplayName || p.currentEnrollment?.classGroupDisplayName}
+          currentEnrollmentAcademicYearId={p.currentEnrollment?.academicYearId}
+          onClose={() => setTransferOpen(false)}
+          onSaved={() => { profile.refetch(); setTransferOpen(false); }}
+        />
+      )}
+
+      {/* Add Guardian Drawer */}
+      {guardianAdd && p && (
+        <GuardianFlowDrawer
+          studentId={id}
+          mode="add"
+          onClose={() => setGuardianAdd(false)}
+          onSaved={() => { profile.refetch(); setGuardianAdd(false); }}
+        />
+      )}
+
+      {/* Edit Guardian Drawer */}
+      {guardianEdit && p && (
+        <GuardianFlowDrawer
+          studentId={id}
+          mode="edit"
+          guardian={guardianEdit}
+          onClose={() => setGuardianEdit(null)}
+          onSaved={() => { profile.refetch(); setGuardianEdit(null); }}
+        />
+      )}
+
+      {/* Create Parent Login Modal */}
+      {createLoginGuardian && (
+        <CreateParentLoginModal
+          studentId={id}
+          guardian={createLoginGuardian}
+          onClose={() => setCreateLoginGuardian(null)}
+          onDone={() => { profile.refetch(); setCreateLoginGuardian(null); }}
+        />
+      )}
     </div>
   );
 }

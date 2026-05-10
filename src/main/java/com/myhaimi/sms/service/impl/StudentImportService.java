@@ -2,9 +2,6 @@ package com.myhaimi.sms.service.impl;
 
 import com.myhaimi.sms.DTO.student.importdto.*;
 import com.myhaimi.sms.entity.*;
-import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
-import com.myhaimi.sms.entity.enums.StudentEnrollmentAdmissionCategory;
-import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.CsvImportParser;
 import com.myhaimi.sms.utils.TenantContext;
@@ -24,10 +21,10 @@ import java.util.*;
  * Orchestrates the parse → validate → preview → commit import flow.
  *
  * <h3>Thread safety</h3>
- * All read operations are done in a {@code readOnly} transaction.
- * The commit step runs in its own {@code @Transactional} method so each
- * student is saved independently; one failure does not roll back others
- * (unless {@code strictMode = true}).
+ * The preview step runs in a read-only transaction for catalogue look-ups.
+ * The commit step is intentionally NOT @Transactional at this level so that
+ * each row runs in its own transaction (via {@link StudentRowPersistService})
+ * for fault isolation — one bad row does not roll back the others.
  */
 @Slf4j
 @Service
@@ -40,9 +37,7 @@ public class StudentImportService {
     private final ClassGroupRepo classGroupRepo;
     private final AcademicYearRepo academicYearRepo;
     private final StudentAcademicEnrollmentRepo enrollmentRepo;
-    private final StudentMedicalInfoRepo medicalRepo;
-    private final GuardianRepo guardianRepo;
-    private final StudentGuardianRepo studentGuardianRepo;
+    private final StudentRowPersistService rowPersistService;
 
     // ── Preview ──────────────────────────────────────────────────────────────────
 
@@ -66,8 +61,7 @@ public class StudentImportService {
         Map<String, ClassGroup> classGroupByCode = loadClassGroupsByCode(schoolId);
         Map<String, AcademicYear> academicYearByLabel = loadAcademicYearsByLabel(schoolId);
         Set<String> existingAdmissionNos = loadExistingAdmissionNos(schoolId);
-        // Roll-no uniqueness checked lazily per class+year combination
-        Map<String, Set<String>> enrolledRollNos = new HashMap<>(); // key = classGroupId:yearId
+        Map<String, Set<String>> enrolledRollNos = new HashMap<>(); // key = "classGroupId:yearId"
 
         // 3. Validate each row
         Set<String> seenAdmissionNosInCsv = new LinkedHashSet<>();
@@ -78,8 +72,7 @@ public class StudentImportService {
             List<String> errors = new ArrayList<>();
             boolean isDuplicate = false;
 
-            // ── Field validations ───────────────────────────────────────────────
-
+            // ── admissionNo ──────────────────────────────────────────────────────
             String admNo = blankToNull(row.getAdmissionNo());
             if (admNo == null) {
                 errors.add("Row " + row.getRowNumber() + ": admissionNo is required.");
@@ -93,22 +86,26 @@ public class StudentImportService {
                 }
             }
 
+            // ── firstName ────────────────────────────────────────────────────────
             if (blankToNull(row.getFirstName()) == null) {
                 errors.add("Row " + row.getRowNumber() + ": firstName is required.");
             }
 
-            // Date of birth – optional but must be parseable if present
+            // ── dateOfBirth (optional, must be parseable if present) ─────────────
             String dobRaw = blankToNull(row.getDateOfBirth());
             if (dobRaw != null) {
                 try {
-                    LocalDate.parse(dobRaw);
+                    LocalDate parsed = LocalDate.parse(dobRaw);
+                    if (parsed.isAfter(LocalDate.now())) {
+                        errors.add("Row " + row.getRowNumber() + ": dateOfBirth cannot be a future date.");
+                    }
                 } catch (DateTimeParseException e) {
                     errors.add("Row " + row.getRowNumber()
                             + ": dateOfBirth '" + dobRaw + "' is not a valid date (use yyyy-MM-dd).");
                 }
             }
 
-            // Class group
+            // ── classCode ────────────────────────────────────────────────────────
             String classCode = blankToNull(row.getClassCode());
             ClassGroup classGroup = null;
             if (classCode == null) {
@@ -120,7 +117,6 @@ public class StudentImportService {
                             + ": Class code '" + classCode + "' not found.");
                 } else {
                     row.setResolvedClassGroupId(classGroup.getId());
-                    // Validate sectionCode if provided
                     String sectionCode = blankToNull(row.getSectionCode());
                     if (sectionCode != null && classGroup.getSection() != null
                             && !sectionCode.equalsIgnoreCase(classGroup.getSection())) {
@@ -132,7 +128,7 @@ public class StudentImportService {
                 }
             }
 
-            // Academic year
+            // ── academicYear ─────────────────────────────────────────────────────
             String yearLabel = blankToNull(row.getAcademicYear());
             AcademicYear academicYear = null;
             if (yearLabel == null) {
@@ -147,7 +143,7 @@ public class StudentImportService {
                 }
             }
 
-            // Guardian
+            // ── guardian ─────────────────────────────────────────────────────────
             if (blankToNull(row.getGuardianName()) == null) {
                 errors.add("Row " + row.getRowNumber() + ": guardianName is required.");
             }
@@ -155,7 +151,7 @@ public class StudentImportService {
                 errors.add("Row " + row.getRowNumber() + ": guardianPhone is required.");
             }
 
-            // Roll number uniqueness (only if all above resolved & rollNo is provided)
+            // ── rollNo uniqueness ─────────────────────────────────────────────────
             String rollNo = blankToNull(row.getRollNo());
             if (!isDuplicate && errors.isEmpty() && rollNo != null
                     && classGroup != null && academicYear != null) {
@@ -170,8 +166,7 @@ public class StudentImportService {
                 }
             }
 
-            // ── Classify row ────────────────────────────────────────────────────
-
+            // ── Classify row ──────────────────────────────────────────────────────
             if (isDuplicate && errors.stream().noneMatch(e -> e.contains("admissionNo"))) {
                 results.add(StudentImportRowResultDto.duplicate(row,
                         "Row " + row.getRowNumber() + ": Student with admissionNo '"
@@ -200,6 +195,12 @@ public class StudentImportService {
                 .build();
     }
 
+    // ── Discard ──────────────────────────────────────────────────────────────────
+
+    public void discard(String token) {
+        tokenStore.discard(token);
+    }
+
     // ── Commit ───────────────────────────────────────────────────────────────────
 
     public StudentImportCommitResultDto commit(StudentImportCommitDto request) {
@@ -220,7 +221,7 @@ public class StudentImportService {
 
         for (StudentImportRowDto row : validRows) {
             try {
-                persistRow(school, row);
+                rowPersistService.persist(school, row);
                 imported++;
             } catch (Exception ex) {
                 log.warn("Import commit: row {} failed – {}", row.getRowNumber(), ex.getMessage());
@@ -228,9 +229,8 @@ public class StudentImportService {
                     throw new IllegalStateException(
                             "Row " + row.getRowNumber() + " failed at commit: " + ex.getMessage(), ex);
                 }
-                List<String> errs = List.of("Row " + row.getRowNumber()
-                        + ": " + friendlyMessage(ex));
-                failedRows.add(StudentImportRowResultDto.invalid(row, errs));
+                failedRows.add(StudentImportRowResultDto.invalid(row,
+                        List.of("Row " + row.getRowNumber() + ": " + friendlyMessage(ex))));
             }
         }
 
@@ -239,75 +239,6 @@ public class StudentImportService {
                 .skippedCount(failedRows.size())
                 .failedRows(failedRows)
                 .build();
-    }
-
-    // ── Persist a single row ─────────────────────────────────────────────────────
-
-    @Transactional
-    public void persistRow(School school, StudentImportRowDto row) {
-        // Guard: double-check admissionNo uniqueness (concurrent import)
-        if (studentRepo.findBySchool_IdAndAdmissionNo(school.getId(), row.getAdmissionNo()).isPresent()) {
-            throw new IllegalArgumentException(
-                    "admissionNo '" + row.getAdmissionNo() + "' was created by another concurrent operation.");
-        }
-
-        ClassGroup classGroup = classGroupRepo.findById(row.getResolvedClassGroupId())
-                .orElseThrow(() -> new IllegalArgumentException("Class group not found at commit time."));
-        AcademicYear academicYear = academicYearRepo.findById(row.getResolvedAcademicYearId())
-                .orElseThrow(() -> new IllegalArgumentException("Academic year not found at commit time."));
-
-        // ── Student ────────────────────────────────────────────────────────────
-        Student student = new Student();
-        student.setSchool(school);
-        student.setAdmissionNo(row.getAdmissionNo().trim());
-        student.setFirstName(row.getFirstName().trim());
-        student.setMiddleName(blankToNull(row.getMiddleName()));
-        student.setLastName(blankToNull(row.getLastName()));
-        student.setGender(blankToNull(row.getGender()));
-        student.setBloodGroup(null);
-        student.setStatus(StudentLifecycleStatus.ACTIVE);
-
-        String dob = blankToNull(row.getDateOfBirth());
-        if (dob != null) student.setDateOfBirth(LocalDate.parse(dob));
-
-        // Compose address
-        String address = composeAddress(
-                row.getAddressLine1(), null, row.getCity(), row.getState(), row.getPincode());
-        student.setAddress(address);
-        student.setClassGroup(classGroup);
-        studentRepo.save(student);
-
-        // ── Enrollment ─────────────────────────────────────────────────────────
-        String rollNo = blankToNull(row.getRollNo());
-        StudentAcademicEnrollment enr = new StudentAcademicEnrollment();
-        enr.setStudent(student);
-        enr.setAcademicYear(academicYear);
-        enr.setClassGroup(classGroup);
-        enr.setRollNo(rollNo);
-        enr.setAdmissionDate(LocalDate.now());
-        enr.setJoiningDate(LocalDate.now());
-        enr.setStatus(StudentAcademicEnrollmentStatus.ACTIVE);
-        enr.setAdmissionCategory(StudentEnrollmentAdmissionCategory.NEW_ADMISSION);
-        enrollmentRepo.save(enr);
-
-        // ── Guardian ───────────────────────────────────────────────────────────
-        if (blankToNull(row.getGuardianName()) != null) {
-            Guardian guardian = new Guardian();
-            guardian.setSchool(school);
-            guardian.setName(row.getGuardianName().trim());
-            guardian.setPhone(row.getGuardianPhone().trim());
-            guardian.setEmail(blankToNull(row.getGuardianEmail()));
-            guardianRepo.save(guardian);
-
-            StudentGuardian link = new StudentGuardian();
-            link.setStudent(student);
-            link.setGuardian(guardian);
-            link.setRelation(row.getGuardianRelation() != null ? row.getGuardianRelation().trim() : "Guardian");
-            link.setPrimaryGuardian(true);
-            link.setReceivesNotifications(true);
-            link.setCanLogin(false);
-            studentGuardianRepo.save(link);
-        }
     }
 
     // ── Catalogue loaders ────────────────────────────────────────────────────────
@@ -331,7 +262,7 @@ public class StudentImportService {
         return byLabel;
     }
 
-    /** Returns lowercased admission numbers. */
+    /** Returns a lowercased set of existing admission numbers for the school. */
     private Set<String> loadExistingAdmissionNos(Integer schoolId) {
         List<Student> all = studentRepo.findBySchool_IdOrderByIdAsc(schoolId);
         Set<String> nos = new HashSet<>(all.size() * 2);
@@ -341,20 +272,20 @@ public class StudentImportService {
         return nos;
     }
 
-    /** Returns lowercased roll numbers already enrolled in a given class+year. */
+    /**
+     * Returns a mutable lowercased set of roll numbers already enrolled in the
+     * given class+year so the caller can track within-file duplicates.
+     */
     private Set<String> loadUsedRollNos(Integer classGroupId, Integer academicYearId) {
-        List<StudentAcademicEnrollment> enrs = enrollmentRepo
-                .findEnrollmentsForStudentsInYear(List.of(), academicYearId); // warm cache – unused
-        // More targeted: fetch all enrollments for this class+year
-        Set<String> used = new HashSet<>();
-        // Use existsByAcademicYear_IdAndClassGroup_IdAndRollNo per roll would be N+1;
-        // instead keep a mutable set and populate it lazily from CSV rows.
-        // DB state is already validated via existsByAcademicYear_IdAndClassGroup_IdAndRollNo
-        // during preview row validation.
-        return used;
+        Set<String> dbRollNos = enrollmentRepo.findRollNosForClassAndYear(classGroupId, academicYearId);
+        Set<String> result = new HashSet<>(dbRollNos.size() * 2);
+        for (String rn : dbRollNos) {
+            if (rn != null) result.add(rn.toLowerCase());
+        }
+        return result;
     }
 
-    // ── Utility ──────────────────────────────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────────
 
     private static String blankToNull(String s) {
         if (s == null) return null;
@@ -362,31 +293,9 @@ public class StudentImportService {
         return t.isEmpty() ? null : t;
     }
 
-    private static String composeAddress(
-            String line1, String line2, String city, String state, String pincode) {
-        List<String> parts = new ArrayList<>();
-        if (blankToNull(line1) != null) parts.add(line1.trim());
-        if (blankToNull(line2) != null) parts.add(line2.trim());
-        StringBuilder locality = new StringBuilder();
-        if (blankToNull(city) != null) locality.append(city.trim());
-        if (blankToNull(state) != null) {
-            if (!locality.isEmpty()) locality.append(", ");
-            locality.append(state.trim());
-        }
-        if (blankToNull(pincode) != null) {
-            if (!locality.isEmpty()) locality.append(" ");
-            locality.append(pincode.trim());
-        }
-        if (!locality.isEmpty()) parts.add(locality.toString());
-        if (parts.isEmpty()) return null;
-        String combined = String.join("\n", parts);
-        return combined.length() > 256 ? combined.substring(0, 256) : combined;
-    }
-
     private static String friendlyMessage(Exception ex) {
         String msg = ex.getMessage();
         if (msg == null) return "Unexpected error.";
-        // Strip JDBC / Hibernate noise
         if (msg.contains("Duplicate entry")) return "A record with the same key already exists.";
         if (msg.contains("constraint")) return "Database constraint violation: " + msg;
         return msg;

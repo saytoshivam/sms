@@ -36,4 +36,10 @@ public class StudentProfileSummaryDTO {
     private StudentMedicalSummaryDTO medical;
 
     private List<StudentDocumentSummaryDTO> documents;
+
+    /**
+     * Caller-specific permission flags injected by the service layer.
+     * Null when the profile is built internally (e.g. during write operations).
+     */
+    private StudentViewerPermissionsDTO viewerPermissions;
 }

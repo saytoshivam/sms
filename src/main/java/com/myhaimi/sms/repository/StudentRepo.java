@@ -1,6 +1,6 @@
 package com.myhaimi.sms.repository;
 
-import com.myhaimi.sms.entity.Student;
+import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -28,6 +28,15 @@ public interface StudentRepo extends JpaRepository<Student, Integer>, JpaSpecifi
     Optional<Student> findBySchool_IdAndAdmissionNo(Integer schoolId, String admissionNo);
 
     long countBySchool_Id(Integer schoolId);
+
+    long countBySchool_IdAndStatus(Integer schoolId, StudentLifecycleStatus status);
+
+    @Query("SELECT COUNT(s) FROM Student s WHERE s.school.id = :schoolId AND s.classGroup IS NULL")
+    long countBySchool_IdAndNoSection(@Param("schoolId") Integer schoolId);
+
+    @Query("SELECT COUNT(s) FROM Student s WHERE s.school.id = :schoolId " +
+           "AND NOT EXISTS (SELECT sg FROM StudentGuardian sg WHERE sg.student.id = s.id)")
+    long countBySchool_IdAndNoGuardian(@Param("schoolId") Integer schoolId);
 
     @Query("SELECT s.school.id, COUNT(s) FROM Student s GROUP BY s.school.id")
     List<Object[]> countStudentsGroupedBySchool();

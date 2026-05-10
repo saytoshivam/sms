@@ -112,5 +112,29 @@ public final class PermissionCodes {
     public static final String EXAM_COORD_SCHEDULES = "EXAM_COORD_SCHEDULES";
     public static final String HOSTEL_ROSTER_MANAGE = "HOSTEL_ROSTER_MANAGE";
 
+    // —— Student module access ——
+    /** See any student record in the school (admin / principal / VP / accountant). */
+    public static final String STUDENT_VIEW_ANY       = "STUDENT_VIEW_ANY";
+    /** Class teacher: see students in homeroom class only. */
+    public static final String STUDENT_VIEW_OWN_CLASS = "STUDENT_VIEW_OWN_CLASS";
+    /** Subject teacher: see students in allocated sections only (limited view). */
+    public static final String STUDENT_VIEW_OWN_SUBJECT = "STUDENT_VIEW_OWN_SUBJECT";
+    /** Create / onboard a new student record. */
+    public static final String STUDENT_CREATE         = "STUDENT_CREATE";
+    /** Edit core student profile fields. */
+    public static final String STUDENT_EDIT           = "STUDENT_EDIT";
+    /** Transfer student between class-sections. */
+    public static final String STUDENT_TRANSFER       = "STUDENT_TRANSFER";
+    /** Access guardian contact tab (full details). */
+    public static final String STUDENT_VIEW_GUARDIANS = "STUDENT_VIEW_GUARDIANS";
+    /** Access medical info / alerts tab. */
+    public static final String STUDENT_VIEW_MEDICAL   = "STUDENT_VIEW_MEDICAL";
+    /** Access student documents tab. */
+    public static final String STUDENT_VIEW_DOCUMENTS = "STUDENT_VIEW_DOCUMENTS";
+    /** Access fee statements and dues tab. */
+    public static final String STUDENT_VIEW_FEES      = "STUDENT_VIEW_FEES";
+    /** Create / link parent login account for a guardian. */
+    public static final String STUDENT_MANAGE_LOGIN   = "STUDENT_MANAGE_LOGIN";
+
     private PermissionCodes() {}
 }

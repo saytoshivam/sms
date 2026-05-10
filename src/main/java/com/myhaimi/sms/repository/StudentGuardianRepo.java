@@ -7,11 +7,16 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface StudentGuardianRepo extends JpaRepository<StudentGuardian, Integer> {
     List<StudentGuardian> findByStudent_IdOrderByPrimaryGuardianDescIdAsc(Integer studentId);
 
     long countByStudent_Id(Integer studentId);
+
+    Optional<StudentGuardian> findByStudent_IdAndGuardian_Id(Integer studentId, Integer guardianId);
+
+    List<StudentGuardian> findByGuardian_Id(Integer guardianId);
 
     @Query(
             """

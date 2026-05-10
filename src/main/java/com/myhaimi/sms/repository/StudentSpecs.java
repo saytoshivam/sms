@@ -12,6 +12,7 @@ import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.util.Locale;
+import java.util.Set;
 
 public final class StudentSpecs {
 
@@ -19,6 +20,39 @@ public final class StudentSpecs {
 
     public static Specification<Student> forSchool(Integer schoolId) {
         return (root, q, cb) -> cb.equal(root.get("school").get("id"), schoolId);
+    }
+
+    /**
+     * Restricts results to students whose current class group is one of {@code allowedIds}.
+     * If {@code allowedIds} is null → no restriction (all class groups).
+     * If empty → no students match.
+     */
+    public static Specification<Student> restrictedToClassGroups(Set<Integer> allowedIds) {
+        if (allowedIds == null) return (root, q, cb) -> cb.conjunction();
+        if (allowedIds.isEmpty()) return (root, q, cb) -> cb.disjunction();
+        return (root, q, cb) -> root.get("classGroup").get("id").in(allowedIds);
+    }
+
+    /** Restricts results to the specific student IDs (parent / student portal). */
+    public static Specification<Student> studentIdIn(Set<Integer> ids) {
+        if (ids == null || ids.isEmpty()) return (root, q, cb) -> cb.disjunction();
+        return (root, q, cb) -> root.get("id").in(ids);
+    }
+
+    /** Restricts results to students with no class-section assigned. */
+    public static Specification<Student> hasNoSection() {
+        return (root, q, cb) -> cb.isNull(root.get("classGroup"));
+    }
+
+    /** Restricts results to students with no guardian linked. */
+    public static Specification<Student> hasNoGuardian() {
+        return (root, query, cb) -> {
+            Subquery<Integer> sq = query.subquery(Integer.class);
+            Root<StudentGuardian> sg = sq.from(StudentGuardian.class);
+            sq.select(sg.get("student").get("id"));
+            sq.where(cb.equal(sg.get("student").get("id"), root.get("id")));
+            return cb.not(cb.exists(sq));
+        };
     }
 
     public static Specification<Student> classGroup(Integer classGroupId) {

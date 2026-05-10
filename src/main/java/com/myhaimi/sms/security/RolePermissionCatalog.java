@@ -11,6 +11,25 @@ import static com.myhaimi.sms.security.PermissionCodes.*;
  */
 public final class RolePermissionCatalog {
 
+    // —— Student module grants shared across multiple roles ——
+    private static final Set<String> STUDENT_MODULE_ADMIN = Set.of(
+            STUDENT_VIEW_ANY, STUDENT_CREATE, STUDENT_EDIT, STUDENT_TRANSFER,
+            STUDENT_VIEW_GUARDIANS, STUDENT_VIEW_MEDICAL, STUDENT_VIEW_DOCUMENTS,
+            STUDENT_VIEW_FEES, STUDENT_MANAGE_LOGIN);
+
+    private static final Set<String> STUDENT_MODULE_VP = Set.of(
+            STUDENT_VIEW_ANY, STUDENT_VIEW_GUARDIANS, STUDENT_VIEW_MEDICAL,
+            STUDENT_VIEW_FEES, STUDENT_MANAGE_LOGIN);
+
+    private static final Set<String> STUDENT_MODULE_CLASS_TEACHER = Set.of(
+            STUDENT_VIEW_OWN_CLASS, STUDENT_VIEW_GUARDIANS, STUDENT_VIEW_MEDICAL);
+
+    private static final Set<String> STUDENT_MODULE_TEACHER = Set.of(
+            STUDENT_VIEW_OWN_SUBJECT);
+
+    private static final Set<String> STUDENT_MODULE_ACCOUNTANT = Set.of(
+            STUDENT_VIEW_ANY, STUDENT_VIEW_FEES);
+
     private static final Set<String> TEACHER = Set.of(
             TCH_VIEW_ASSIGNED_CLASSES_SUBJECTS,
             TCH_UPLOAD_STUDY_MATERIAL,
@@ -27,14 +46,16 @@ public final class RolePermissionCatalog {
             CT_CONTACT_ALL_CLASS_PARENTS,
             CT_HANDLE_STUDENT_ISSUES);
 
-    private static final Set<String> VICE_PRINCIPAL = Set.of(
-            OPS_DAILY_MANAGE,
-            OPS_ATTENDANCE_OVERSEE,
-            OPS_DISCIPLINE_MONITOR,
-            OPS_LEAVE_APPROVE,
-            OPS_ESCALATION_HANDLE,
-            OPS_OPERATIONAL_REPORTS,
-            TENANT_SETTINGS_VIEW);
+    private static final Set<String> VICE_PRINCIPAL = union(
+            STUDENT_MODULE_VP,
+            Set.of(
+                    OPS_DAILY_MANAGE,
+                    OPS_ATTENDANCE_OVERSEE,
+                    OPS_DISCIPLINE_MONITOR,
+                    OPS_LEAVE_APPROVE,
+                    OPS_ESCALATION_HANDLE,
+                    OPS_OPERATIONAL_REPORTS,
+                    TENANT_SETTINGS_VIEW));
 
     private static final Set<String> HOD = Set.of(
             ACAD_ASSIGN_SUBJECTS_TO_TEACHERS,
@@ -71,14 +92,16 @@ public final class RolePermissionCatalog {
             LIB_MANAGE_FINES,
             LIB_REPORTS_ISSUED_OVERDUE);
 
-    private static final Set<String> ACCOUNTANT = Set.of(
-            ACC_FEE_STRUCTURES_MANAGE,
-            ACC_GENERATE_INVOICES,
-            ACC_TRACK_PAYMENTS,
-            ACC_HANDLE_REFUNDS,
-            ACC_REVENUE_REPORTS,
-            ACC_PENDING_DUES_REPORTS,
-            ACC_VERIFY_PAYMENT_STATUS);
+    private static final Set<String> ACCOUNTANT = union(
+            STUDENT_MODULE_ACCOUNTANT,
+            Set.of(
+                    ACC_FEE_STRUCTURES_MANAGE,
+                    ACC_GENERATE_INVOICES,
+                    ACC_TRACK_PAYMENTS,
+                    ACC_HANDLE_REFUNDS,
+                    ACC_REVENUE_REPORTS,
+                    ACC_PENDING_DUES_REPORTS,
+                    ACC_VERIFY_PAYMENT_STATUS));
 
     private static final Set<String> RECEPTIONIST = Set.of(
             REC_ADMISSIONS_DATA_ENTRY,
@@ -108,6 +131,7 @@ public final class RolePermissionCatalog {
     private static final Set<String> PRINCIPAL = union(
             VICE_PRINCIPAL,
             HOD,
+            STUDENT_MODULE_ADMIN,
             Set.of(
                     CLASS_STRUCTURES_APPROVE,
                     TIMETABLE_APPROVE,
@@ -126,6 +150,7 @@ public final class RolePermissionCatalog {
     /** Broadest tenant role: union of operational domains (for defaults / tooling). */
     private static final Set<String> SCHOOL_ADMIN = union(
             PRINCIPAL,
+            STUDENT_MODULE_ADMIN,
             ACCOUNTANT,
             LIBRARIAN,
             RECEPTIONIST,
@@ -152,8 +177,8 @@ public final class RolePermissionCatalog {
             case RoleNames.PRINCIPAL -> Set.copyOf(PRINCIPAL);
             case RoleNames.VICE_PRINCIPAL -> Set.copyOf(VICE_PRINCIPAL);
             case RoleNames.HOD -> Set.copyOf(HOD);
-            case RoleNames.TEACHER -> Set.copyOf(TEACHER);
-            case RoleNames.CLASS_TEACHER -> union(TEACHER, CLASS_TEACHER_EXTRA);
+            case RoleNames.TEACHER -> union(TEACHER, STUDENT_MODULE_TEACHER);
+            case RoleNames.CLASS_TEACHER -> union(TEACHER, CLASS_TEACHER_EXTRA, STUDENT_MODULE_CLASS_TEACHER);
             case RoleNames.STUDENT -> Set.copyOf(STUDENT);
             case RoleNames.PARENT -> Set.copyOf(PARENT);
             case RoleNames.LIBRARIAN -> Set.copyOf(LIBRARIAN);

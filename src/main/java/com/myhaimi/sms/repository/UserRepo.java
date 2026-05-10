@@ -34,4 +34,8 @@ public interface UserRepo extends JpaRepository<User, Integer> {
             @Param("excludeUserId") int excludeUserId);
 
     Optional<User> findFirstBySchool_IdAndLinkedStaff_Id(Integer schoolId, Integer staffId);
+
+    Optional<User> findFirstByLinkedGuardian_Id(Integer guardianId);
+
+    Optional<User> findFirstBySchool_IdAndLinkedGuardian_Id(Integer schoolId, Integer guardianId);
 }

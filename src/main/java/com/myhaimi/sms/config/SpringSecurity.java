@@ -60,7 +60,15 @@ public class SpringSecurity {
                         .requestMatchers("/user/**").authenticated()
                         .anyRequest().authenticated()
                 )
-                .exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                        .accessDeniedHandler((req, resp, e) -> {
+                            resp.setStatus(HttpStatus.FORBIDDEN.value());
+                            resp.setContentType("application/json");
+                            String msg = e.getMessage() != null ? e.getMessage().replace("\"", "'") : "Access denied";
+                            resp.getWriter().write("{\"error\":\"" + msg + "\"}");
+                        })
+                )
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }

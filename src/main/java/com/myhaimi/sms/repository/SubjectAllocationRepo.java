@@ -17,6 +17,8 @@ public interface SubjectAllocationRepo extends JpaRepository<SubjectAllocation, 
 
     List<SubjectAllocation> findBySchool_Id(Integer schoolId);
 
+    List<SubjectAllocation> findBySchool_IdAndStaff_Id(Integer schoolId, Integer staffId);
+
     long countBySchool_IdAndSubject_Id(Integer schoolId, Integer subjectId);
 
     long countBySchool_IdAndStaff_Id(Integer schoolId, Integer staffId);

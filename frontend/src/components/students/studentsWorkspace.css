@@ -6,6 +6,140 @@
   gap: 16px;
 }
 
+/* ── Quick filter chips ──────────────────────────────────────────────────── */
+.sw-quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.sw-quick-filters-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(15, 23, 42, 0.42);
+  flex-shrink: 0;
+}
+
+.sw-qf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.68);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.sw-qf-chip:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 6%, #fff);
+}
+.sw-qf-chip--active {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, #fff);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+.sw-qf-chip--warn.sw-qf-chip--active {
+  border-color: #d97706;
+  background: rgba(234, 179, 8, 0.1);
+  color: #92400e;
+}
+.sw-qf-chip--warn:not(.sw-qf-chip--active):hover:not(:disabled) {
+  border-color: #d97706;
+  color: #92400e;
+  background: rgba(234, 179, 8, 0.07);
+}
+.sw-qf-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.sw-qf-clear {
+  margin-left: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(220, 38, 38, 0.08);
+  font-size: 12px;
+  font-weight: 600;
+  color: #b91c1c;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.sw-qf-clear:hover { background: rgba(220, 38, 38, 0.14); }
+
+/* ── Bulk action bar ─────────────────────────────────────────────────────── */
+.sw-bulk-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary) 8%, #fff);
+  border: 1.5px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  animation: sw-slide-in 0.15s ease;
+}
+@keyframes sw-slide-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.sw-bulk-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.sw-bulk-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* ── Metric card clickable variant ───────────────────────────────────────── */
+.sw-metric-card--clickable {
+  cursor: pointer;
+  transition: box-shadow 0.12s, transform 0.1s;
+}
+.sw-metric-card--clickable:hover {
+  box-shadow:
+    0 4px 16px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  transform: translateY(-1px);
+}
+.sw-metric-card--clickable:active { transform: translateY(0); }
+
+/* ── Checkbox column ─────────────────────────────────────────────────────── */
+.sw-th-check,
+.sw-td-check {
+  width: 36px;
+  padding-left: 14px !important;
+  padding-right: 4px !important;
+}
+.sw-th-check input[type='checkbox'],
+.sw-td-check input[type='checkbox'] {
+  cursor: pointer;
+  accent-color: var(--color-primary);
+  width: 15px;
+  height: 15px;
+}
+.sw-row-selected {
+  background: color-mix(in srgb, var(--color-primary) 5%, #fff) !important;
+}
+.sw-row-selected td {
+  border-color: color-mix(in srgb, var(--color-primary) 12%, rgba(15, 23, 42, 0.06)) !important;
+}
+
 .sw-header {
   display: flex;
   flex-wrap: wrap;
