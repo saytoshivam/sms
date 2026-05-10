@@ -36,8 +36,7 @@ CROSS JOIN (
     UNION ALL SELECT 'ADDRESS_PROOF'
 ) dt
 WHERE NOT EXISTS (
-    SELECT 1 FROM student_documents
-    WHERE student_documents.student_id = s.id
-      AND student_documents.document_type = dt.doc_type
-)
-ON DUPLICATE KEY UPDATE created_at = created_at;
+    SELECT 1 FROM student_documents sd
+    WHERE sd.student_id = s.id
+      AND sd.document_type = dt.doc_type
+);
