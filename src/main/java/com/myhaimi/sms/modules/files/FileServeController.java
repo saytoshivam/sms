@@ -1,6 +1,7 @@
 package com.myhaimi.sms.modules.files;
 
 import com.myhaimi.sms.entity.FileObject;
+import com.myhaimi.sms.entity.enums.FileStatus;
 import com.myhaimi.sms.modules.files.storage.LocalStorageProvider;
 import com.myhaimi.sms.repository.FileObjectRepo;
 import com.myhaimi.sms.repository.UserRepo;
@@ -63,9 +64,8 @@ public class FileServeController {
         Integer schoolId = TenantContext.getSchoolId();
         if (schoolId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 
-        // Look up by storageKey + schoolId — no findAll()
-        FileObject fo = fileObjectRepo.findByStorageKeyAndSchoolId(storageKey, schoolId)
-                .filter(f -> f.getStatus() != null && !"DELETED".equals(f.getStatus().name()))
+        // Look up by storageKey + schoolId, excluding DELETED — no findAll(), no in-memory filter
+        FileObject fo = fileObjectRepo.findByStorageKeyAndSchoolIdAndStatusNot(storageKey, schoolId, FileStatus.DELETED)
                 .orElse(null);
         if (fo == null) return ResponseEntity.notFound().build();
 

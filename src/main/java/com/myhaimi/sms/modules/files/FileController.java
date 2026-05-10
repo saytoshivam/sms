@@ -54,7 +54,7 @@ public class FileController {
             FileCategory   fileCat = FileCategory.valueOf(category.toUpperCase());
             FileVisibility vis     = FileVisibility.valueOf(visibility.toUpperCase());
 
-            FileObjectDTO result = fileService.upload(file, fileCat, ownerType, ownerId, vis, caller.userId());
+            FileObjectDTO result = fileService.upload(file, fileCat, ownerType, ownerId, vis, caller);
             return ResponseEntity.status(HttpStatus.CREATED).body(result);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));

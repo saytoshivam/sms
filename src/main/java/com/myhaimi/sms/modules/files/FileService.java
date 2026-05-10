@@ -90,11 +90,15 @@ public class FileService {
 
     // ── generic upload (admin-only) ───────────────────────────────────────────
 
+    /**
+     * Generic upload — caller must have been validated by FileAccessService.assertCanUploadGeneric
+     * before this method is invoked (done in FileController).
+     */
     @Transactional
     public FileObjectDTO upload(MultipartFile file, FileCategory category,
                                 String ownerType, String ownerId,
-                                FileVisibility visibility, Integer uploadedBy) {
-        return doUpload(file, category, ownerType, ownerId, visibility, uploadedBy);
+                                FileVisibility visibility, FileCallerContext caller) {
+        return doUpload(file, category, ownerType, ownerId, visibility, caller);
     }
 
     /**
@@ -104,7 +108,8 @@ public class FileService {
     public FileObjectDTO uploadForModule(MultipartFile file, FileCategory category,
                                          String ownerType, String ownerId,
                                          FileVisibility visibility, Integer uploadedBy) {
-        return doUpload(file, category, ownerType, ownerId, visibility, uploadedBy);
+        Integer schoolId = requireSchoolId();
+        return doUploadWithIds(file, category, ownerType, ownerId, visibility, uploadedBy, schoolId);
     }
 
     // ── download URL ──────────────────────────────────────────────────────────
@@ -130,7 +135,7 @@ public class FileService {
 
     @Transactional
     public void softDelete(Long fileId, FileCallerContext caller) {
-        Integer schoolId = requireSchoolId();
+        Integer schoolId = caller.schoolId() != null ? caller.schoolId() : requireSchoolId();
         FileObject fo = requireActive(fileId, schoolId);
         fileAccessService.assertCanDelete(fo, caller);
         fo.setStatus(FileStatus.DELETED);
@@ -158,8 +163,7 @@ public class FileService {
 
     @Transactional(readOnly = true)
     public FileObject requireByStorageKey(String storageKey, Integer schoolId) {
-        return fileObjectRepo.findByStorageKeyAndSchoolId(storageKey, schoolId)
-                .filter(fo -> fo.getStatus() != FileStatus.DELETED)
+        return fileObjectRepo.findByStorageKeyAndSchoolIdAndStatusNot(storageKey, schoolId, FileStatus.DELETED)
                 .orElseThrow(() -> new IllegalArgumentException("File not found."));
     }
 
@@ -167,8 +171,14 @@ public class FileService {
 
     private FileObjectDTO doUpload(MultipartFile file, FileCategory category,
                                    String ownerType, String ownerId,
-                                   FileVisibility visibility, Integer uploadedBy) {
-        Integer schoolId = requireSchoolId();
+                                   FileVisibility visibility, FileCallerContext caller) {
+        Integer schoolId = caller.schoolId() != null ? caller.schoolId() : requireSchoolId();
+        return doUploadWithIds(file, category, ownerType, ownerId, visibility, caller.userId(), schoolId);
+    }
+
+    private FileObjectDTO doUploadWithIds(MultipartFile file, FileCategory category,
+                                          String ownerType, String ownerId,
+                                          FileVisibility visibility, Integer uploadedBy, Integer schoolId) {
         validateFile(file, category);
 
         byte[] bytes;
