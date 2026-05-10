@@ -8,6 +8,7 @@ import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.ToString;
 
 import java.time.Instant;
 
@@ -34,9 +35,20 @@ public class StudentDocument {
     /**
      * FK to file_objects.id — set after file is uploaded via FileService.
      * Null until a file is actually uploaded; fileUrl kept for backward compat.
+     * This column is the write-side; use {@link #fileObject} for navigation reads.
      */
     @Column(name = "file_id", nullable = true)
     private Long fileId;
+
+    /**
+     * Navigation property to the linked FileObject.
+     * {@code insertable=false, updatable=false} — the underlying FK is managed via {@link #fileId}.
+     */
+    @ToString.Exclude
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "file_id", insertable = false, updatable = false)
+    private FileObject fileObject;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "collection_status", nullable = false, length = 32)

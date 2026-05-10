@@ -81,10 +81,16 @@ export type DocLifecycleStatus =
 export type StudentDocumentSummary = {
   id: number;
   documentType?: string | null;
+  /** @deprecated Use fileId + GET /api/files/{fileId}/download-url instead. */
   fileUrl?: string | null;
   /** FileObject id from the managed file module. Present after upload via POST …/upload. */
   fileId?: number | null;
-  /** Computed single-status from backend: VERIFIED > REJECTED > UPLOADED > COLLECTED_PHYSICAL > NOT_REQUIRED > PENDING_COLLECTION */
+  // File metadata — populated once a file has been uploaded
+  originalFilename?: string | null;
+  fileSize?: number | null;
+  contentType?: string | null;
+  uploadedAt?: string | null;
+  /** Computed single-status from backend: NOT_REQUIRED > REJECTED > VERIFIED > UPLOADED > COLLECTED_PHYSICAL > PENDING_COLLECTION */
   displayStatus?: string | null;
   status?: DocLifecycleStatus | null;           // legacy — may be null for new documents
   collectionStatus?: string | null;
@@ -148,6 +154,13 @@ function fmtDate(d: string | null | undefined): string {
   } catch {
     return d;
   }
+}
+
+function fmtFileSize(bytes: number | null | undefined): string {
+  if (bytes == null) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
@@ -664,6 +677,22 @@ function DocumentsTab({
   }
 
   async function handleFileSelected(docId: number, file: File) {
+    // Client-side validation (mirrors backend: 10 MB max, PDF/JPG/PNG only)
+    const MAX_MB = 10;
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setRowError({ docId, msg: `File size must be less than ${MAX_MB} MB.` });
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+      setUploadingDoc(null);
+      return;
+    }
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!allowed.includes(file.type)) {
+      setRowError({ docId, msg: 'Only PDF, JPG, and PNG files are allowed.' });
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+      setUploadingDoc(null);
+      return;
+    }
+
     setUploadingDoc(docId);
     setBusy(docId);
     setRowError(null);
@@ -682,6 +711,25 @@ function DocumentsTab({
       setBusy(null);
       // reset file input so same file can be re-selected if needed
       if (uploadInputRef.current) uploadInputRef.current.value = '';
+    }
+  }
+
+  async function handleDownload(fileId: number, docId: number) {
+    setBusy(docId);
+    setRowError(null);
+    try {
+      const resp = await api.get<{ downloadUrl?: string }>(`/api/files/${fileId}/download-url`);
+      const url = resp.data?.downloadUrl;
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } else {
+        setRowError({ docId, msg: 'Could not get download URL.' });
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.error ?? e?.message ?? 'Could not get download URL.';
+      setRowError({ docId, msg });
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -763,15 +811,13 @@ function DocumentsTab({
                         <td style={{ ...TD_STYLE, fontWeight: 600, color: 'rgba(15,23,42,0.85)', minWidth: 140 }}>
                           <div>{doc.documentType?.replace(/_/g, ' ') || '—'}</div>
                           {doc.fileId ? (
-                            <a
-                              href="#"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                window.open(`/api/files/${doc.fileId}/download-url`, '_blank');
-                              }}
-                              style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600, display: 'block', marginTop: 2 }}>
-                              View file ↗
-                            </a>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => handleDownload(doc.fileId!, doc.id)}
+                              style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600, display: 'block', marginTop: 2, background: 'none', border: 'none', cursor: isBusy ? 'wait' : 'pointer', padding: 0 }}>
+                              View / Download ↗
+                            </button>
                           ) : doc.fileUrl ? (
                             <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
                               style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600, display: 'block', marginTop: 2 }}>
@@ -785,9 +831,20 @@ function DocumentsTab({
                           <LifecyclePill map={COLL_INFO} value={coll} />
                         </td>
 
-                        {/* Upload status */}
+                        {/* Upload status + file metadata */}
                         <td style={TD_STYLE}>
                           <LifecyclePill map={UP_INFO} value={up} />
+                          {doc.originalFilename && (
+                            <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.55)', marginTop: 3, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                 title={doc.originalFilename}>
+                              {doc.originalFilename}
+                            </div>
+                          )}
+                          {doc.fileSize != null && (
+                            <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.38)', lineHeight: 1.3 }}>
+                              {fmtFileSize(doc.fileSize)}
+                            </div>
+                          )}
                         </td>
 
                         {/* Verification status */}

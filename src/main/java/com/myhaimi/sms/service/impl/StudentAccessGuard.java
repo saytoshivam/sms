@@ -93,7 +93,8 @@ public class StudentAccessGuard {
         } else if (roles.contains(RoleNames.VICE_PRINCIPAL)) {
             canViewAnyStudent = true;
             canViewGuardians = true; canViewMedical = true;
-            canViewFees = true; canManageParentLogin = true; canManageStudentLogin = true;
+            canViewDocuments = true; canViewFees = true;
+            canManageParentLogin = true; canManageStudentLogin = true;
 
         } else if (roles.contains(RoleNames.ACCOUNTANT)) {
             canViewAnyStudent = true;

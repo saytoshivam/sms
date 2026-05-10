@@ -9,6 +9,7 @@ import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import com.myhaimi.sms.entity.FileObject;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import com.myhaimi.sms.entity.enums.GuardianLoginStatus;
 import com.myhaimi.sms.entity.enums.FileCategory;
@@ -891,6 +892,7 @@ public class StudentService {
 
     /**
      * Convert StudentDocument entity to DTO.
+     * Must be called within an active transaction (lazy-loads fileObject if fileId is set).
      */
     private StudentDocumentSummaryDTO toDocumentSummaryDTO(StudentDocument doc) {
         StudentDocumentSummaryDTO dto = new StudentDocumentSummaryDTO();
@@ -907,6 +909,16 @@ public class StudentService {
         dto.setVerifiedAt(doc.getVerifiedAt());
         dto.setRemarks(doc.getRemarks());
         dto.setCreatedAt(doc.getCreatedAt());
+
+        // Populate file metadata from the linked FileObject (lazy-loaded)
+        FileObject fo = doc.getFileObject();
+        if (fo != null) {
+            dto.setOriginalFilename(fo.getOriginalFilename());
+            dto.setFileSize(fo.getFileSize());
+            dto.setContentType(fo.getContentType());
+            dto.setUploadedAt(fo.getUploadedAt());
+        }
+
         return dto;
     }
 
@@ -1140,8 +1152,12 @@ public class StudentService {
 
         Integer schoolId = requireSchoolId();
         StudentCallerContext ctx = accessGuard.resolve(schoolId);
-        if (!ctx.canEdit()) {
-            throw new AccessDeniedException("You do not have permission to upload student documents.");
+
+        // Upload is restricted to school leadership roles only
+        if (!ctx.isSchoolAdmin() && !ctx.isPrincipal() && !ctx.isVicePrincipal()) {
+            throw new AccessDeniedException(
+                    "You do not have permission to upload student documents. " +
+                    "Only School Admin, Principal, or Vice Principal may upload.");
         }
 
         Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
@@ -1153,6 +1169,7 @@ public class StudentService {
 
         Integer uploadedBy = resolveUserId(auth);
 
+        // FileService validates type (PDF/JPG/PNG) and size (≤ 10 MB) for STUDENT_DOCUMENT
         FileObjectDTO fo = fileService.uploadForModule(
                 file,
                 FileCategory.STUDENT_DOCUMENT,
@@ -1161,9 +1178,18 @@ public class StudentService {
                 FileVisibility.SCHOOL_INTERNAL,
                 uploadedBy);
 
+        // Link the FileObject — never store the raw signed URL
         doc.setFileId(fo.getId());
-        doc.setFileUrl(fo.getDownloadUrl()); // backward-compat convenience field
+
+        // Upgrade collection status if the document was waiting to be collected
+        if (doc.getCollectionStatus() == StudentDocumentCollectionStatus.PENDING_COLLECTION) {
+            doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
+        }
+
+        // A newly uploaded file always resets verification to NOT_VERIFIED
+        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
         doc.setUploadStatus(StudentDocumentUploadStatus.UPLOADED);
+
         documentRepo.save(doc);
 
         return toDocumentSummaryDTO(doc);

@@ -229,15 +229,41 @@ public class FileService {
         String ct = file.getContentType();
         Set<String> allowed = ALLOWED_TYPES.get(category);
         if (allowed != null && (ct == null || !allowed.contains(ct.toLowerCase()))) {
-            throw new IllegalArgumentException(
-                    "File type '" + ct + "' is not allowed for category " + category + ". Allowed: " + allowed);
+            throw new IllegalArgumentException(friendlyTypeError(category));
         }
         long maxBytes = MAX_SIZE_BYTES.getOrDefault(category, DEFAULT_MAX_BYTES);
         if (file.getSize() > maxBytes) {
-            throw new IllegalArgumentException(
-                    "File size " + (file.getSize() / 1024) + " KB exceeds the "
-                            + (maxBytes / 1024 / 1024) + " MB limit for category " + category + ".");
+            throw new IllegalArgumentException(friendlySizeError(category, maxBytes));
         }
+    }
+
+    private static String friendlyTypeError(FileCategory category) {
+        return switch (category) {
+            case STUDENT_DOCUMENT, GUARDIAN_DOCUMENT, TEACHER_DOCUMENT ->
+                    "Only PDF, JPG, and PNG files are allowed.";
+            case PROFILE_PHOTO ->
+                    "Only JPEG, PNG, and WEBP images are allowed for profile photos.";
+            case ASSIGNMENT_ATTACHMENT, ASSIGNMENT_SUBMISSION ->
+                    "Only PDF, Word, PowerPoint, JPG, and PNG files are allowed.";
+            case CIRCULAR_ATTACHMENT ->
+                    "Only PDF, JPG, and PNG files are allowed for circulars.";
+            case FEE_RECEIPT, REPORT_CARD, PAYROLL_SLIP ->
+                    "Only PDF files are allowed for this document type.";
+            default ->
+                    "File type is not allowed for this upload category.";
+        };
+    }
+
+    private static String friendlySizeError(FileCategory category, long maxBytes) {
+        long mb = maxBytes / 1024 / 1024;
+        return switch (category) {
+            case STUDENT_DOCUMENT ->
+                    "File size must be less than " + mb + " MB.";
+            case PROFILE_PHOTO ->
+                    "Profile photo must be less than " + mb + " MB.";
+            default ->
+                    "File size exceeds the " + mb + " MB limit.";
+        };
     }
 
     private Integer requireSchoolId() {
