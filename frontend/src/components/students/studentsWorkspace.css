@@ -762,3 +762,67 @@
     width: 100vw;
   }
 }
+
+/* ── Student Profile — More menu ─────────────────────────────────────────── */
+.sp-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  min-width: 210px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  animation: sp-menu-in 0.12s ease;
+}
+
+@keyframes sp-menu-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.sp-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.82);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.1s;
+}
+
+.sp-more-item:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.sp-more-item--danger {
+  color: #991b1b;
+}
+
+.sp-more-item--danger:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.sp-more-item--disabled,
+.sp-more-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sp-more-sep {
+  border: none;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  margin: 4px 0;
+}
+
