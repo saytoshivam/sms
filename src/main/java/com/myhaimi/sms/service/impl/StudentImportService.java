@@ -155,9 +155,11 @@ public class StudentImportService {
             String rollNo = blankToNull(row.getRollNo());
             if (!isDuplicate && errors.isEmpty() && rollNo != null
                     && classGroup != null && academicYear != null) {
-                String key = classGroup.getId() + ":" + academicYear.getId();
+                final var finalClassGroup = classGroup;
+                final var finalAcademicYear = academicYear;
+                String key = finalClassGroup.getId() + ":" + finalAcademicYear.getId();
                 Set<String> usedRollNos = enrolledRollNos.computeIfAbsent(key, k ->
-                        loadUsedRollNos(classGroup.getId(), academicYear.getId()));
+                        loadUsedRollNos(finalClassGroup.getId(), finalAcademicYear.getId()));
                 if (!usedRollNos.add(rollNo.toLowerCase())) {
                     errors.add("Row " + row.getRowNumber()
                             + ": rollNo '" + rollNo
