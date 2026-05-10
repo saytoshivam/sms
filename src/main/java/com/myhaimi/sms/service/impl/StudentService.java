@@ -1170,12 +1170,13 @@ public class StudentService {
         Integer uploadedBy = resolveUserId(auth);
 
         // FileService validates type (PDF/JPG/PNG) and size (≤ 10 MB) for STUDENT_DOCUMENT
+        // Visibility is PRIVATE — official student documents are sensitive
         FileObjectDTO fo = fileService.uploadForModule(
                 file,
                 FileCategory.STUDENT_DOCUMENT,
                 "STUDENT",
                 studentId.toString(),
-                FileVisibility.SCHOOL_INTERNAL,
+                FileVisibility.PRIVATE,
                 uploadedBy);
 
         // Link the FileObject — never store the raw signed URL
@@ -1195,45 +1196,6 @@ public class StudentService {
         return toDocumentSummaryDTO(doc);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // File integration — student profile photo upload
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Upload a profile photo for a student.
-     * Updates {@code students.profile_photo_file_id} and {@code students.photo_url}.
-     * POST /api/students/{studentId}/profile-photo
-     */
-    @Transactional
-    public StudentProfileSummaryDTO uploadProfilePhoto(
-            Integer studentId, MultipartFile file, Authentication auth) {
-
-        Integer schoolId = requireSchoolId();
-        StudentCallerContext ctx = accessGuard.resolve(schoolId);
-        if (!ctx.canEdit()) {
-            throw new AccessDeniedException("You do not have permission to upload a student profile photo.");
-        }
-
-        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
-                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
-
-        Integer uploadedBy = resolveUserId(auth);
-
-        FileObjectDTO fo = fileService.uploadForModule(
-                file,
-                FileCategory.PROFILE_PHOTO,
-                "STUDENT",
-                studentId.toString(),
-                FileVisibility.SCHOOL_INTERNAL,
-                uploadedBy);
-
-        student.setProfilePhotoFileId(fo.getId());
-        // Store the download URL in photoUrl for backward compat (serves as a fast display hint)
-        student.setPhotoUrl("/api/files/" + fo.getId() + "/download-url");
-        studentRepo.save(student);
-
-        return buildProfile(student);
-    }
 
     // ── helper: resolve userId from authentication ────────────────────────────
 

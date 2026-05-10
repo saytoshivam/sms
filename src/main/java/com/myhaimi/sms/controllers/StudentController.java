@@ -3,8 +3,6 @@ package com.myhaimi.sms.controllers;
 import com.myhaimi.sms.DTO.StudentViewDTO;
 import com.myhaimi.sms.DTO.student.*;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
-import com.myhaimi.sms.modules.files.FileObjectDTO;
-import com.myhaimi.sms.modules.files.FileService;
 import com.myhaimi.sms.service.impl.ParentLoginService;
 import com.myhaimi.sms.service.impl.StudentLoginService;
 import com.myhaimi.sms.service.impl.StudentService;
@@ -30,7 +28,6 @@ public class StudentController {
     private final StudentService studentService;
     private final ParentLoginService parentLoginService;
     private final StudentLoginService studentLoginService;
-    private final FileService fileService;
 
     /** Converts access-denied errors to HTTP 403 with a JSON body. */
     @org.springframework.web.bind.annotation.ExceptionHandler(AccessDeniedException.class)
@@ -286,24 +283,5 @@ public class StudentController {
         }
     }
 
-    /**
-     * Upload a profile photo for a student.
-     * POST /api/students/{studentId}/profile-photo
-     */
-    @PostMapping("/{studentId}/profile-photo")
-    public ResponseEntity<?> uploadProfilePhoto(
-            @PathVariable Integer studentId,
-            @RequestParam("file") MultipartFile file,
-            Authentication auth) {
-        try {
-            StudentProfileSummaryDTO result =
-                    studentService.uploadProfilePhoto(studentId, file, auth);
-            return ResponseEntity.ok(result);
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
-        } catch (AccessDeniedException ex) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
-        }
-    }
 }
 
