@@ -1153,7 +1153,7 @@ public class StudentService {
 
         Integer uploadedBy = resolveUserId(auth);
 
-        FileObjectDTO fo = fileService.upload(
+        FileObjectDTO fo = fileService.uploadForModule(
                 file,
                 FileCategory.STUDENT_DOCUMENT,
                 "STUDENT",
@@ -1193,7 +1193,7 @@ public class StudentService {
 
         Integer uploadedBy = resolveUserId(auth);
 
-        FileObjectDTO fo = fileService.upload(
+        FileObjectDTO fo = fileService.uploadForModule(
                 file,
                 FileCategory.PROFILE_PHOTO,
                 "STUDENT",

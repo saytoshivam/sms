@@ -2,7 +2,6 @@ package com.myhaimi.sms.modules.files;
 
 import com.myhaimi.sms.entity.enums.FileCategory;
 import com.myhaimi.sms.entity.enums.FileVisibility;
-import com.myhaimi.sms.security.RoleNames;
 import com.myhaimi.sms.repository.UserRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -19,67 +18,56 @@ import java.util.stream.Collectors;
 /**
  * REST endpoints for the centralised file module.
  *
- * POST   /api/files/upload              — upload any file
- * GET    /api/files/{id}/download-url   — get signed/temporary read URL
- * GET    /api/files/{id}                — file metadata only
- * DELETE /api/files/{id}                — soft delete
+ * POST   /api/files/upload              — generic upload (SCHOOL_ADMIN / PRINCIPAL only)
+ * GET    /api/files/{id}/download-url   — permission-checked signed URL
+ * GET    /api/files/{id}                — permission-checked metadata
+ * DELETE /api/files/{id}                — permission-checked soft delete
  */
 @RestController
 @RequestMapping("/api/files")
 @RequiredArgsConstructor
 public class FileController {
 
-    private final FileService fileService;
-    private final UserRepo userRepo;
+    private final FileService       fileService;
+    private final FileAccessService fileAccessService;
+    private final UserRepo          userRepo;
 
-    // ── exception handler ─────────────────────────────────────────────────────
     @ExceptionHandler(AccessDeniedException.class)
     ResponseEntity<Map<String, String>> handleAccessDenied(AccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
     }
 
-    // ── upload ────────────────────────────────────────────────────────────────
+    // ── generic upload (admin-only) ───────────────────────────────────────────
 
-    /**
-     * Generic upload endpoint.
-     *
-     * @param file       Multipart file
-     * @param category   FileCategory enum name (e.g. STUDENT_DOCUMENT, PROFILE_PHOTO)
-     * @param ownerType  Domain entity type (e.g. STUDENT, TEACHER)
-     * @param ownerId    PK of the owning entity
-     * @param visibility FileVisibility enum name (default: SCHOOL_INTERNAL)
-     */
     @PostMapping("/upload")
     public ResponseEntity<?> upload(
-            @RequestParam("file")                  MultipartFile file,
-            @RequestParam("category")              String category,
-            @RequestParam("ownerType")             String ownerType,
-            @RequestParam("ownerId")               String ownerId,
-            @RequestParam(value = "visibility",
-                    defaultValue = "SCHOOL_INTERNAL") String visibility,
+            @RequestParam("file")                                  MultipartFile file,
+            @RequestParam("category")                              String category,
+            @RequestParam("ownerType")                             String ownerType,
+            @RequestParam("ownerId")                               String ownerId,
+            @RequestParam(value = "visibility", defaultValue = "SCHOOL_INTERNAL") String visibility,
             Authentication auth) {
         try {
-            FileCategory fileCat = FileCategory.valueOf(category.toUpperCase());
-            FileVisibility vis    = FileVisibility.valueOf(visibility.toUpperCase());
-            Integer callerUserId  = resolveUserId(auth);
+            FileCallerContext caller = resolveCallerContext(auth);
+            fileAccessService.assertCanUploadGeneric(caller);
 
-            FileObjectDTO result = fileService.upload(file, fileCat, ownerType, ownerId, vis, callerUserId);
+            FileCategory   fileCat = FileCategory.valueOf(category.toUpperCase());
+            FileVisibility vis     = FileVisibility.valueOf(visibility.toUpperCase());
+
+            FileObjectDTO result = fileService.upload(file, fileCat, ownerType, ownerId, vis, caller.userId());
             return ResponseEntity.status(HttpStatus.CREATED).body(result);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
     }
 
-    // ── download-url ──────────────────────────────────────────────────────────
+    // ── download URL ──────────────────────────────────────────────────────────
 
     @GetMapping("/{fileId}/download-url")
     public ResponseEntity<?> downloadUrl(@PathVariable Long fileId, Authentication auth) {
         try {
-            CallerInfo caller = resolveCallerInfo(auth);
-            FileObjectDTO result = fileService.getDownloadUrl(
-                    fileId, caller.userId(), caller.roles(),
-                    caller.linkedStudentId(), caller.linkedGuardianId());
-            return ResponseEntity.ok(result);
+            FileCallerContext caller = resolveCallerContext(auth);
+            return ResponseEntity.ok(fileService.getDownloadUrl(fileId, caller));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
         } catch (AccessDeniedException ex) {
@@ -90,11 +78,14 @@ public class FileController {
     // ── metadata ──────────────────────────────────────────────────────────────
 
     @GetMapping("/{fileId}")
-    public ResponseEntity<?> metadata(@PathVariable Long fileId) {
+    public ResponseEntity<?> metadata(@PathVariable Long fileId, Authentication auth) {
         try {
-            return ResponseEntity.ok(fileService.getMetadata(fileId));
+            FileCallerContext caller = resolveCallerContext(auth);
+            return ResponseEntity.ok(fileService.getMetadata(fileId, caller));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
         }
     }
 
@@ -103,35 +94,33 @@ public class FileController {
     @DeleteMapping("/{fileId}")
     public ResponseEntity<?> delete(@PathVariable Long fileId, Authentication auth) {
         try {
-            Integer callerUserId = resolveUserId(auth);
-            fileService.softDelete(fileId, callerUserId);
+            FileCallerContext caller = resolveCallerContext(auth);
+            fileService.softDelete(fileId, caller);
             return ResponseEntity.ok(Map.of("message", "File deleted."));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
         }
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // ── resolver ─────────────────────────────────────────────────────────────
 
-    private Integer resolveUserId(Authentication auth) {
-        if (auth == null) return null;
-        return userRepo.findFirstByEmailIgnoreCase(auth.getName())
-                .map(u -> u.getId())
-                .orElse(null);
-    }
-
-    private CallerInfo resolveCallerInfo(Authentication auth) {
-        if (auth == null) throw new AccessDeniedException("Not authenticated.");
+    FileCallerContext resolveCallerContext(Authentication auth) {
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new AccessDeniedException("Not authenticated.");
+        }
         var user = userRepo.findFirstByEmailIgnoreCase(auth.getName())
-                .orElseThrow(() -> new AccessDeniedException("User not found."));
+                .orElseThrow(() -> new AccessDeniedException("User account not found."));
+
         Set<String> roles = user.getRoles().stream()
                 .map(r -> r.getName())
                 .collect(Collectors.toSet());
+
         Integer studentId  = user.getLinkedStudent()  != null ? user.getLinkedStudent().getId()  : null;
         Integer guardianId = user.getLinkedGuardian() != null ? user.getLinkedGuardian().getId() : null;
-        return new CallerInfo(user.getId(), roles, studentId, guardianId);
+        Integer schoolId   = user.getSchool()         != null ? user.getSchool().getId()          : null;
+
+        return new FileCallerContext(user.getId(), roles, studentId, guardianId, schoolId);
     }
-
-    record CallerInfo(Integer userId, Set<String> roles, Integer linkedStudentId, Integer linkedGuardianId) {}
 }
-
