@@ -29,4 +29,3 @@ public class SectionTransferDTO {
     @Size(max = 512)
     private String reason;
 }
-

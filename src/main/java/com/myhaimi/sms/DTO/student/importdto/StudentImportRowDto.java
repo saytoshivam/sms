@@ -39,4 +39,3 @@ public class StudentImportRowDto {
     private Integer resolvedClassGroupId;
     private Integer resolvedAcademicYearId;
 }
-

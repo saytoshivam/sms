@@ -23,4 +23,3 @@ public class StudentImportPreviewDto {
     /** Per-row details. Only rows with status INVALID or DUPLICATE have non-empty {@code errors}. */
     private List<StudentImportRowResultDto> rows;
 }
-

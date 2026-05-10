@@ -21,4 +21,3 @@ public class StudentImportCommitResultDto {
      */
     private List<StudentImportRowResultDto> failedRows;
 }
-

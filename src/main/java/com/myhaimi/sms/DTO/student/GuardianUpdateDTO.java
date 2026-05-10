@@ -31,4 +31,3 @@ public class GuardianUpdateDTO {
 
     private boolean canLogin;
 }
-
