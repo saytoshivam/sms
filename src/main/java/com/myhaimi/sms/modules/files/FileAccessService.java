@@ -12,22 +12,15 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Centralises all file permission decisions for the ERP.
- * Every public entry-point that reads, writes, or deletes a FileObject
- * must invoke the appropriate assert* method before proceeding.
+ * Centralises ALL file-level permission decisions.
  *
- * <p>Rules summary:
- * <ul>
- *   <li>SCHOOL_ADMIN / PRINCIPAL — full access within their school</li>
- *   <li>VICE_PRINCIPAL — view/download SCHOOL_INTERNAL; delete only own uploads</li>
- *   <li>CLASS_TEACHER / TEACHER — view/download SCHOOL_INTERNAL non-student-document files;
- *       explicitly denied STUDENT_DOCUMENT; delete only own uploads</li>
- *   <li>PARENT — view/download only files of linked children with
- *       PARENT_VISIBLE or PUBLIC visibility; no delete</li>
- *   <li>STUDENT — view/download only own files; no delete</li>
- *   <li>Generic upload (POST /api/files/upload) — SCHOOL_ADMIN / PRINCIPAL only</li>
- *   <li>Module-specific upload (e.g. student doc upload) — enforced by the calling module service</li>
- * </ul>
+ * Rules:
+ *  - SCHOOL_ADMIN / PRINCIPAL  → full access within their school
+ *  - VICE_PRINCIPAL            → view SCHOOL_INTERNAL; delete only own uploads
+ *  - CLASS_TEACHER / TEACHER   → view SCHOOL_INTERNAL; denied STUDENT_DOCUMENT / GUARDIAN_DOCUMENT
+ *  - PARENT                    → own children's files with PARENT_VISIBLE/STUDENT_VISIBLE/PUBLIC
+ *  - STUDENT                   → own files only (ownerType=STUDENT, ownerId==linkedStudentId)
+ *  - Generic upload             → SCHOOL_ADMIN / PRINCIPAL only
  */
 @Service
 @RequiredArgsConstructor
@@ -37,10 +30,7 @@ public class FileAccessService {
 
     // ── upload ────────────────────────────────────────────────────────────────
 
-    /**
-     * Asserts the caller may use the generic upload endpoint.
-     * Module-specific endpoints (student doc, profile photo) do their own checks.
-     */
+    /** Generic /api/files/upload — SCHOOL_ADMIN or PRINCIPAL only. */
     public void assertCanUploadGeneric(FileCallerContext caller) {
         if (caller.isSchoolLeadership()) return;
         throw new AccessDeniedException(
@@ -49,27 +39,19 @@ public class FileAccessService {
 
     // ── view metadata ─────────────────────────────────────────────────────────
 
-    /**
-     * Asserts the caller may view the metadata of this file.
-     * Applies the same visibility rules as download.
-     */
     public void assertCanViewMetadata(FileObject fo, FileCallerContext caller) {
         assertCanRead(fo, caller, "view metadata for");
     }
 
     // ── download ──────────────────────────────────────────────────────────────
 
-    /** Asserts the caller may obtain a download URL or stream for this file. */
     public void assertCanDownload(FileObject fo, FileCallerContext caller) {
         assertCanRead(fo, caller, "download");
     }
 
     // ── delete ────────────────────────────────────────────────────────────────
 
-    /**
-     * Asserts the caller may soft-delete this file.
-     * Allowed for: school leadership, or the original uploader.
-     */
+    /** School leadership OR original uploader may soft-delete. */
     public void assertCanDelete(FileObject fo, FileCallerContext caller) {
         if (caller.isSchoolLeadership()) return;
         if (caller.userId() != null && caller.userId().equals(fo.getUploadedBy())) return;
@@ -77,71 +59,60 @@ public class FileAccessService {
                 "Only school administrators or the file's original uploader may delete files.");
     }
 
-    // ── internal shared read check ────────────────────────────────────────────
+    // ── shared read check ─────────────────────────────────────────────────────
 
     private void assertCanRead(FileObject fo, FileCallerContext caller, String action) {
         // 1. School leadership — full access
         if (caller.isSchoolLeadership()) return;
 
-        // 2. Anyone can read PUBLIC files
+        // 2. PUBLIC files — any authenticated caller
         if (fo.getVisibility() == FileVisibility.PUBLIC) return;
 
-        // 3. VICE_PRINCIPAL — SCHOOL_INTERNAL, but not PRIVATE
+        // 3. VICE_PRINCIPAL — SCHOOL_INTERNAL only
         if (caller.isVicePrincipal()) {
             if (fo.getVisibility() == FileVisibility.SCHOOL_INTERNAL) return;
             deny(action, fo);
         }
 
-        // 4. CLASS_TEACHER / TEACHER — SCHOOL_INTERNAL only AND not student documents
+        // 4. CLASS_TEACHER / TEACHER — SCHOOL_INTERNAL but NOT student/guardian docs
         if (caller.isTeacher()) {
             if (fo.getFileCategory() == FileCategory.STUDENT_DOCUMENT
                     || fo.getFileCategory() == FileCategory.GUARDIAN_DOCUMENT) {
                 throw new AccessDeniedException(
-                        "Teachers do not have access to student/guardian document files.");
+                        "Teachers do not have access to student or guardian documents.");
             }
             if (fo.getVisibility() == FileVisibility.SCHOOL_INTERNAL) return;
             deny(action, fo);
         }
 
-        // 5. STUDENT — own files only (by ownerType=STUDENT and ownerId == linked student id)
+        // 5. STUDENT — own files only
         if (caller.isStudent()) {
             if ("STUDENT".equals(fo.getOwnerType())
                     && caller.linkedStudentId() != null
-                    && caller.linkedStudentId().toString().equals(fo.getOwnerId())) {
-                // Student can see own files if not PRIVATE
-                if (fo.getVisibility() != FileVisibility.PRIVATE) return;
+                    && caller.linkedStudentId().toString().equals(fo.getOwnerId())
+                    && fo.getVisibility() != FileVisibility.PRIVATE) {
+                return;
             }
             throw new AccessDeniedException("Students may only access their own files.");
         }
 
-        // 6. PARENT — linked children's files with appropriate visibility
+        // 6. PARENT — linked children's files with allowed visibility
         if (caller.isParent()) {
             assertParentCanRead(fo, caller, action);
             return;
         }
 
-        // Any other role — deny
         deny(action, fo);
     }
 
-    /**
-     * Parent-specific read rule:
-     * Parent may access the file only if:
-     * <ol>
-     *   <li>The file belongs to one of the parent's linked children (ownerType=STUDENT, ownerId in linked students)</li>
-     *   <li>AND the file's visibility is PARENT_VISIBLE, STUDENT_VISIBLE, or PUBLIC</li>
-     * </ol>
-     */
     private void assertParentCanRead(FileObject fo, FileCallerContext caller, String action) {
         if (caller.linkedGuardianId() == null) {
             throw new AccessDeniedException("Parent account has no linked guardian record.");
         }
         if (!"STUDENT".equals(fo.getOwnerType())) {
-            // Parents can only access STUDENT-owned files
             throw new AccessDeniedException("Parents may only access files belonging to their linked children.");
         }
 
-        // Gather student ids linked to this guardian
         Set<String> linkedStudentIds = studentGuardianRepo
                 .findByGuardian_Id(caller.linkedGuardianId())
                 .stream()
@@ -152,15 +123,13 @@ public class FileAccessService {
             throw new AccessDeniedException("This file does not belong to any of your linked children.");
         }
 
-        // Visibility must allow parent
         if (fo.getVisibility() == FileVisibility.PARENT_VISIBLE
                 || fo.getVisibility() == FileVisibility.STUDENT_VISIBLE
                 || fo.getVisibility() == FileVisibility.PUBLIC) {
             return;
         }
 
-        throw new AccessDeniedException(
-                "This file's visibility does not allow parent access.");
+        throw new AccessDeniedException("This file's visibility does not allow parent access.");
     }
 
     private static void deny(String action, FileObject fo) {
@@ -168,4 +137,3 @@ public class FileAccessService {
                 "You do not have permission to " + action + " this file.");
     }
 }
-

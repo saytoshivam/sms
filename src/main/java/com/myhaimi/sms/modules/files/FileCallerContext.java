@@ -16,15 +16,14 @@ public record FileCallerContext(
         /** School this user belongs to (used for tenant isolation). */
         Integer schoolId
 ) {
-    public boolean isAdmin()        { return roles.contains("SCHOOL_ADMIN"); }
-    public boolean isPrincipal()    { return roles.contains("PRINCIPAL"); }
-    public boolean isVicePrincipal(){ return roles.contains("VICE_PRINCIPAL"); }
-    public boolean isClassTeacher() { return roles.contains("CLASS_TEACHER"); }
-    public boolean isTeacher()      { return roles.contains("TEACHER") || roles.contains("CLASS_TEACHER"); }
-    public boolean isParent()       { return roles.contains("PARENT"); }
-    public boolean isStudent()      { return roles.contains("STUDENT"); }
+    public boolean isAdmin()           { return roles.contains("SCHOOL_ADMIN"); }
+    public boolean isPrincipal()       { return roles.contains("PRINCIPAL"); }
+    public boolean isVicePrincipal()   { return roles.contains("VICE_PRINCIPAL"); }
+    public boolean isClassTeacher()    { return roles.contains("CLASS_TEACHER"); }
+    public boolean isTeacher()         { return roles.contains("TEACHER") || roles.contains("CLASS_TEACHER"); }
+    public boolean isParent()          { return roles.contains("PARENT"); }
+    public boolean isStudent()         { return roles.contains("STUDENT"); }
     /** Admin or principal — most permissive school roles. */
-    public boolean isSchoolLeadership() { return isAdmin() || isPrincipal(); }
-    public boolean hasRole(String r)    { return roles.contains(r); }
+    public boolean isSchoolLeadership(){ return isAdmin() || isPrincipal(); }
+    public boolean hasRole(String r)   { return roles.contains(r); }
 }
-
