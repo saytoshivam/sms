@@ -283,5 +283,28 @@ public class StudentController {
         }
     }
 
+    /**
+     * Upload a profile photo for a student.
+     * Stores FileObject id in student.profilePhotoFileId.
+     * Frontend must call GET /api/files/{profilePhotoFileId}/download-url to get the signed image URL.
+     * POST /api/students/{studentId}/profile-photo
+     */
+    @PostMapping("/{studentId}/profile-photo")
+    public ResponseEntity<?> uploadProfilePhoto(
+            @PathVariable Integer studentId,
+            @RequestParam("file") MultipartFile file,
+            Authentication auth) {
+        try {
+            StudentProfileSummaryDTO result =
+                    studentService.uploadProfilePhoto(studentId, file, auth);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
 }
+
 

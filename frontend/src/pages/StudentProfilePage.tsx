@@ -1177,12 +1177,27 @@ function AccessTab({
 // ─── Profile Avatar ───────────────────────────────────────────────────────────
 
 function ProfileAvatar({
-  p, size = 80,
+  p, size = 80, canEdit = false, onUpload,
 }: {
-  p: StudentProfilePayload; size?: number;
+  p: StudentProfilePayload; size?: number; canEdit?: boolean; onUpload?: () => void;
 }) {
-  const [broken, setBroken] = useState(false);
-  const url = p.photoUrl?.trim();
+  const [signedUrl, setSignedUrl]   = useState<string | null>(null);
+  const [imgBroken, setImgBroken]   = useState(false);
+
+  // Fetch a short-lived signed URL when profilePhotoFileId is set.
+  // Never use p.photoUrl directly — it may be stale or point to a JSON endpoint.
+  useEffect(() => {
+    setSignedUrl(null);
+    setImgBroken(false);
+    if (!p.profilePhotoFileId) return;
+    let cancelled = false;
+    api.get<{ downloadUrl?: string }>(`/api/files/${p.profilePhotoFileId}/download-url`)
+      .then(r => { if (!cancelled && r.data?.downloadUrl) setSignedUrl(r.data.downloadUrl); })
+      .catch(() => { /* show initials fallback on error */ });
+    return () => { cancelled = true; };
+  }, [p.profilePhotoFileId]);
+
+  const hasPhoto = !!signedUrl && !imgBroken;
   const avatarStyle: React.CSSProperties = {
     width: size, height: size, borderRadius: 16, objectFit: 'cover', flexShrink: 0,
     border: '2px solid rgba(15,23,42,0.08)',
@@ -1198,10 +1213,26 @@ function ProfileAvatar({
 
   return (
     <div style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}>
-      {url && !broken
-        ? <img src={url} alt="" onError={() => setBroken(true)} style={avatarStyle} />
+      {hasPhoto
+        ? <img src={signedUrl!} alt="" onError={() => setImgBroken(true)} style={avatarStyle} />
         : <div aria-hidden style={fallbackStyle}>{initials(p)}</div>
       }
+      {canEdit && onUpload && (
+        <button
+          type="button"
+          onClick={onUpload}
+          title="Change profile photo"
+          style={{
+            position: 'absolute', bottom: 0, right: 0,
+            width: 24, height: 24, borderRadius: '50%',
+            background: 'rgba(15,23,42,0.75)', border: '1.5px solid #fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', padding: 0,
+          }}
+        >
+          <span style={{ fontSize: 12 }}>📷</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -1225,6 +1256,9 @@ export function StudentProfilePage() {
   const [deactivating, setDeactivating]   = useState(false);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
   const moreMenuRef                       = useRef<HTMLDivElement>(null);
+  const photoInputRef                     = useRef<HTMLInputElement>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError]       = useState<string | null>(null);
 
   // Close More menu on outside click
   useEffect(() => {
@@ -1309,10 +1343,59 @@ export function StudentProfilePage() {
 
       {p && (
         <>
+          {/* Hidden file input for profile photo — triggered by the 📷 button on the avatar */}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              // Client-side validation: 2 MB, jpeg/png/webp only
+              if (file.size > 2 * 1024 * 1024) {
+                setPhotoError('File size must be under 2 MB.');
+                if (photoInputRef.current) photoInputRef.current.value = '';
+                return;
+              }
+              if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+                setPhotoError('Only JPG, PNG, or WEBP images are allowed.');
+                if (photoInputRef.current) photoInputRef.current.value = '';
+                return;
+              }
+              setPhotoUploading(true);
+              setPhotoError(null);
+              try {
+                const form = new FormData();
+                form.append('file', file);
+                await api.post(`/api/students/${id}/profile-photo`, form, {
+                  headers: { 'Content-Type': 'multipart/form-data' },
+                });
+                profile.refetch();
+              } catch (err: any) {
+                setPhotoError(err?.response?.data?.error ?? err?.message ?? 'Upload failed.');
+              } finally {
+                setPhotoUploading(false);
+                if (photoInputRef.current) photoInputRef.current.value = '';
+              }
+            }}
+          />
+
           {/* ── Profile Header ── */}
           <div className="card" style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <ProfileAvatar p={p} size={80} />
+              <ProfileAvatar
+                p={p}
+                size={80}
+                canEdit={perms.canEdit}
+                onUpload={() => { setPhotoError(null); photoInputRef.current?.click(); }}
+              />
+              {photoUploading && (
+                <span style={{ fontSize: 10, color: 'rgba(15,23,42,0.45)' }}>Uploading…</span>
+              )}
+              {photoError && (
+                <span style={{ fontSize: 10, color: '#b91c1c', maxWidth: 84, textAlign: 'center' }}>{photoError}</span>
+              )}
             </div>
 
             <div style={{ flex: 1, minWidth: 220 }}>

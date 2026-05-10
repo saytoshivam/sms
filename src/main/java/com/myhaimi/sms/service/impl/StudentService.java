@@ -1197,6 +1197,52 @@ public class StudentService {
     }
 
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // File integration — student profile photo upload
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Upload a profile photo for a student and store only the FileObject id.
+     * The frontend must call GET /api/files/{profilePhotoFileId}/download-url
+     * to obtain a short-lived signed URL for display — never use the download-url
+     * endpoint directly as an img src (it returns JSON, not image bytes).
+     *
+     * POST /api/students/{studentId}/profile-photo
+     */
+    @Transactional
+    public StudentProfileSummaryDTO uploadProfilePhoto(
+            Integer studentId, MultipartFile file, Authentication auth) {
+
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+
+        // Leadership roles can update student profile photos
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException(
+                    "You do not have permission to upload a student profile photo.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        Integer uploadedBy = resolveUserId(auth);
+
+        // FileService enforces: jpeg/png/webp only, max 2 MB
+        FileObjectDTO fo = fileService.uploadForModule(
+                file,
+                FileCategory.PROFILE_PHOTO,
+                "STUDENT",
+                studentId.toString(),
+                FileVisibility.STUDENT_VISIBLE,
+                uploadedBy);
+
+        // Store only the FileObject id — never set photoUrl to a /download-url path
+        student.setProfilePhotoFileId(fo.getId());
+        studentRepo.save(student);
+
+        return buildProfile(student);
+    }
+
     // ── helper: resolve userId from authentication ────────────────────────────
 
     private Integer resolveUserId(Authentication auth) {
