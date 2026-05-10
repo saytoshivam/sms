@@ -3961,6 +3961,101 @@ textarea:disabled {
   font-size: 14px;
   font-weight: 800;
   letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.date-keeper__month-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 2px 6px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.date-keeper__month-btn:hover {
+  background: color-mix(in srgb, #fff7ed 80%, #ffffff);
+  border-color: color-mix(in srgb, #ea580c 30%, transparent);
+  color: #ea580c;
+}
+
+.date-keeper__month-btn--active {
+  background: color-mix(in srgb, #fed7aa 55%, #ffffff);
+  border-color: color-mix(in srgb, #ea580c 40%, transparent);
+  color: #ea580c;
+}
+
+/* ── month grid ───────────────────────────────────────── */
+.date-keeper__month-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.date-keeper__month-cell {
+  padding: 10px 4px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--color-text);
+  text-align: center;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.date-keeper__month-cell:hover {
+  background: color-mix(in srgb, #fed7aa 45%, #ffffff);
+  border-color: color-mix(in srgb, #fb923c 35%, transparent);
+}
+
+.date-keeper__month-cell--selected {
+  background: linear-gradient(135deg, #fb923c, #ea580c);
+  color: #fff;
+  border-color: color-mix(in srgb, #c2410c 40%, transparent);
+  box-shadow: 0 4px 12px color-mix(in srgb, #ea580c 35%, transparent);
+}
+
+/* ── year grid ────────────────────────────────────────── */
+.date-keeper__year-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.date-keeper__year-cell {
+  padding: 10px 4px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--color-text);
+  text-align: center;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.date-keeper__year-cell:hover {
+  background: color-mix(in srgb, #fed7aa 45%, #ffffff);
+  border-color: color-mix(in srgb, #fb923c 35%, transparent);
+}
+
+.date-keeper__year-cell--selected {
+  background: linear-gradient(135deg, #fb923c, #ea580c);
+  color: #fff;
+  border-color: color-mix(in srgb, #c2410c 40%, transparent);
+  box-shadow: 0 4px 12px color-mix(in srgb, #ea580c 35%, transparent);
 }
 
 .date-keeper__nav {

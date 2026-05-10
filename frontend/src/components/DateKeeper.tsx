@@ -15,11 +15,18 @@ export type DateKeeperProps = {
   disabled?: boolean;
   /** When `value` is not a valid YYYY-MM-DD, shown on the trigger instead of a formatted date. */
   emptyLabel?: string;
-  /** Show a “Clear” control in the popover when a date is selected (sets `value` to `""`). */
+  /** Show a "Clear" control in the popover when a date is selected (sets `value` to `""`). */
   clearable?: boolean;
 };
 
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_FULL = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+];
+
+type PickerMode = 'day' | 'month' | 'year';
 
 function monthMatrix(view: Date): (Date | null)[][] {
   const y = view.getFullYear();
@@ -35,6 +42,11 @@ function monthMatrix(view: Date): (Date | null)[][] {
     rows.push(cells.slice(i, i + 7));
   }
   return rows;
+}
+
+/** Returns the start of the 12-year block containing `year`. */
+function yearRangeStart(year: number) {
+  return Math.floor(year / 12) * 12;
 }
 
 /**
@@ -55,12 +67,14 @@ export function DateKeeper({
   const id = idProp ?? gen;
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState<PickerMode>('day');
   const parsed = useMemo(() => parseYmd(value), [value]);
   const [view, setView] = useState(() => {
     const sel = parseYmd(value);
     const base = sel ?? new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
+  const [yrStart, setYrStart] = useState(() => yearRangeStart((parseYmd(value) ?? new Date()).getFullYear()));
 
   useEffect(() => {
     const sel = parseYmd(value);
@@ -70,6 +84,11 @@ export function DateKeeper({
   useEffect(() => {
     if (disabled && open) setOpen(false);
   }, [disabled, open]);
+
+  // Reset to day mode whenever popover closes
+  useEffect(() => {
+    if (!open) setPickerMode('day');
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -114,6 +133,105 @@ export function DateKeeper({
 
   const rootClass = ['date-keeper', disabled ? 'date-keeper--disabled' : '', className].filter(Boolean).join(' ');
 
+  // ── header navigation helpers ──────────────────────────────────────────────
+  function handlePrev() {
+    if (pickerMode === 'day') setView(new Date(view.getFullYear(), view.getMonth() - 1, 1));
+    else if (pickerMode === 'month') setView(new Date(view.getFullYear() - 1, view.getMonth(), 1));
+    else setYrStart((s) => s - 12);
+  }
+  function handleNext() {
+    if (pickerMode === 'day') setView(new Date(view.getFullYear(), view.getMonth() + 1, 1));
+    else if (pickerMode === 'month') setView(new Date(view.getFullYear() + 1, view.getMonth(), 1));
+    else setYrStart((s) => s + 12);
+  }
+
+  // ── header label ──────────────────────────────────────────────────────────
+  function renderHeadLabel() {
+    if (pickerMode === 'year') {
+      return (
+        <div className="date-keeper__month">
+          <span className="date-keeper__month-btn date-keeper__month-btn--active">
+            {yrStart}–{yrStart + 11}
+          </span>
+        </div>
+      );
+    }
+    return (
+      <div className="date-keeper__month">
+        <button
+          type="button"
+          className={`date-keeper__month-btn${pickerMode === 'month' ? ' date-keeper__month-btn--active' : ''}`}
+          onClick={() => setPickerMode((m) => m === 'month' ? 'day' : 'month')}
+          aria-label="Select month"
+        >
+          {MONTH_FULL[view.getMonth()]}
+        </button>
+        <button
+          type="button"
+          className={`date-keeper__month-btn${pickerMode === 'year' ? ' date-keeper__month-btn--active' : ''}`}
+          onClick={() => {
+            setYrStart(yearRangeStart(view.getFullYear()));
+            setPickerMode((m) => m === 'year' ? 'day' : 'year');
+          }}
+          aria-label="Select year"
+        >
+          {view.getFullYear()}
+        </button>
+      </div>
+    );
+  }
+
+  // ── month grid ─────────────────────────────────────────────────────────────
+  function renderMonthGrid() {
+    return (
+      <div className="date-keeper__month-grid">
+        {MONTHS.map((name, idx) => {
+          const isSelected = parsed
+            ? parsed.getFullYear() === view.getFullYear() && parsed.getMonth() === idx
+            : false;
+          return (
+            <button
+              key={idx}
+              type="button"
+              className={`date-keeper__month-cell${isSelected ? ' date-keeper__month-cell--selected' : ''}`}
+              onClick={() => {
+                setView(new Date(view.getFullYear(), idx, 1));
+                setPickerMode('day');
+              }}
+            >
+              {name}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── year grid ──────────────────────────────────────────────────────────────
+  function renderYearGrid() {
+    const years = Array.from({ length: 12 }, (_, i) => yrStart + i);
+    return (
+      <div className="date-keeper__year-grid">
+        {years.map((yr) => {
+          const isSelected = parsed ? parsed.getFullYear() === yr : view.getFullYear() === yr;
+          return (
+            <button
+              key={yr}
+              type="button"
+              className={`date-keeper__year-cell${isSelected ? ' date-keeper__year-cell--selected' : ''}`}
+              onClick={() => {
+                setView(new Date(yr, view.getMonth(), 1));
+                setPickerMode('month');
+              }}
+            >
+              {yr}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className={rootClass} ref={rootRef}>
       <button
@@ -147,56 +265,63 @@ export function DateKeeper({
             <button
               type="button"
               className="date-keeper__nav"
-              aria-label="Previous month"
-              onClick={() => setView(new Date(view.getFullYear(), view.getMonth() - 1, 1))}
+              aria-label="Previous"
+              onClick={handlePrev}
             >
               ‹
             </button>
-            <div className="date-keeper__month">
-              {view.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-            </div>
+            {renderHeadLabel()}
             <button
               type="button"
               className="date-keeper__nav"
-              aria-label="Next month"
-              onClick={() => setView(new Date(view.getFullYear(), view.getMonth() + 1, 1))}
+              aria-label="Next"
+              onClick={handleNext}
             >
               ›
             </button>
           </div>
-          <div className="date-keeper__weekdays">
-            {WEEKDAYS.map((w) => (
-              <div key={w} className="date-keeper__wd">
-                {w}
+
+          {pickerMode === 'day' && (
+            <>
+              <div className="date-keeper__weekdays">
+                {WEEKDAYS.map((w) => (
+                  <div key={w} className="date-keeper__wd">
+                    {w}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="date-keeper__grid">
-            {matrix.map((row, ri) => (
-              <div key={ri} className="date-keeper__row">
-                {row.map((cell, ci) => {
-                  if (!cell) {
-                    return <div key={ci} className="date-keeper__cell date-keeper__cell--empty" />;
-                  }
-                  const dayDisabled = isDisabled(cell);
-                  const isSel = parsed ? sameDay(cell, parsed) : false;
-                  return (
-                    <button
-                      key={ci}
-                      type="button"
-                      disabled={dayDisabled}
-                      className={
-                        isSel ? 'date-keeper__day date-keeper__day--selected' : 'date-keeper__day'
+              <div className="date-keeper__grid">
+                {matrix.map((row, ri) => (
+                  <div key={ri} className="date-keeper__row">
+                    {row.map((cell, ci) => {
+                      if (!cell) {
+                        return <div key={ci} className="date-keeper__cell date-keeper__cell--empty" />;
                       }
-                      onClick={() => !dayDisabled && pick(cell)}
-                    >
-                      {cell.getDate()}
-                    </button>
-                  );
-                })}
+                      const dayDisabled = isDisabled(cell);
+                      const isSel = parsed ? sameDay(cell, parsed) : false;
+                      return (
+                        <button
+                          key={ci}
+                          type="button"
+                          disabled={dayDisabled}
+                          className={
+                            isSel ? 'date-keeper__day date-keeper__day--selected' : 'date-keeper__day'
+                          }
+                          onClick={() => !dayDisabled && pick(cell)}
+                        >
+                          {cell.getDate()}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
+
+          {pickerMode === 'month' && renderMonthGrid()}
+          {pickerMode === 'year' && renderYearGrid()}
+
           <div className="date-keeper__footer">
             {clearable && parsed ? (
               <button
