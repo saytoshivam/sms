@@ -13,6 +13,8 @@ public class StudentDocumentSummaryDTO {
     private Integer id;
     private String documentType;
     private String fileUrl;
+    /** ID of the FileObject row if a file was uploaded via the file module. Null for old records. */
+    private Long fileId;
     private StudentDocumentCollectionStatus collectionStatus;
     private StudentDocumentUploadStatus uploadStatus;
     private StudentDocumentVerificationStatus verificationStatus;

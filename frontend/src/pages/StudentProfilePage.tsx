@@ -82,6 +82,8 @@ export type StudentDocumentSummary = {
   id: number;
   documentType?: string | null;
   fileUrl?: string | null;
+  /** FileObject id from the managed file module. Present after upload via POST …/upload. */
+  fileId?: number | null;
   /** Computed single-status from backend: VERIFIED > REJECTED > UPLOADED > COLLECTED_PHYSICAL > NOT_REQUIRED > PENDING_COLLECTION */
   displayStatus?: string | null;
   status?: DocLifecycleStatus | null;           // legacy — may be null for new documents
@@ -105,6 +107,8 @@ export type StudentProfilePayload = {
   gender?: string | null;
   bloodGroup?: string | null;
   photoUrl?: string | null;
+  /** FileObject id for managed profile photo. Null for legacy records. */
+  profilePhotoFileId?: number | null;
   status?: StudentLifecycleStatus | null;
   phone?: string | null;
   address?: string | null;
@@ -594,6 +598,10 @@ function DocumentsTab({
   const [editRemarkDoc, setEditRemarkDoc]     = useState<number | null>(null);
   const [editRemarkValue, setEditRemarkValue] = useState('');
 
+  // Per-row upload
+  const [uploadingDoc, setUploadingDoc] = useState<number | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
   async function callAction(docId: number, endpoint: string, body?: object) {
     setBusy(docId);
     setRowError(null);
@@ -655,8 +663,43 @@ function DocumentsTab({
     }
   }
 
+  async function handleFileSelected(docId: number, file: File) {
+    setUploadingDoc(docId);
+    setBusy(docId);
+    setRowError(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      await api.post(`/api/students/${studentId}/documents/${docId}/upload`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      onRefresh();
+    } catch (e: any) {
+      const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Upload failed.';
+      setRowError({ docId, msg });
+    } finally {
+      setUploadingDoc(null);
+      setBusy(null);
+      // reset file input so same file can be re-selected if needed
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+    }
+  }
+
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+
+      {/* Hidden file input — triggered by per-row upload button */}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          const docId = uploadingDoc;
+          if (file && docId != null) handleFileSelected(docId, file);
+        }}
+      />
 
       {/* Header row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -664,16 +707,6 @@ function DocumentsTab({
           Documents
           <span style={{ fontWeight: 500, fontSize: 13, color: 'rgba(15,23,42,0.45)', marginLeft: 6 }}>({docs.length})</span>
         </div>
-        <SmallBtn
-          label="Upload Document"
-          disabled
-          title="Upload service not enabled yet. Contact your system administrator to enable document uploads."
-        />
-      </div>
-
-      {/* Upload info banner */}
-      <div style={{ padding: '8px 12px', background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: 8, fontSize: 12, color: '#1d4ed8', lineHeight: 1.55 }}>
-        <strong>Upload service not enabled yet.</strong> You can still track physical collection and run verification actions below.
       </div>
 
       {/* True empty state — only when backend didn't create default rows at all */}
@@ -726,15 +759,25 @@ function DocumentsTab({
                   return (
                     <React.Fragment key={doc.id}>
                       <tr style={rowStyle}>
-                        {/* Document name */}
+                         {/* Document name */}
                         <td style={{ ...TD_STYLE, fontWeight: 600, color: 'rgba(15,23,42,0.85)', minWidth: 140 }}>
                           <div>{doc.documentType?.replace(/_/g, ' ') || '—'}</div>
-                          {doc.fileUrl && (
+                          {doc.fileId ? (
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                window.open(`/api/files/${doc.fileId}/download-url`, '_blank');
+                              }}
+                              style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600, display: 'block', marginTop: 2 }}>
+                              View file ↗
+                            </a>
+                          ) : doc.fileUrl ? (
                             <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
                               style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600, display: 'block', marginTop: 2 }}>
                               View file ↗
                             </a>
-                          )}
+                          ) : null}
                         </td>
 
                         {/* Collection status */}
@@ -823,6 +866,17 @@ function DocumentsTab({
                                   <SmallBtn label="Not Required" disabled={isBusy}
                                     onClick={() => callAction(doc.id, 'mark-not-required')} />
                                 )}
+                                {/* Upload: available when doc is not NOT_REQUIRED */}
+                                {coll !== 'NOT_REQUIRED' && (
+                                  <SmallBtn
+                                    label={isBusy && uploadingDoc === doc.id ? '…' : (up === 'UPLOADED' ? 'Replace File' : 'Upload File')}
+                                    disabled={isBusy}
+                                    onClick={() => {
+                                      setUploadingDoc(doc.id);
+                                      setTimeout(() => uploadInputRef.current?.click(), 0);
+                                    }}
+                                  />
+                                )}
                                 {canVerifyReject && (
                                   <>
                                     <SmallBtn label={isBusy ? '…' : 'Verify'} primary disabled={isBusy}
@@ -831,7 +885,7 @@ function DocumentsTab({
                                       onClick={() => { setRejectDoc(doc.id); setRejectReason(''); setEditRemarkDoc(null); }} />
                                   </>
                                 )}
-                                {!canMarkCollected && !canMarkPending && !canMarkNotRequired && !canVerifyReject && (
+                                {!canMarkCollected && !canMarkPending && !canMarkNotRequired && !canVerifyReject && coll === 'NOT_REQUIRED' && (
                                   <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.32)' }}>—</span>
                                 )}
                               </div>
@@ -1065,30 +1119,48 @@ function AccessTab({
 
 // ─── Profile Avatar ───────────────────────────────────────────────────────────
 
-function ProfileAvatar({ p, size = 80 }: { p: StudentProfilePayload; size?: number }) {
+function ProfileAvatar({
+  p, size = 80, canEdit = false, onUpload,
+}: {
+  p: StudentProfilePayload; size?: number; canEdit?: boolean; onUpload?: () => void;
+}) {
   const [broken, setBroken] = useState(false);
   const url = p.photoUrl?.trim();
-  if (url && !broken) {
-    return (
-      <img
-        src={url} alt="" onError={() => setBroken(true)}
-        style={{ width: size, height: size, borderRadius: 16, objectFit: 'cover', flexShrink: 0, border: '2px solid rgba(15,23,42,0.08)' }}
-      />
-    );
-  }
+  const avatarStyle: React.CSSProperties = {
+    width: size, height: size, borderRadius: 16, objectFit: 'cover', flexShrink: 0,
+    border: '2px solid rgba(15,23,42,0.08)',
+  };
+  const fallbackStyle: React.CSSProperties = {
+    width: size, height: size, borderRadius: 16, flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'linear-gradient(135deg,#e7e5e4,#d6d3d1)',
+    color: 'rgba(28,25,23,0.75)', fontWeight: 800,
+    fontSize: Math.max(16, Math.round(size * 0.36)),
+    border: '2px solid rgba(15,23,42,0.07)',
+  };
+
   return (
-    <div
-      aria-hidden
-      style={{
-        width: size, height: size, borderRadius: 16, flexShrink: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'linear-gradient(135deg,#e7e5e4,#d6d3d1)',
-        color: 'rgba(28,25,23,0.75)', fontWeight: 800,
-        fontSize: Math.max(16, Math.round(size * 0.36)),
-        border: '2px solid rgba(15,23,42,0.07)',
-      }}
-    >
-      {initials(p)}
+    <div style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}>
+      {url && !broken
+        ? <img src={url} alt="" onError={() => setBroken(true)} style={avatarStyle} />
+        : <div aria-hidden style={fallbackStyle}>{initials(p)}</div>
+      }
+      {canEdit && onUpload && (
+        <button
+          type="button"
+          onClick={onUpload}
+          title="Change profile photo"
+          style={{
+            position: 'absolute', bottom: 0, right: 0,
+            width: 24, height: 24, borderRadius: '50%',
+            background: 'rgba(15,23,42,0.75)', border: '1.5px solid #fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', padding: 0,
+          }}
+        >
+          <span style={{ fontSize: 12 }}>📷</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -1112,6 +1184,9 @@ export function StudentProfilePage() {
   const [deactivating, setDeactivating]   = useState(false);
   const [deactivateError, setDeactivateError] = useState<string | null>(null);
   const moreMenuRef                       = useRef<HTMLDivElement>(null);
+  const photoInputRef                     = useRef<HTMLInputElement>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError]       = useState<string | null>(null);
 
   // Close More menu on outside click
   useEffect(() => {
@@ -1196,9 +1271,49 @@ export function StudentProfilePage() {
 
       {p && (
         <>
+          {/* Hidden file input for profile photo upload */}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              setPhotoUploading(true);
+              setPhotoError(null);
+              try {
+                const form = new FormData();
+                form.append('file', file);
+                await api.post(`/api/students/${id}/profile-photo`, form, {
+                  headers: { 'Content-Type': 'multipart/form-data' },
+                });
+                profile.refetch();
+              } catch (err: any) {
+                setPhotoError(err?.response?.data?.error ?? err?.message ?? 'Upload failed.');
+              } finally {
+                setPhotoUploading(false);
+                if (photoInputRef.current) photoInputRef.current.value = '';
+              }
+            }}
+          />
+
           {/* ── Profile Header ── */}
           <div className="card" style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-            <ProfileAvatar p={p} size={80} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <ProfileAvatar
+                p={p}
+                size={80}
+                canEdit={perms.canEdit}
+                onUpload={() => photoInputRef.current?.click()}
+              />
+              {photoUploading && (
+                <span style={{ fontSize: 10, color: 'rgba(15,23,42,0.45)' }}>Uploading…</span>
+              )}
+              {photoError && (
+                <span style={{ fontSize: 10, color: '#b91c1c', maxWidth: 84, textAlign: 'center' }}>{photoError}</span>
+              )}
+            </div>
 
             <div style={{ flex: 1, minWidth: 220 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 6 }}>

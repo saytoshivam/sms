@@ -64,6 +64,13 @@ public class Student {
     @Column(name = "photo_url", length = 512)
     private String photoUrl;
 
+    /**
+     * FK to file_objects.id — set after profile photo is uploaded via FileService.
+     * photoUrl kept for backward compat with records that predate the file module.
+     */
+    @Column(name = "profile_photo_file_id", nullable = true)
+    private Long profilePhotoFileId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 24)
     private StudentLifecycleStatus status = StudentLifecycleStatus.ACTIVE;

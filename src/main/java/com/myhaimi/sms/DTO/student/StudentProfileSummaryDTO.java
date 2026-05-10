@@ -19,6 +19,8 @@ public class StudentProfileSummaryDTO {
     private String gender;
     private String bloodGroup;
     private String photoUrl;
+    /** FileObject id for managed profile photo uploaded via file module. Null for legacy photo_url records. */
+    private Long profilePhotoFileId;
     private StudentLifecycleStatus status;
     private Integer classGroupId;
     private String classGroupDisplayName;

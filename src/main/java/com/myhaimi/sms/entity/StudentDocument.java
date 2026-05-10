@@ -31,6 +31,13 @@ public class StudentDocument {
     @Column(name = "file_url", nullable = true, length = 1024)
     private String fileUrl;
 
+    /**
+     * FK to file_objects.id — set after file is uploaded via FileService.
+     * Null until a file is actually uploaded; fileUrl kept for backward compat.
+     */
+    @Column(name = "file_id", nullable = true)
+    private Long fileId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "collection_status", nullable = false, length = 32)
     private StudentDocumentCollectionStatus collectionStatus;

@@ -11,6 +11,10 @@ import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import com.myhaimi.sms.entity.enums.GuardianLoginStatus;
+import com.myhaimi.sms.entity.enums.FileCategory;
+import com.myhaimi.sms.entity.enums.FileVisibility;
+import com.myhaimi.sms.modules.files.FileObjectDTO;
+import com.myhaimi.sms.modules.files.FileService;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -20,8 +24,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -52,6 +58,7 @@ public class StudentService {
     private final StudentDocumentRepo documentRepo;
     private final UserRepo userRepo;
     private final StudentAccessGuard accessGuard;
+    private final FileService fileService;
 
     /**
      * Default document types required during student onboarding.
@@ -133,6 +140,7 @@ public class StudentService {
                 .build();
     }
 
+    @Transactional
     public StudentProfileSummaryDTO getProfile(Integer studentId) {
         Integer schoolId = requireSchoolId();
         StudentCallerContext ctx = accessGuard.resolve(schoolId);
@@ -708,6 +716,10 @@ public class StudentService {
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
         doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
+        // Resetting to pending clears verification state; preserve fileUrl & uploadStatus if file exists
+        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        doc.setVerifiedAt(null);
+        doc.setVerifiedByStaffId(null);
         documentRepo.save(doc);
 
         return toDocumentSummaryDTO(doc);
@@ -733,6 +745,10 @@ public class StudentService {
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
         doc.setCollectionStatus(StudentDocumentCollectionStatus.NOT_REQUIRED);
+        doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
+        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        doc.setVerifiedAt(null);
+        doc.setVerifiedByStaffId(null);
         documentRepo.save(doc);
 
         return toDocumentSummaryDTO(doc);
@@ -757,6 +773,12 @@ public class StudentService {
         StudentDocument doc = documentRepo.findById(docId)
                 .filter(d -> d.getStudent().getId().equals(student.getId()))
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
+
+        boolean physicallyCollected = doc.getCollectionStatus() == StudentDocumentCollectionStatus.COLLECTED_PHYSICAL;
+        boolean uploaded            = doc.getUploadStatus()     == StudentDocumentUploadStatus.UPLOADED;
+        if (!physicallyCollected && !uploaded) {
+            throw new IllegalArgumentException("Document must be collected or uploaded before verification.");
+        }
 
         doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
         doc.setVerifiedAt(Instant.now());
@@ -796,6 +818,10 @@ public class StudentService {
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
         doc.setVerificationStatus(StudentDocumentVerificationStatus.REJECTED);
+        doc.setVerifiedAt(Instant.now());
+        if (ctx.linkedStaffId() != null) {
+            doc.setVerifiedByStaffId(ctx.linkedStaffId());
+        }
         doc.setRemarks(remarks.trim());
         documentRepo.save(doc);
 
@@ -846,14 +872,19 @@ public class StudentService {
      * Derives a single display status string from the three lifecycle fields.
      * Precedence: VERIFIED > REJECTED > UPLOADED > COLLECTED_PHYSICAL > NOT_REQUIRED > PENDING_COLLECTION.
      */
-    private static String computeDisplayStatus(StudentDocument doc) {
-        StudentDocumentVerificationStatus vs = doc.getVerificationStatus();
-        if (vs == StudentDocumentVerificationStatus.VERIFIED)  return "VERIFIED";
-        if (vs == StudentDocumentVerificationStatus.REJECTED)  return "REJECTED";
-        StudentDocumentUploadStatus us = doc.getUploadStatus();
-        if (us == StudentDocumentUploadStatus.UPLOADED)        return "UPLOADED";
+    /**
+     * Derives a single display status string from the three lifecycle fields.
+     * Precedence: NOT_REQUIRED > REJECTED > VERIFIED > UPLOADED > COLLECTED_PHYSICAL > PENDING_COLLECTION.
+     * NOT_REQUIRED wins first so a waived document never shows as verified/rejected.
+     */
+    static String computeDisplayStatus(StudentDocument doc) {
         StudentDocumentCollectionStatus cs = doc.getCollectionStatus();
-        if (cs == StudentDocumentCollectionStatus.NOT_REQUIRED)       return "NOT_REQUIRED";
+        if (cs == StudentDocumentCollectionStatus.NOT_REQUIRED) return "NOT_REQUIRED";
+        StudentDocumentVerificationStatus vs = doc.getVerificationStatus();
+        if (vs == StudentDocumentVerificationStatus.REJECTED)   return "REJECTED";
+        if (vs == StudentDocumentVerificationStatus.VERIFIED)   return "VERIFIED";
+        StudentDocumentUploadStatus us = doc.getUploadStatus();
+        if (us == StudentDocumentUploadStatus.UPLOADED)         return "UPLOADED";
         if (cs == StudentDocumentCollectionStatus.COLLECTED_PHYSICAL) return "COLLECTED_PHYSICAL";
         return "PENDING_COLLECTION";
     }
@@ -866,6 +897,7 @@ public class StudentService {
         dto.setId(doc.getId());
         dto.setDocumentType(doc.getDocumentType());
         dto.setFileUrl(doc.getFileUrl());
+        dto.setFileId(doc.getFileId());
         dto.setCollectionStatus(doc.getCollectionStatus());
         dto.setUploadStatus(doc.getUploadStatus());
         dto.setVerificationStatus(doc.getVerificationStatus());
@@ -879,6 +911,9 @@ public class StudentService {
     }
 
     private StudentProfileSummaryDTO buildProfile(Student s) {
+        // Ensure default document checklist rows exist before building profile
+        ensureDefaultDocumentsExist(s);
+
         StudentProfileSummaryDTO out = new StudentProfileSummaryDTO();
         out.setId(s.getId());
         out.setAdmissionNo(s.getAdmissionNo());
@@ -889,6 +924,7 @@ public class StudentService {
         out.setGender(s.getGender());
         out.setBloodGroup(s.getBloodGroup());
         out.setPhotoUrl(s.getPhotoUrl());
+        out.setProfilePhotoFileId(s.getProfilePhotoFileId());
         out.setStatus(s.getStatus());
         out.setPhone(s.getPhone());
         out.setAddress(s.getAddress());
@@ -1086,5 +1122,99 @@ public class StudentService {
         if (primaries != 1) {
             throw new IllegalStateException("Exactly one primary guardian is required.");
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // File integration — student document upload
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Upload a file and attach it to the given student document checklist row.
+     * Sets {@code uploadStatus = UPLOADED} and links the resulting {@link com.myhaimi.sms.entity.FileObject}.
+     * POST /api/students/{studentId}/documents/{docId}/upload
+     */
+    @Transactional
+    public StudentDocumentSummaryDTO uploadDocumentFile(
+            Integer studentId, Integer docId,
+            MultipartFile file, Authentication auth) {
+
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException("You do not have permission to upload student documents.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        StudentDocument doc = documentRepo.findById(docId)
+                .filter(d -> d.getStudent().getId().equals(student.getId()))
+                .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
+
+        Integer uploadedBy = resolveUserId(auth);
+
+        FileObjectDTO fo = fileService.upload(
+                file,
+                FileCategory.STUDENT_DOCUMENT,
+                "STUDENT",
+                studentId.toString(),
+                FileVisibility.SCHOOL_INTERNAL,
+                uploadedBy);
+
+        doc.setFileId(fo.getId());
+        doc.setFileUrl(fo.getDownloadUrl()); // backward-compat convenience field
+        doc.setUploadStatus(StudentDocumentUploadStatus.UPLOADED);
+        documentRepo.save(doc);
+
+        return toDocumentSummaryDTO(doc);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // File integration — student profile photo upload
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Upload a profile photo for a student.
+     * Updates {@code students.profile_photo_file_id} and {@code students.photo_url}.
+     * POST /api/students/{studentId}/profile-photo
+     */
+    @Transactional
+    public StudentProfileSummaryDTO uploadProfilePhoto(
+            Integer studentId, MultipartFile file, Authentication auth) {
+
+        Integer schoolId = requireSchoolId();
+        StudentCallerContext ctx = accessGuard.resolve(schoolId);
+        if (!ctx.canEdit()) {
+            throw new AccessDeniedException("You do not have permission to upload a student profile photo.");
+        }
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        Integer uploadedBy = resolveUserId(auth);
+
+        FileObjectDTO fo = fileService.upload(
+                file,
+                FileCategory.PROFILE_PHOTO,
+                "STUDENT",
+                studentId.toString(),
+                FileVisibility.SCHOOL_INTERNAL,
+                uploadedBy);
+
+        student.setProfilePhotoFileId(fo.getId());
+        // Store the download URL in photoUrl for backward compat (serves as a fast display hint)
+        student.setPhotoUrl("/api/files/" + fo.getId() + "/download-url");
+        studentRepo.save(student);
+
+        return buildProfile(student);
+    }
+
+    // ── helper: resolve userId from authentication ────────────────────────────
+
+    private Integer resolveUserId(Authentication auth) {
+        if (auth == null) return null;
+        return userRepo.findFirstByEmailIgnoreCase(auth.getName())
+                .map(u -> u.getId())
+                .orElse(null);
     }
 }
