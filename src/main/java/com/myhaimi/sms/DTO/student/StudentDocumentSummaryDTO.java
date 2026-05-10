@@ -16,9 +16,18 @@ public class StudentDocumentSummaryDTO {
     private StudentDocumentCollectionStatus collectionStatus;
     private StudentDocumentUploadStatus uploadStatus;
     private StudentDocumentVerificationStatus verificationStatus;
+
+    /**
+     * Single computed status string derived from the three lifecycle fields.
+     * Precedence: VERIFIED > REJECTED > UPLOADED > COLLECTED_PHYSICAL > NOT_REQUIRED > PENDING_COLLECTION.
+     * Frontend should use this for display; individual fields are available for detailed logic.
+     */
+    private String displayStatus;
+
     /** @deprecated Use collectionStatus, uploadStatus, verificationStatus instead. */
     @Deprecated
     private StudentDocumentStatus status;
+
     private Integer verifiedByStaffId;
     private Instant verifiedAt;
     private String remarks;

@@ -35,5 +35,8 @@ public class StudentViewerPermissionsDTO {
 
     /** Can create / link parent login for a guardian. */
     private boolean canManageParentLogin;
+
+    /** Can create / manage this student's own portal login. */
+    private boolean canManageStudentLogin;
 }
 

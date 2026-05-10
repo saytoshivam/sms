@@ -79,6 +79,7 @@ public class StudentAccessGuard {
         boolean canViewDocuments     = false;
         boolean canViewFees          = false;
         boolean canManageParentLogin = false;
+        boolean canManageStudentLogin = false;
         // null = unrestricted (all classes in school); non-null = explicit allowlist
         Set<Integer> allowedClassGroupIds = null;
 
@@ -86,12 +87,13 @@ public class StudentAccessGuard {
             canViewAnyStudent = true;
             canEdit = true; canTransfer = true; canCreateStudents = true;
             canViewGuardians = true; canViewMedical = true;
-            canViewDocuments = true; canViewFees = true; canManageParentLogin = true;
+            canViewDocuments = true; canViewFees = true;
+            canManageParentLogin = true; canManageStudentLogin = true;
 
         } else if (roles.contains(RoleNames.VICE_PRINCIPAL)) {
             canViewAnyStudent = true;
             canViewGuardians = true; canViewMedical = true;
-            canViewFees = true; canManageParentLogin = true;
+            canViewFees = true; canManageParentLogin = true; canManageStudentLogin = true;
 
         } else if (roles.contains(RoleNames.ACCOUNTANT)) {
             canViewAnyStudent = true;
@@ -146,7 +148,7 @@ public class StudentAccessGuard {
                 allowedClassGroupIds,
                 canViewAnyStudent, canEdit, canTransfer, canCreateStudents,
                 canViewGuardians, canViewMedical, canViewDocuments, canViewFees,
-                canManageParentLogin);
+                canManageParentLogin, canManageStudentLogin);
     }
 
     /** Builds the viewer permissions DTO for embedding in the profile response. */
@@ -160,6 +162,7 @@ public class StudentAccessGuard {
                 .canViewDocuments(ctx.canViewDocuments())
                 .canViewFees(ctx.canViewFees())
                 .canManageParentLogin(ctx.canManageParentLogin())
+                .canManageStudentLogin(ctx.canManageStudentLogin())
                 .build();
     }
 }

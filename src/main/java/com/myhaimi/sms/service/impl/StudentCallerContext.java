@@ -27,7 +27,8 @@ public record StudentCallerContext(
         boolean canViewMedical,
         boolean canViewDocuments,
         boolean canViewFees,
-        boolean canManageParentLogin
+        boolean canManageParentLogin,
+        boolean canManageStudentLogin
 ) {
     public boolean hasRole(String role) {
         return roleNames != null && roleNames.contains(role);

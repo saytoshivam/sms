@@ -599,8 +599,19 @@ public class StudentService {
             if (st == null) continue;
             int sid = st.getId();
             int[] counts = byStudent.computeIfAbsent(sid, k -> new int[] {0, 0});
-            StudentDocumentStatus stEnum = d.getStatus();
-            if (stEnum == StudentDocumentStatus.VERIFIED) {
+            // counts[0] = verified, counts[1] = pending/other
+            // Use new verificationStatus field; fall back to legacy status for backward compat
+            boolean isVerified = false;
+            if (d.getVerificationStatus() != null) {
+                isVerified = d.getVerificationStatus() == StudentDocumentVerificationStatus.VERIFIED;
+            } else if (d.getStatus() != null) {
+                isVerified = d.getStatus() == StudentDocumentStatus.VERIFIED;
+            }
+            // Skip NOT_REQUIRED documents from counts entirely
+            if (d.getCollectionStatus() == StudentDocumentCollectionStatus.NOT_REQUIRED) {
+                continue;
+            }
+            if (isVerified) {
                 counts[0]++;
             } else {
                 counts[1]++;
@@ -729,7 +740,7 @@ public class StudentService {
 
     /**
      * Verify a document.
-     * Sets verificationStatus=VERIFIED and verifiedAt timestamp.
+     * Sets verificationStatus=VERIFIED, verifiedAt timestamp, and verifiedByStaffId when available.
      * Optionally captures remarks.
      */
     @Transactional
@@ -749,6 +760,10 @@ public class StudentService {
 
         doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
         doc.setVerifiedAt(Instant.now());
+        // Capture who verified the document (staff member linked to the current user)
+        if (ctx.linkedStaffId() != null) {
+            doc.setVerifiedByStaffId(ctx.linkedStaffId());
+        }
         if (remarks != null && !remarks.isBlank()) {
             doc.setRemarks(remarks.trim());
         }
@@ -828,6 +843,22 @@ public class StudentService {
     }
 
     /**
+     * Derives a single display status string from the three lifecycle fields.
+     * Precedence: VERIFIED > REJECTED > UPLOADED > COLLECTED_PHYSICAL > NOT_REQUIRED > PENDING_COLLECTION.
+     */
+    private static String computeDisplayStatus(StudentDocument doc) {
+        StudentDocumentVerificationStatus vs = doc.getVerificationStatus();
+        if (vs == StudentDocumentVerificationStatus.VERIFIED)  return "VERIFIED";
+        if (vs == StudentDocumentVerificationStatus.REJECTED)  return "REJECTED";
+        StudentDocumentUploadStatus us = doc.getUploadStatus();
+        if (us == StudentDocumentUploadStatus.UPLOADED)        return "UPLOADED";
+        StudentDocumentCollectionStatus cs = doc.getCollectionStatus();
+        if (cs == StudentDocumentCollectionStatus.NOT_REQUIRED)       return "NOT_REQUIRED";
+        if (cs == StudentDocumentCollectionStatus.COLLECTED_PHYSICAL) return "COLLECTED_PHYSICAL";
+        return "PENDING_COLLECTION";
+    }
+
+    /**
      * Convert StudentDocument entity to DTO.
      */
     private StudentDocumentSummaryDTO toDocumentSummaryDTO(StudentDocument doc) {
@@ -838,6 +869,7 @@ public class StudentService {
         dto.setCollectionStatus(doc.getCollectionStatus());
         dto.setUploadStatus(doc.getUploadStatus());
         dto.setVerificationStatus(doc.getVerificationStatus());
+        dto.setDisplayStatus(computeDisplayStatus(doc));
         dto.setStatus(doc.getStatus());
         dto.setVerifiedByStaffId(doc.getVerifiedByStaffId());
         dto.setVerifiedAt(doc.getVerifiedAt());
@@ -914,21 +946,21 @@ public class StudentService {
 
         List<StudentDocumentSummaryDTO> docs = new ArrayList<>();
         for (StudentDocument d : documentRepo.findByStudent_IdOrderByCreatedAtDesc(s.getId())) {
-            StudentDocumentSummaryDTO dd = new StudentDocumentSummaryDTO();
-            dd.setId(d.getId());
-            dd.setDocumentType(d.getDocumentType());
-            dd.setFileUrl(d.getFileUrl());
-            dd.setCollectionStatus(d.getCollectionStatus());
-            dd.setUploadStatus(d.getUploadStatus());
-            dd.setVerificationStatus(d.getVerificationStatus());
-            dd.setStatus(d.getStatus());
-            dd.setVerifiedByStaffId(d.getVerifiedByStaffId());
-            dd.setVerifiedAt(d.getVerifiedAt());
-            dd.setRemarks(d.getRemarks());
-            dd.setCreatedAt(d.getCreatedAt());
-            docs.add(dd);
+            docs.add(toDocumentSummaryDTO(d));
         }
         out.setDocuments(docs);
+
+        // Populate student login info — always present so the frontend can decide what to show
+        userRepo.findFirstByLinkedStudent_Id(s.getId()).ifPresentOrElse(
+                u -> {
+                    out.setStudentUserId(u.getId());
+                    out.setStudentLoginUsername(u.getUsername());
+                    out.setStudentLoginStatus("ACTIVE");
+                    out.setStudentLoginLastInviteSentAt(null);
+                },
+                () -> out.setStudentLoginStatus("NOT_CREATED")
+        );
+
         return out;
     }
 

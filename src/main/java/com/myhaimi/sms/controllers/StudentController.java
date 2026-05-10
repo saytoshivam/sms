@@ -4,6 +4,7 @@ import com.myhaimi.sms.DTO.StudentViewDTO;
 import com.myhaimi.sms.DTO.student.*;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import com.myhaimi.sms.service.impl.ParentLoginService;
+import com.myhaimi.sms.service.impl.StudentLoginService;
 import com.myhaimi.sms.service.impl.StudentService;
 import com.myhaimi.sms.utils.CommonUtil;
 import jakarta.validation.Valid;
@@ -24,6 +25,7 @@ import java.util.Map;
 public class StudentController {
     private final StudentService studentService;
     private final ParentLoginService parentLoginService;
+    private final StudentLoginService studentLoginService;
 
     /** Converts access-denied errors to HTTP 403 with a JSON body. */
     @org.springframework.web.bind.annotation.ExceptionHandler(AccessDeniedException.class)
@@ -138,6 +140,17 @@ public class StudentController {
         }
     }
 
+    @PostMapping("/{studentId}/create-login")
+    public ResponseEntity<?> createStudentLogin(@PathVariable Integer studentId) {
+        try {
+            return ResponseEntity.ok(studentLoginService.createLogin(studentId));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (IllegalStateException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        }
+    }
+
     @PostMapping("/{id}/transfer-section")
     public ResponseEntity<?> transferSection(
             @PathVariable Integer id,
@@ -214,7 +227,7 @@ public class StudentController {
     public ResponseEntity<?> rejectDocument(
             @PathVariable Integer studentId,
             @PathVariable Integer docId,
-            @Valid @RequestBody StudentDocumentActionDTO dto,
+            @Valid @RequestBody StudentDocumentRejectDTO dto,
             BindingResult result) {
         ResponseEntity<?> res = CommonUtil.dtoBindingResults(result);
         if (res.getStatusCode().is4xxClientError()) return res;

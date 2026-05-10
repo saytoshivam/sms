@@ -37,6 +37,16 @@ public class StudentProfileSummaryDTO {
 
     private List<StudentDocumentSummaryDTO> documents;
 
+    // ── Student portal login info ─────────────────────────────────────────────
+    /** Login account status: NOT_CREATED, INVITED, ACTIVE, DISABLED. Always present in GET /api/students/{id}. */
+    private String studentLoginStatus;
+    /** Username of the linked student user account, null when no login has been created yet. */
+    private String studentLoginUsername;
+    /** Timestamp of the last invite sent (future use). */
+    private Instant studentLoginLastInviteSentAt;
+    /** ID of the linked User row with STUDENT role. */
+    private Integer studentUserId;
+
     /**
      * Caller-specific permission flags injected by the service layer.
      * Null when the profile is built internally (e.g. during write operations).

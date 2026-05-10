@@ -38,4 +38,8 @@ public interface UserRepo extends JpaRepository<User, Integer> {
     Optional<User> findFirstByLinkedGuardian_Id(Integer guardianId);
 
     Optional<User> findFirstBySchool_IdAndLinkedGuardian_Id(Integer schoolId, Integer guardianId);
+
+    Optional<User> findFirstByLinkedStudent_Id(Integer studentId);
+
+    Optional<User> findFirstBySchool_IdAndLinkedStudent_Id(Integer schoolId, Integer studentId);
 }
