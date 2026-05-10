@@ -1,5 +1,7 @@
 package com.myhaimi.sms.modules.files.storage;
 
+import org.springframework.core.io.Resource;
+
 import java.io.InputStream;
 
 /**
@@ -27,6 +29,17 @@ public interface FileStorageProvider {
      * @return Absolute URL
      */
     String generateReadUrl(String storageKey, long ttlSeconds);
+
+    /**
+     * Load the stored object as a Spring {@link Resource} for authenticated streaming.
+     * The returned stream must be closed by the caller (Spring MVC does this automatically
+     * when used with ResponseEntity&lt;Resource&gt;).
+     *
+     * @param storageKey Full path key
+     * @return Resource ready for streaming
+     * @throws IllegalArgumentException if the key does not exist or fails path validation
+     */
+    Resource loadAsResource(String storageKey);
 
     /**
      * Permanently delete the stored object.

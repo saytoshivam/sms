@@ -10,6 +10,7 @@ import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -130,6 +131,24 @@ public class FileService {
         fileAccessService.assertCanViewMetadata(fo, caller);
         return toDTO(fo, null);
     }
+
+    // ── authenticated content streaming ──────────────────────────────────────
+
+    /**
+     * Load the raw file bytes as a Spring {@link Resource} for authenticated streaming.
+     * Throws {@link org.springframework.security.access.AccessDeniedException} if the caller
+     * does not have permission to download the file.
+     */
+    @Transactional(readOnly = true)
+    public FileContentResult streamContent(Long fileId, FileCallerContext caller) {
+        FileObject fo = requireActive(fileId, caller.schoolId());
+        fileAccessService.assertCanDownload(fo, caller);
+        Resource resource = storageProvider.loadAsResource(fo.getStorageKey());
+        return new FileContentResult(resource, fo.getContentType(), fo.getOriginalFilename());
+    }
+
+    /** Carries the {@link Resource}, MIME type, and original filename for streaming. */
+    public record FileContentResult(Resource resource, String contentType, String originalFilename) {}
 
     // ── soft delete ───────────────────────────────────────────────────────────
 

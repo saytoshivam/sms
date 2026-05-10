@@ -2,6 +2,8 @@ package com.myhaimi.sms.modules.files.storage;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
@@ -52,6 +54,15 @@ public class LocalStorageProvider implements FileStorageProvider {
                 .path("/api/files/local/")
                 .path(storageKey)
                 .toUriString();
+    }
+
+    @Override
+    public Resource loadAsResource(String storageKey) {
+        Path file = resolve(storageKey);
+        if (!Files.exists(file)) {
+            throw new IllegalArgumentException("File not found in local storage: " + storageKey);
+        }
+        return new FileSystemResource(file);
     }
 
     @Override

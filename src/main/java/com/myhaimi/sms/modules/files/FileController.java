@@ -4,13 +4,18 @@ import com.myhaimi.sms.entity.enums.FileCategory;
 import com.myhaimi.sms.entity.enums.FileVisibility;
 import com.myhaimi.sms.repository.UserRepo;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -58,6 +63,51 @@ public class FileController {
             return ResponseEntity.status(HttpStatus.CREATED).body(result);
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    // ── authenticated content stream ─────────────────────────────────────────
+
+    /**
+     * Stream file content through the backend with the caller's Authorization header.
+     *
+     * GET /api/files/{fileId}/content          — inline (for view in browser tab)
+     * GET /api/files/{fileId}/content?download=true — as attachment (for download)
+     */
+    @GetMapping("/{fileId}/content")
+    public ResponseEntity<Resource> streamContent(
+            @PathVariable Long fileId,
+            @RequestParam(value = "download", defaultValue = "false") boolean download,
+            Authentication auth) {
+        try {
+            FileCallerContext caller = resolveCallerContext(auth);
+            FileService.FileContentResult result = fileService.streamContent(fileId, caller);
+
+            MediaType mediaType;
+            try {
+                mediaType = result.contentType() != null
+                        ? MediaType.parseMediaType(result.contentType())
+                        : MediaType.APPLICATION_OCTET_STREAM;
+            } catch (Exception e) {
+                mediaType = MediaType.APPLICATION_OCTET_STREAM;
+            }
+
+            String safeFilename = result.originalFilename() != null
+                    ? URLEncoder.encode(result.originalFilename(), StandardCharsets.UTF_8).replace("+", "%20")
+                    : "file";
+
+            String disposition = download
+                    ? "attachment; filename=\"" + safeFilename + "\""
+                    : "inline; filename=\"" + safeFilename + "\"";
+
+            return ResponseEntity.ok()
+                    .contentType(mediaType)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, disposition)
+                    .body(result.resource());
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        } catch (AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
     }
 

@@ -18,6 +18,9 @@ import java.io.InputStream;
 import java.net.URI;
 import java.time.Duration;
 
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
+
 /**
  * S3-compatible object storage provider.
  * Works with AWS S3, Cloudflare R2, and Backblaze B2 (all S3-compatible).
@@ -92,6 +95,15 @@ public class S3StorageProvider implements FileStorageProvider {
                         .build())
                 .build();
         return presigner.presignGetObject(presignRequest).url().toString();
+    }
+
+    @Override
+    public Resource loadAsResource(String storageKey) {
+        var response = s3.getObject(GetObjectRequest.builder()
+                .bucket(bucket)
+                .key(storageKey)
+                .build());
+        return new InputStreamResource(response);
     }
 
     @Override

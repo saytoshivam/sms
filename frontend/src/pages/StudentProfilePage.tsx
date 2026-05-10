@@ -718,18 +718,37 @@ function DocumentsTab({
     setBusy(docId);
     setRowError(null);
     try {
-      const resp = await api.get<{ downloadUrl?: string }>(`/api/files/${fileId}/download-url`);
-      const url = resp.data?.downloadUrl;
-      if (url) {
-        window.open(url, '_blank', 'noopener,noreferrer');
-      } else {
-        setRowError({ docId, msg: 'Could not get download URL.' });
-      }
+      const resp = await api.get(`/api/files/${fileId}/content`, { responseType: 'blob' });
+      const blob = new Blob([resp.data], { type: resp.headers['content-type'] || 'application/octet-stream' });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank', 'noopener,noreferrer');
+      // Revoke the object URL after a brief delay to allow the tab to load
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } catch (e: any) {
-      const msg = e?.response?.data?.error ?? e?.message ?? 'Could not get download URL.';
+      const msg = e?.response?.data?.error ?? e?.message ?? 'Could not load document.';
       setRowError({ docId, msg });
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function handleSaveDownload(fileId: number, filename: string) {
+    try {
+      const resp = await api.get(`/api/files/${fileId}/content`, {
+        responseType: 'blob',
+        params: { download: true },
+      });
+      const blob = new Blob([resp.data], { type: resp.headers['content-type'] || 'application/octet-stream' });
+      const blobUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = blobUrl;
+      anchor.download = filename || 'document';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // silently fail for download-only action
     }
   }
 
@@ -1184,17 +1203,25 @@ function ProfileAvatar({
   const [signedUrl, setSignedUrl]   = useState<string | null>(null);
   const [imgBroken, setImgBroken]   = useState(false);
 
-  // Fetch a short-lived signed URL when profilePhotoFileId is set.
-  // Never use p.photoUrl directly — it may be stale or point to a JSON endpoint.
+  // Fetch profile photo as an authenticated blob so the browser Authorization header is sent.
+  // Never use /download-url directly in <img src> — browser requests bypass Axios interceptor.
   useEffect(() => {
     setSignedUrl(null);
     setImgBroken(false);
     if (!p.profilePhotoFileId) return;
     let cancelled = false;
-    api.get<{ downloadUrl?: string }>(`/api/files/${p.profilePhotoFileId}/download-url`)
-      .then(r => { if (!cancelled && r.data?.downloadUrl) setSignedUrl(r.data.downloadUrl); })
+    let objectUrl: string | null = null;
+    api.get(`/api/files/${p.profilePhotoFileId}/content`, { responseType: 'blob' })
+      .then(r => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(r.data as Blob);
+        setSignedUrl(objectUrl);
+      })
       .catch(() => { /* show initials fallback on error */ });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [p.profilePhotoFileId]);
 
   const hasPhoto = !!signedUrl && !imgBroken;
