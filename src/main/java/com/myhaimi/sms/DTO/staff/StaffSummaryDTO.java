@@ -5,6 +5,7 @@ import com.myhaimi.sms.entity.enums.StaffStatus;
 import com.myhaimi.sms.entity.enums.StaffType;
 import lombok.Data;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -34,6 +35,9 @@ public class StaffSummaryDTO {
     private List<String>  roles;
     private List<String>  teachableSubjectCodes;
     private boolean       hasLoginAccount;
+    private Integer       userId;
+    private String        username;
+    private Instant       lastInviteSentAt;
     private Integer       maxWeeklyLectureLoad;
     private Integer       maxDailyLectureLoad;
     private boolean       canBeClassTeacher;

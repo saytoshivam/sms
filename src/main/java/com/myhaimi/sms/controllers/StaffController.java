@@ -1,7 +1,6 @@
 package com.myhaimi.sms.controllers;
 
 import com.myhaimi.sms.DTO.staff.*;
-import com.myhaimi.sms.entity.Staff;
 import com.myhaimi.sms.service.impl.StaffAccessService;
 import com.myhaimi.sms.service.impl.StaffDocumentService;
 import com.myhaimi.sms.service.impl.StaffReadinessService;
@@ -49,13 +48,17 @@ public class StaffController {
     }
 
     /**
-     * Create a staff record.
-     * Accepts the Staff entity for backward compatibility; returns {@link StaffSummaryDTO}.
+     * @deprecated Use {@code POST /api/v1/onboarding/staff/onboard} with
+     * {@link com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingRequest} instead.
+     * Accepting raw JPA entities over HTTP is not permitted for security reasons.
      */
     @PostMapping
-    public ResponseEntity<StaffSummaryDTO> create(@RequestBody Staff staff) {
-        StaffSummaryDTO created = staffService.create(staff);
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    @Deprecated
+    public ResponseEntity<?> create() {
+        return ResponseEntity.status(HttpStatus.GONE)
+                .body(Map.of("error",
+                        "This endpoint has been removed. Use POST /api/v1/onboarding/staff/onboard " +
+                        "with the structured StaffOnboardingRequest body."));
     }
 
     // ── Document checklist ────────────────────────────────────────────────────

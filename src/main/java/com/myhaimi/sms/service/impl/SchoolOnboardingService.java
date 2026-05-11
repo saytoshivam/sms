@@ -47,6 +47,7 @@ import com.myhaimi.sms.DTO.staff.StaffProfileDTO;
 import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingRequest;
 import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingResult;
 import com.myhaimi.sms.academic.SubjectAllocationVenueParsing;
+import com.myhaimi.sms.academic.RoomTypeParsing;
 import com.myhaimi.sms.entity.ClassGroup;
 import com.myhaimi.sms.entity.Building;
 import com.myhaimi.sms.entity.Floor;
@@ -153,6 +154,7 @@ public class SchoolOnboardingService {
     private final TimetableGridV2Service timetableGridV2Service;
     private final TeacherDemandAnalysisService teacherDemandAnalysisService;
     private final StaffService staffService;
+    private final StaffDocumentService staffDocumentService;
 
     private List<Integer> parseIntListJson(String json) {
         if (json == null || json.isBlank()) {
@@ -1414,7 +1416,10 @@ public class SchoolOnboardingService {
             });
         }
 
-        // ── 9. Build response ──────────────────────────────────────────────────
+        // ── 9. Seed document checklist ─────────────────────────────────────────
+        staffDocumentService.seedDocuments(staff.getId());
+
+        // ── 10. Build response ─────────────────────────────────────────────────
         StaffProfileDTO profile = staffService.getById(staff.getId());
         return new StaffOnboardingResult(profile, warnings, tempPassword);
     }
@@ -1521,6 +1526,9 @@ public class SchoolOnboardingService {
                 u.setRoles(roleEntities); userRepo.save(u);
             });
         }
+
+        // Seed document checklist (idempotent — only creates missing rows)
+        staffDocumentService.seedDocuments(staff.getId());
 
         StaffProfileDTO profile = staffService.getById(staff.getId());
         return new StaffOnboardingResult(profile, warnings, tempPassword);

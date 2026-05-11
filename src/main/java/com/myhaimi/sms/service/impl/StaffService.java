@@ -58,7 +58,7 @@ public class StaffService {
 
         Map<Integer, List<String>> rolesByStaff    = buildRolesMap(schoolId);
         Map<Integer, List<String>> subjectsByStaff = buildSubjectsMap(schoolId);
-        Map<Integer, Boolean>      loginByStaff    = buildLoginMap(schoolId);
+        Map<Integer, User>         loginByStaff    = buildLoginMap(schoolId);
 
         List<StaffSummaryDTO> dtos = page.getContent().stream()
                 .map(s -> toSummaryDTO(s, rolesByStaff, subjectsByStaff, loginByStaff))

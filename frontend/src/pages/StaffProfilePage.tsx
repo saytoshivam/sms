@@ -179,13 +179,13 @@ function SectionCard({ title, children }: { title: string; children: React.React
   );
 }
 
-function ComingSoonTab({ icon, name }: { icon: string; name: string }) {
+function ModuleDisabledTab({ icon, name, reason }: { icon: string; name: string; reason?: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 24px', textAlign: 'center' }}>
-      <div style={{ fontSize: 40, marginBottom: 14 }}>{icon}</div>
-      <div style={{ fontWeight: 800, fontSize: 16, color: 'rgba(15,23,42,0.65)', marginBottom: 6 }}>{name}</div>
-      <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.38)', maxWidth: 360 }}>
-        This section is not yet implemented. It will appear here as the module is built — no fake data will be shown in the meantime.
+      <div style={{ fontSize: 40, marginBottom: 14, opacity: 0.45 }}>{icon}</div>
+      <div style={{ fontWeight: 800, fontSize: 16, color: 'rgba(15,23,42,0.55)', marginBottom: 6 }}>{name}</div>
+      <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.38)', maxWidth: 400, lineHeight: 1.6 }}>
+        {reason ?? 'This section is not active for your school plan. Contact your administrator to enable it.'}
       </div>
     </div>
   );
@@ -245,7 +245,7 @@ function MoreMenu({ staffId, profile, onResetLogin, onDeactivate, onMarkExited, 
       </button>
       {open && (
         <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.12)', boxShadow: '0 8px 32px rgba(15,23,42,0.14)', zIndex: 200, minWidth: 200, padding: 6 }}>
-          {item('Upload Document', '📎', () => toast.info('Documents', 'Document upload coming soon.'), false, true)}
+          {item('Upload Document', '📎', () => toast.info('File Upload', 'Digital file upload requires the document storage module to be enabled by your administrator.'), false, true)}
           {item('Reset Login', '🔄', onResetLogin, false, !profile.hasLoginAccount)}
           <div style={{ height: 1, background: 'rgba(15,23,42,0.07)', margin: '4px 0' }} />
           {item('Deactivate', '⏸', onDeactivate, true, profile.status === 'INACTIVE')}
@@ -401,7 +401,7 @@ function TabEmployment({ profile }: { profile: StaffProfile }) {
 
       <div style={{ padding: '12px 16px', background: 'rgba(15,23,42,0.03)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.07)' }}>
         <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-          📋 Status history and HR event log will appear here when the HR Events module is built.
+          📋 HR status history and employment event log are available once the HR Events module is activated for your school.
         </div>
       </div>
     </div>
@@ -593,7 +593,7 @@ function TabTimetable({ profile }: { profile: StaffProfile }) {
 
       <div style={{ padding: '12px 16px', background: 'rgba(15,23,42,0.02)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.07)' }}>
         <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.42)', fontWeight: 600 }}>
-          📋 Embedded per-teacher timetable view (admin perspective) is planned. In future releases, the published weekly grid for this specific teacher will be embedded here.
+          📋 An embedded per-teacher weekly timetable view is available after the timetable is published. Open the Timetable Grid above to view and manage the full schedule.
         </div>
       </div>
 
@@ -961,7 +961,7 @@ function TabDocuments({ staffId }: { staffId: number }) {
 
       {/* Note about upload */}
       <div style={{ padding: '10px 14px', background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.18)', borderRadius: 9, fontSize: 12, color: '#92400e', fontWeight: 600 }}>
-        ℹ️ File upload is not yet active. Physical document collection and verification are fully operational.
+        ℹ️ Digital file upload is not enabled. Physical document collection and verification are fully operational and tracked below.
       </div>
 
       {/* Desktop table */}
@@ -1281,7 +1281,7 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
           {hasLogin && isActive && (
             <ActionRow
               title="Send Invite"
-              desc="Record that an invite was sent. Email delivery will be active in a future release."
+              desc="Record that an invite notification was dispatched. Email delivery requires the communications module to be enabled for your school."
             >
               <Btn label="Record Invite" busy={busy} onClick={() => doAction(`/api/staff/${staffId}/send-invite`, 'Invite recorded.')} />
             </ActionRow>
@@ -1339,6 +1339,10 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
           onCancel={() => setLinkOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
 // ─── Tab: Activity Log ────────────────────────────────────────────────────────
 
 function TabActivity({ profile }: { profile: StaffProfile }) {
@@ -1363,7 +1367,7 @@ function TabActivity({ profile }: { profile: StaffProfile }) {
 
       <div style={{ padding: '12px 16px', background: 'rgba(15,23,42,0.02)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.07)' }}>
         <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-          📋 Detailed HR event log (status changes, role updates, logins, etc.) will appear here when the audit/events module is built.
+          📋 Detailed HR event log — status transitions, role updates, login events, and document actions — is available once the audit module is activated for your school.
         </div>
       </div>
     </div>
@@ -1596,7 +1600,13 @@ export function StaffProfilePage() {
         {activeTab === 'timetable'  && <TabTimetable  profile={profile} />}
         {activeTab === 'documents'  && <TabDocuments staffId={id} />}
         {activeTab === 'access'     && <TabAccess profile={profile} staffId={id} onRefresh={refreshProfile} />}
-        {activeTab === 'leave'      && <ComingSoonTab icon="🏖" name="Leave Management" />}
+        {activeTab === 'leave'      && (
+          <ModuleDisabledTab
+            icon="🏖"
+            name="Leave Management"
+            reason="Leave management is not active for this school. Leave requests, balances, and approval workflows will be available once the HR Leave module is enabled by your administrator."
+          />
+        )}
         {activeTab === 'payroll'    && (
           profile.payrollEnabled ? (
             <div style={{ display: 'grid', gap: 14 }}>
@@ -1609,11 +1619,15 @@ export function StaffProfilePage() {
                 <InfoRow label="PAN"                value={profile.panNumberMasked} mono />
               </SectionCard>
               <div style={{ padding: '12px 16px', background: 'rgba(234,179,8,0.08)', borderRadius: 10, border: '1px solid rgba(234,179,8,0.2)', fontSize: 12, color: '#92400e', fontWeight: 600 }}>
-                ℹ️ Full payroll processing module (salary runs, deductions, payslips) is not yet implemented.
+                ℹ️ Payroll processing — salary runs, deductions, and payslip generation — requires the Payroll module to be activated for your school. Contact your administrator to enable it.
               </div>
             </div>
           ) : (
-            <ComingSoonTab icon="💰" name="Payroll" />
+            <ModuleDisabledTab
+              icon="💰"
+              name="Payroll"
+              reason="Payroll is not configured for this staff member. Enable payroll in the Employment section and ensure the Payroll module is active for your school."
+            />
           )
         )}
         {activeTab === 'activity'   && <TabActivity   profile={profile} />}

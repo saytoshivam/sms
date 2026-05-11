@@ -3,7 +3,12 @@ package com.myhaimi.sms.service.impl;
 import com.myhaimi.sms.DTO.staff.StaffDocumentSummaryDTO;
 import com.myhaimi.sms.DTO.staff.StaffDocumentUpdateDTO;
 import com.myhaimi.sms.entity.*;
-import com.myhaimi.sms.entity.enums.*;
+import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.DocumentUploadStatus;
+import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
+import com.myhaimi.sms.entity.enums.DocumentRequirementStatus;
+import com.myhaimi.sms.entity.enums.DocumentTargetType;
+import com.myhaimi.sms.entity.enums.VerificationSource;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -107,7 +112,7 @@ public class StaffDocumentService {
         requireStaff(staffId, schoolId);
         StaffDocument doc = requireDoc(docId, staffId);
 
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
+        doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
         if (remarks != null && !remarks.isBlank()) doc.setRemarks(remarks.trim());
         documentRepo.save(doc);
         return toDTO(doc);
@@ -124,14 +129,14 @@ public class StaffDocumentService {
         requireStaff(staffId, schoolId);
         StaffDocument doc = requireDoc(docId, staffId);
 
-        boolean collected = doc.getCollectionStatus() == StudentDocumentCollectionStatus.COLLECTED_PHYSICAL;
-        boolean uploaded  = doc.getUploadStatus()     == StudentDocumentUploadStatus.UPLOADED;
+        boolean collected = doc.getCollectionStatus() == DocumentCollectionStatus.COLLECTED_PHYSICAL;
+        boolean uploaded  = doc.getUploadStatus()     == DocumentUploadStatus.UPLOADED;
         if (!collected && !uploaded) {
             throw new IllegalArgumentException(
                     "Cannot verify a document that has not been collected or uploaded.");
         }
 
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
+        doc.setVerificationStatus(DocumentVerificationStatus.VERIFIED);
         doc.setVerifiedAt(Instant.now());
         doc.setVerificationSource(source != null ? source
                 : (uploaded ? VerificationSource.UPLOADED_COPY : VerificationSource.PHYSICAL_ORIGINAL));
@@ -151,7 +156,7 @@ public class StaffDocumentService {
             throw new IllegalArgumentException("Rejection remarks are required.");
 
         StaffDocument doc = requireDoc(docId, staffId);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.REJECTED);
+        doc.setVerificationStatus(DocumentVerificationStatus.REJECTED);
         doc.setVerifiedAt(Instant.now());
         doc.setVerifiedByStaffId(resolveCallerStaffId());
         doc.setRemarks(remarks.trim());
@@ -166,9 +171,9 @@ public class StaffDocumentService {
         requireStaff(staffId, schoolId);
         StaffDocument doc = requireDoc(docId, staffId);
 
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.NOT_REQUIRED);
-        doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        doc.setCollectionStatus(DocumentCollectionStatus.NOT_REQUIRED);
+        doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
         doc.setVerificationSource(null);
         doc.setVerifiedAt(null);
         doc.setVerifiedByStaffId(null);
@@ -188,7 +193,7 @@ public class StaffDocumentService {
         if (dto.getUploadStatus() != null)        doc.setUploadStatus(dto.getUploadStatus());
         if (dto.getVerificationStatus() != null) {
             doc.setVerificationStatus(dto.getVerificationStatus());
-            if (dto.getVerificationStatus() == StudentDocumentVerificationStatus.VERIFIED
+            if (dto.getVerificationStatus() == DocumentVerificationStatus.VERIFIED
                     && doc.getVerifiedAt() == null) {
                 doc.setVerifiedAt(Instant.now());
             }
@@ -198,6 +203,20 @@ public class StaffDocumentService {
 
         documentRepo.save(doc);
         return toDTO(doc);
+    }
+
+    /** Create any missing default document rows for a staff member.
+     * @return List of created or updated document summaries
+     */
+    @Transactional
+    public List<StaffDocumentSummaryDTO> seedDocuments(Integer staffId) {
+        Integer schoolId = requireSchoolId();
+        Staff staff = requireStaff(staffId, schoolId);
+        ensureDefaultDocumentsExist(staff);
+        return documentRepo.findByStaff_IdOrderByCreatedAtAsc(staffId)
+                .stream()
+                .map(this::toDTO)
+                .toList();
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -214,9 +233,9 @@ public class StaffDocumentService {
                 doc.setStaff(staff);
                 doc.setDocumentType(dt.getCode());
                 doc.setDocumentTypeId(dt.getId());
-                doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-                doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-                doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+                doc.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
+                doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+                doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
                 documentRepo.save(doc);
             }
         }
@@ -255,14 +274,14 @@ public class StaffDocumentService {
      * Precedence: NOT_REQUIRED > REJECTED > VERIFIED > UPLOADED > COLLECTED_PHYSICAL > PENDING_COLLECTION.
      */
     static String computeDisplayStatus(StaffDocument doc) {
-        StudentDocumentCollectionStatus cs = doc.getCollectionStatus();
-        if (cs == StudentDocumentCollectionStatus.NOT_REQUIRED)      return "NOT_REQUIRED";
-        StudentDocumentVerificationStatus vs = doc.getVerificationStatus();
-        if (vs == StudentDocumentVerificationStatus.REJECTED)        return "REJECTED";
-        if (vs == StudentDocumentVerificationStatus.VERIFIED)        return "VERIFIED";
-        StudentDocumentUploadStatus us = doc.getUploadStatus();
-        if (us == StudentDocumentUploadStatus.UPLOADED)              return "UPLOADED";
-        if (cs == StudentDocumentCollectionStatus.COLLECTED_PHYSICAL) return "COLLECTED_PHYSICAL";
+        DocumentCollectionStatus cs = doc.getCollectionStatus();
+        if (cs == DocumentCollectionStatus.NOT_REQUIRED)      return "NOT_REQUIRED";
+        DocumentVerificationStatus vs = doc.getVerificationStatus();
+        if (vs == DocumentVerificationStatus.REJECTED)        return "REJECTED";
+        if (vs == DocumentVerificationStatus.VERIFIED)        return "VERIFIED";
+        DocumentUploadStatus us = doc.getUploadStatus();
+        if (us == DocumentUploadStatus.UPLOADED)              return "UPLOADED";
+        if (cs == DocumentCollectionStatus.COLLECTED_PHYSICAL) return "COLLECTED_PHYSICAL";
         return "PENDING_COLLECTION";
     }
 
