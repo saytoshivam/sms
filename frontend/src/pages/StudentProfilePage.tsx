@@ -522,8 +522,6 @@ function AcademicTab({ p }: { p: StudentProfilePayload }) {
 
 // ─── Documents tab ────────────────────────────────────────────────────────────
 
-/** Normalise to the new lifecycle vocabulary for display.
- *  Prefers the backend-computed `displayStatus` field; falls back to legacy `status`. */
 function normDocStatus(doc: StudentDocumentSummary): string {
   if (doc.displayStatus) return doc.displayStatus;
   const s = doc.status;
@@ -533,54 +531,158 @@ function normDocStatus(doc: StudentDocumentSummary): string {
   return s;
 }
 
-// ── Per-dimension status display maps ────────────────────────────────────────
-const COLL_INFO: Record<string, { label: string; bg: string; color: string }> = {
-  PENDING_COLLECTION: { label: 'Pending Collection', bg: 'rgba(234,179,8,0.12)',  color: '#854d0e' },
-  COLLECTED_PHYSICAL: { label: 'Collected',          bg: 'rgba(59,130,246,0.12)', color: '#1e40af' },
-  NOT_REQUIRED:       { label: 'Not Required',       bg: 'rgba(15,23,42,0.07)',   color: 'rgba(15,23,42,0.45)' },
-};
-const UP_INFO: Record<string, { label: string; bg: string; color: string }> = {
-  NOT_UPLOADED: { label: 'Not Uploaded', bg: 'rgba(15,23,42,0.06)',   color: 'rgba(15,23,42,0.4)' },
-  UPLOADED:     { label: 'Uploaded',     bg: 'rgba(59,130,246,0.12)', color: '#1e40af' },
-};
-const VER_INFO: Record<string, { label: string; bg: string; color: string }> = {
-  NOT_VERIFIED: { label: 'Not Verified', bg: 'rgba(15,23,42,0.06)',   color: 'rgba(15,23,42,0.4)' },
-  VERIFIED:     { label: 'Verified',     bg: 'rgba(22,163,74,0.12)',  color: '#166534' },
-  REJECTED:     { label: 'Rejected',     bg: 'rgba(220,38,38,0.12)', color: '#991b1b' },
-};
+/** Convert snake_case / UPPER_CASE / lower strings to Title Case. */
+function toTitleCase(str: string): string {
+  return str.toLowerCase().replace(/(?:^|[\s_-])\S/g, c => c.toUpperCase()).replace(/_/g, ' ');
+}
 
-function LifecyclePill({ map, value }: { map: Record<string, { label: string; bg: string; color: string }>; value?: string | null }) {
-  const key = value?.toString() ?? '';
-  const info = map[key];
-  if (!info) return <span style={{ color: 'rgba(15,23,42,0.32)', fontSize: 12 }}>—</span>;
+/** Human-readable, title-cased document name. */
+function fmtDocName(doc: StudentDocumentSummary): string {
+  const raw = doc.documentTypeName ?? (doc.documentType?.replace(/_/g, ' ') ?? '—');
+  if (raw === '—') return raw;
+  return toTitleCase(raw);
+}
+
+function fmtFilename(name: string | null | undefined): string {
+  if (!name) return '';
+  if (name.length <= 22) return name;
+  const dot = name.lastIndexOf('.');
+  if (dot > 0) return name.slice(0, 12) + '…' + name.slice(dot - 3);
+  return name.slice(0, 18) + '…';
+}
+
+/**
+ * Three-axis status display: Collection · Upload · Verification
+ * Replaces the single StatusPill in the table/cards.
+ */
+function CombinedStatusText({ doc }: { doc: StudentDocumentSummary }) {
+  const coll = doc.collectionStatus ?? 'PENDING_COLLECTION';
+  const up   = doc.uploadStatus ?? 'NOT_UPLOADED';
+  const ver  = doc.verificationStatus ?? 'NOT_VERIFIED';
+
+  if (coll === 'NOT_REQUIRED') {
+    return <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Not required</span>;
+  }
+  if (coll === 'PENDING_COLLECTION') {
+    return (
+      <span style={{ display: 'inline-block', padding: '3px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'rgba(234,179,8,0.1)', color: '#854d0e', whiteSpace: 'nowrap' }}>
+        Pending Collection
+      </span>
+    );
+  }
+
+  // Collected — show upload + verification axes
+  const parts: { text: string; color: string }[] = [
+    { text: 'Collected', color: '#1e40af' },
+  ];
+
+  if (up === 'UPLOADED') {
+    parts.push({ text: 'Uploaded', color: '#4338ca' });
+    if (ver === 'VERIFIED')      parts.push({ text: 'Verified ✓', color: '#166534' });
+    else if (ver === 'REJECTED') parts.push({ text: 'Rejected',   color: '#991b1b' });
+    else                         parts.push({ text: 'Not Verified', color: '#92400e' });
+  } else {
+    parts.push({ text: 'Not Uploaded', color: 'rgba(15,23,42,0.38)' });
+  }
+
   return (
-    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: info.bg, color: info.color, whiteSpace: 'nowrap' }}>
-      {info.label}
+    <span style={{ fontSize: 11, lineHeight: 1.6, display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: '0 1px' }}>
+      {parts.map((pt, i) => (
+        <React.Fragment key={pt.text}>
+          {i > 0 && <span style={{ color: 'rgba(15,23,42,0.22)', padding: '0 3px' }}>·</span>}
+          <span style={{ color: pt.color, fontWeight: 600 }}>{pt.text}</span>
+        </React.Fragment>
+      ))}
     </span>
   );
 }
 
-function SmallBtn({
-  label, onClick, danger, primary, disabled, title,
+// ─── Kebab "More" dropdown ────────────────────────────────────────────────────
+function DocMoreMenu({
+  doc, canEdit, isBusy,
+  onCollect, onMarkPending, onMarkNotRequired, onUpload, onVerify,
+  onReject, onEditRemark, onView, onSaveDownload,
 }: {
-  label: string; onClick?: () => void; danger?: boolean; primary?: boolean;
-  disabled?: boolean; title?: string;
+  doc: StudentDocumentSummary; canEdit: boolean; isBusy: boolean;
+  onCollect: () => void; onMarkPending: () => void; onMarkNotRequired: () => void;
+  onUpload: () => void; onVerify: () => void; onReject: () => void;
+  onEditRemark: () => void; onView: () => void; onSaveDownload: () => void;
 }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const coll = doc.collectionStatus ?? 'PENDING_COLLECTION';
+  const up   = doc.uploadStatus ?? 'NOT_UPLOADED';
+  const ver  = doc.verificationStatus ?? 'NOT_VERIFIED';
+  const hasFile = !!(doc.fileId || doc.fileUrl);
+
+  /**
+   * Mirror the primary-action priority used in the table so the More menu
+   * never duplicates the primary button.
+   *   collect  → PENDING_COLLECTION                           → "Mark Collected" is primary
+   *   upload   → COLLECTED + NOT_UPLOADED (not rejected)      → "Upload File" is primary
+   *   verify   → UPLOADED + NOT_VERIFIED                      → "Verify" is primary
+   *   replace  → REJECTED                                     → "Replace File" is primary
+   *   none     → VERIFIED / NOT_REQUIRED / etc.
+   */
+  const primaryType: 'collect' | 'upload' | 'verify' | 'replace' | 'none' =
+    !canEdit || coll === 'NOT_REQUIRED'                                              ? 'none'
+    : coll === 'PENDING_COLLECTION'                                                  ? 'collect'
+    : coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver !== 'REJECTED'       ? 'upload'
+    : up === 'UPLOADED' && ver === 'NOT_VERIFIED'                                    ? 'verify'
+    : ver === 'REJECTED'                                                             ? 'replace'
+    : 'none';
+
+  // canVerify across both axes (physical + uploaded)
+  const canV = canEdit && ver === 'NOT_VERIFIED' && (coll === 'COLLECTED_PHYSICAL' || up === 'UPLOADED');
+
+  const items = ([
+    // ── File access ──
+    { label: 'View / Open',           onClick: onView,            show: hasFile },
+    { label: 'Download',              onClick: onSaveDownload,    show: !!doc.fileId },
+    // Replace file — secondary when file exists but not the primary-action state (REJECTED)
+    { label: 'Replace file',          onClick: onUpload,          show: canEdit && hasFile && coll !== 'NOT_REQUIRED' && primaryType !== 'replace' },
+    // ── Verification (secondary) ──
+    // Verify appears in More only when it is NOT already the primary button (e.g. collected but not uploaded)
+    { label: 'Verify',                onClick: onVerify,          show: canEdit && canV && primaryType !== 'verify' },
+    // Reject is always a secondary action; shown whenever the doc can be acted upon
+    { label: 'Reject',                onClick: onReject, danger: true, show: canEdit && canV },
+    // ── Status transitions ──
+    // Mark Pending: rolls back from collected / not-required
+    { label: 'Mark Pending',          onClick: onMarkPending,     show: canEdit && (coll === 'COLLECTED_PHYSICAL' || coll === 'NOT_REQUIRED') },
+    // Mark Not Required: available unless already marked so
+    { label: 'Mark Not Required',     onClick: onMarkNotRequired, show: canEdit && coll !== 'NOT_REQUIRED' },
+    // ── Remarks ──
+    { label: doc.remarks ? 'Edit Remark' : 'Add Remark', onClick: onEditRemark, show: canEdit },
+  ] as { label: string; onClick: () => void; show: boolean; danger?: boolean }[]).filter(i => i.show);
+
+  if (items.length === 0) return null;
+
   return (
-    <button
-      type="button"
-      className={primary ? 'btn' : 'btn secondary'}
-      style={{
-        fontSize: 11, padding: '4px 9px', flexShrink: 0, whiteSpace: 'nowrap',
-        ...(danger ? { background: 'rgba(220,38,38,0.07)', color: '#991b1b', borderColor: 'rgba(220,38,38,0.2)' } : {}),
-        ...(disabled ? { opacity: 0.45, cursor: 'not-allowed' } : {}),
-      }}
-      disabled={disabled}
-      title={title}
-      onClick={disabled ? undefined : onClick}
-    >
-      {label}
-    </button>
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button type="button" disabled={isBusy} onClick={() => setOpen(v => !v)}
+        style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid rgba(15,23,42,0.13)', background: 'none', cursor: isBusy ? 'not-allowed' : 'pointer', color: 'rgba(15,23,42,0.5)', fontSize: 16, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+        title="More actions">⋯</button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 999, background: '#fff', border: '1px solid rgba(15,23,42,0.11)', borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.12)', minWidth: 170, padding: '4px 0' }}>
+          {items.map(item => (
+            <button key={item.label} type="button"
+              onClick={() => { setOpen(false); item.onClick(); }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', color: item.danger ? '#991b1b' : 'rgba(15,23,42,0.8)' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = item.danger ? 'rgba(220,38,38,0.06)' : 'rgba(15,23,42,0.04)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; }}
+            >{item.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -590,395 +692,280 @@ const TH_STYLE: React.CSSProperties = {
   whiteSpace: 'nowrap', background: 'rgba(250,250,249,0.98)',
   borderBottom: '1px solid rgba(15,23,42,0.07)', position: 'sticky', top: 0,
 };
-const TD_STYLE: React.CSSProperties = { padding: '10px 12px', verticalAlign: 'top' };
+const TD_STYLE: React.CSSProperties = { padding: '10px 12px', verticalAlign: 'middle' };
 
-// ─── DocumentsTab component ───────────────────────────────────────────────────
-
-function DocumentsTab({
-  p, studentId, onRefresh, canEdit,
-}: {
+// ─── DocumentsTab ─────────────────────────────────────────────────────────────
+function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
   p: StudentProfilePayload; studentId: number; onRefresh: () => void; canEdit: boolean;
 }) {
   const docs = p.documents ?? [];
-
-  // Per-row action state
-  const [busy, setBusy]       = useState<number | null>(null);
-  const [rowError, setRowError] = useState<{ docId: number; msg: string } | null>(null);
-
-  // Inline reject (requires reason)
-  const [rejectDoc, setRejectDoc]     = useState<number | null>(null);
+  const [busy, setBusy]             = useState<number | null>(null);
+  const [rowError, setRowError]     = useState<{ docId: number; msg: string } | null>(null);
+  const [rejectDoc, setRejectDoc]   = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
-
-  // Inline edit remark
-  const [editRemarkDoc, setEditRemarkDoc]     = useState<number | null>(null);
-  const [editRemarkValue, setEditRemarkValue] = useState('');
-
-  // Per-row upload
+  const [editRemarkDoc, setEditRemarkDoc]       = useState<number | null>(null);
+  const [editRemarkValue, setEditRemarkValue]   = useState('');
   const [uploadingDoc, setUploadingDoc] = useState<number | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   async function callAction(docId: number, endpoint: string, body?: object) {
-    setBusy(docId);
-    setRowError(null);
-    try {
-      await api.post(`/api/students/${studentId}/documents/${docId}/${endpoint}`, body ?? {});
-      onRefresh();
-    } catch (e: any) {
-      const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Action failed.';
-      setRowError({ docId, msg });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function callPatch(docId: number, body: object) {
-    setBusy(docId);
-    setRowError(null);
-    try {
-      await api.patch(`/api/students/${studentId}/documents/${docId}`, body);
-      onRefresh();
-    } catch (e: any) {
-      const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Update failed.';
-      setRowError({ docId, msg });
-    } finally {
-      setBusy(null);
-    }
+    setBusy(docId); setRowError(null);
+    try { await api.post(`/api/students/${studentId}/documents/${docId}/${endpoint}`, body ?? {}); onRefresh(); }
+    catch (e: any) { setRowError({ docId, msg: e?.response?.data?.error ?? e?.message ?? 'Action failed.' }); }
+    finally { setBusy(null); }
   }
 
   async function submitReject(docId: number) {
     if (!rejectReason.trim()) return;
-    setBusy(docId);
-    setRowError(null);
-    try {
-      await api.post(`/api/students/${studentId}/documents/${docId}/reject`, { remarks: rejectReason.trim() });
-      setRejectDoc(null);
-      setRejectReason('');
-      onRefresh();
-    } catch (e: any) {
-      const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Rejection failed.';
-      setRowError({ docId, msg });
-    } finally {
-      setBusy(null);
-    }
+    setBusy(docId); setRowError(null);
+    try { await api.post(`/api/students/${studentId}/documents/${docId}/reject`, { remarks: rejectReason.trim() }); setRejectDoc(null); setRejectReason(''); onRefresh(); }
+    catch (e: any) { setRowError({ docId, msg: e?.response?.data?.error ?? e?.message ?? 'Rejection failed.' }); }
+    finally { setBusy(null); }
   }
 
   async function submitEditRemark(docId: number) {
-    setBusy(docId);
-    setRowError(null);
-    try {
-      await api.patch(`/api/students/${studentId}/documents/${docId}`, { remarks: editRemarkValue.trim() || null });
-      setEditRemarkDoc(null);
-      setEditRemarkValue('');
-      onRefresh();
-    } catch (e: any) {
-      const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Update failed.';
-      setRowError({ docId, msg });
-    } finally {
-      setBusy(null);
-    }
+    setBusy(docId); setRowError(null);
+    try { await api.patch(`/api/students/${studentId}/documents/${docId}`, { remarks: editRemarkValue.trim() || null }); setEditRemarkDoc(null); setEditRemarkValue(''); onRefresh(); }
+    catch (e: any) { setRowError({ docId, msg: e?.response?.data?.error ?? e?.message ?? 'Update failed.' }); }
+    finally { setBusy(null); }
   }
 
   async function handleFileSelected(docId: number, file: File) {
-    // Client-side validation (mirrors backend: 10 MB max, PDF/JPG/PNG only)
-    const MAX_MB = 10;
-    if (file.size > MAX_MB * 1024 * 1024) {
-      setRowError({ docId, msg: `File size must be less than ${MAX_MB} MB.` });
-      if (uploadInputRef.current) uploadInputRef.current.value = '';
-      setUploadingDoc(null);
-      return;
-    }
-    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
-    if (!allowed.includes(file.type)) {
-      setRowError({ docId, msg: 'Only PDF, JPG, and PNG files are allowed.' });
-      if (uploadInputRef.current) uploadInputRef.current.value = '';
-      setUploadingDoc(null);
-      return;
-    }
-
-    setUploadingDoc(docId);
-    setBusy(docId);
-    setRowError(null);
+    if (file.size > 10 * 1024 * 1024) { setRowError({ docId, msg: 'File must be less than 10 MB.' }); if (uploadInputRef.current) uploadInputRef.current.value = ''; setUploadingDoc(null); return; }
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)) { setRowError({ docId, msg: 'Only PDF, JPG, PNG allowed.' }); if (uploadInputRef.current) uploadInputRef.current.value = ''; setUploadingDoc(null); return; }
+    setUploadingDoc(docId); setBusy(docId); setRowError(null);
     try {
-      const form = new FormData();
-      form.append('file', file);
-      await api.post(`/api/students/${studentId}/documents/${docId}/upload`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const form = new FormData(); form.append('file', file);
+      await api.post(`/api/students/${studentId}/documents/${docId}/upload`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
       onRefresh();
-    } catch (e: any) {
-      const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Upload failed.';
-      setRowError({ docId, msg });
-    } finally {
-      setUploadingDoc(null);
-      setBusy(null);
-      // reset file input so same file can be re-selected if needed
-      if (uploadInputRef.current) uploadInputRef.current.value = '';
-    }
+    } catch (e: any) { setRowError({ docId, msg: e?.response?.data?.error ?? e?.message ?? 'Upload failed.' }); }
+    finally { setUploadingDoc(null); setBusy(null); if (uploadInputRef.current) uploadInputRef.current.value = ''; }
   }
 
   async function handleDownload(fileId: number, docId: number) {
-    setBusy(docId);
-    setRowError(null);
+    setBusy(docId); setRowError(null);
     try {
       const resp = await api.get(`/api/files/${fileId}/content`, { responseType: 'blob' });
-      const blob = new Blob([resp.data], { type: resp.headers['content-type'] || 'application/octet-stream' });
-      const blobUrl = URL.createObjectURL(blob);
-      window.open(blobUrl, '_blank', 'noopener,noreferrer');
-      // Revoke the object URL after a brief delay to allow the tab to load
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    } catch (e: any) {
-      const msg = e?.response?.data?.error ?? e?.message ?? 'Could not load document.';
-      setRowError({ docId, msg });
-    } finally {
-      setBusy(null);
-    }
+      const url = URL.createObjectURL(new Blob([resp.data], { type: resp.headers['content-type'] || 'application/octet-stream' }));
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e: any) { setRowError({ docId, msg: e?.message ?? 'Could not load document.' }); }
+    finally { setBusy(null); }
   }
 
   async function handleSaveDownload(fileId: number, filename: string) {
     try {
-      const resp = await api.get(`/api/files/${fileId}/content`, {
-        responseType: 'blob',
-        params: { download: true },
-      });
-      const blob = new Blob([resp.data], { type: resp.headers['content-type'] || 'application/octet-stream' });
-      const blobUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = blobUrl;
-      anchor.download = filename || 'document';
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      // silently fail for download-only action
-    }
+      const resp = await api.get(`/api/files/${fileId}/content`, { responseType: 'blob', params: { download: true } });
+      const url = URL.createObjectURL(new Blob([resp.data], { type: resp.headers['content-type'] || 'application/octet-stream' }));
+      const a = document.createElement('a'); a.href = url; a.download = filename || 'document';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch { /* silent */ }
   }
+
+  function triggerUpload(docId: number) { setUploadingDoc(docId); setTimeout(() => uploadInputRef.current?.click(), 0); }
+
+  // ── Summary counts (exclude NOT_REQUIRED from totals) ─────────────────────
+  const active       = docs.filter(d => normDocStatus(d) !== 'NOT_REQUIRED');
+  const collected    = active.filter(d => ['COLLECTED_PHYSICAL','UPLOADED','VERIFIED','REJECTED'].includes(normDocStatus(d))).length;
+  const uploaded     = active.filter(d => ['UPLOADED','VERIFIED'].includes(normDocStatus(d))).length;
+  const verified     = active.filter(d => normDocStatus(d) === 'VERIFIED').length;
+  const pending      = active.filter(d => normDocStatus(d) === 'PENDING_COLLECTION').length;
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+      {/* Hidden file input */}
+      <input ref={uploadInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; const id = uploadingDoc; if (f && id != null) handleFileSelected(id, f); }} />
 
-      {/* Hidden file input — triggered by per-row upload button */}
-      <input
-        ref={uploadInputRef}
-        type="file"
-        accept=".pdf,.jpg,.jpeg,.png"
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          const docId = uploadingDoc;
-          if (file && docId != null) handleFileSelected(docId, file);
-        }}
-      />
-
-      {/* Header row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ fontWeight: 800, fontSize: 15 }}>
-          Documents
-          <span style={{ fontWeight: 500, fontSize: 13, color: 'rgba(15,23,42,0.45)', marginLeft: 6 }}>({docs.length})</span>
-        </div>
+      {/* Header */}
+      <div style={{ fontWeight: 800, fontSize: 15 }}>
+        Documents<span style={{ fontWeight: 500, fontSize: 13, color: 'rgba(15,23,42,0.45)', marginLeft: 6 }}>({docs.length})</span>
       </div>
 
-      {/* True empty state — only when backend didn't create default rows at all */}
-      {docs.length === 0 && (
-        <PlaceholderState
-          icon="📄"
-          title="No documents on record"
-          body="Default document types will appear here once the student profile is fully set up. If you see this message for an existing student, please refresh or contact support."
-        />
+      {/* Summary tiles */}
+      {active.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: 8 }}>
+          {([
+            { label: 'Required',  value: active.length, color: 'rgba(15,23,42,0.7)' },
+            { label: 'Collected', value: collected,     color: '#1e40af' },
+            { label: 'Uploaded',  value: uploaded,      color: '#4338ca' },
+            { label: 'Verified',  value: verified,      color: '#166534' },
+            { label: 'Pending',   value: pending,       color: '#854d0e' },
+          ] as {label:string;value:number;color:string}[]).map(({ label, value, color }) => (
+            <div key={label} style={{ background: 'rgba(15,23,42,0.03)', border: '1px solid rgba(15,23,42,0.07)', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
+              <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.45)', fontWeight: 600, marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
+            </div>
+          ))}
+        </div>
       )}
 
-      {/* Document checklist table */}
+      {/* Progress bars */}
+      {active.length > 0 && (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {([
+            { label: 'Collection', value: collected, color: '#1d4ed8' },
+            { label: 'Verification', value: verified, color: '#16a34a' },
+          ] as {label:string;value:number;color:string}[]).map(({ label, value, color }) => (
+            <div key={label}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, color: 'rgba(15,23,42,0.4)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <span>{label} progress</span><span>{value}/{active.length}</span>
+              </div>
+              <div style={{ height: 5, borderRadius: 9999, background: 'rgba(15,23,42,0.07)' }}>
+                <div style={{ height: '100%', borderRadius: 9999, background: color, width: `${active.length ? (value / active.length) * 100 : 0}%`, transition: 'width 0.35s' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {docs.length === 0 && (
+        <PlaceholderState icon="📄" title="No documents on record"
+          body="Document requirements will appear here once the student profile is set up." />
+      )}
+
+      {/* ── Desktop table — hidden on mobile via .doc-card-list/.doc-table-wrap CSS ── */}
       {docs.length > 0 && (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="card doc-table-wrap" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 820 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr>
-                  <th style={TH_STYLE}>Document</th>
-                  <th style={TH_STYLE}>Collection</th>
-                  <th style={TH_STYLE}>Upload</th>
-                  <th style={TH_STYLE}>Verification</th>
-                  <th style={{ ...TH_STYLE, minWidth: 160 }}>Remarks</th>
-                  {canEdit && <th style={{ ...TH_STYLE, minWidth: 180 }}>Actions</th>}
+                  <th style={{ ...TH_STYLE, minWidth: 160 }}>Document</th>
+                  <th style={{ ...TH_STYLE, minWidth: 130 }}>Status</th>
+                  <th style={{ ...TH_STYLE, minWidth: 150 }}>File</th>
+                  {canEdit && <th style={{ ...TH_STYLE, minWidth: 140 }}>Next Action</th>}
+                  <th style={{ ...TH_STYLE, width: 44 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {docs.map((doc) => {
-                  const isBusy   = busy === doc.id;
-                  const err      = rowError?.docId === doc.id ? rowError.msg : null;
-                  const isReject = rejectDoc === doc.id;
-                  const isEdit   = editRemarkDoc === doc.id;
+                {docs.map(doc => {
+                  const isBusy = busy === doc.id;
+                  const err    = rowError?.docId === doc.id ? rowError.msg : null;
+                  const coll   = doc.collectionStatus ?? 'PENDING_COLLECTION';
+                  const up     = doc.uploadStatus     ?? 'NOT_UPLOADED';
+                  const ver    = doc.verificationStatus ?? 'NOT_VERIFIED';
+                  const hasFile = !!(doc.fileId || doc.fileUrl);
+                  const isRejecting = rejectDoc === doc.id;
+                  const isEditingRemark = editRemarkDoc === doc.id;
 
-                  const coll = doc.collectionStatus ?? 'PENDING_COLLECTION';
-                  const up   = doc.uploadStatus ?? 'NOT_UPLOADED';
-                  const ver  = doc.verificationStatus ?? 'NOT_VERIFIED';
+                  /**
+                   * Primary-action priority (spec order):
+                   *  1. PENDING_COLLECTION            → Mark Collected
+                   *  2. COLLECTED + NOT_UPLOADED      → Upload File
+                   *  3. UPLOADED/COLLECTED + NOT_VER  → Verify
+                   *  4. REJECTED                      → Replace File
+                   *  5. VERIFIED / NOT_REQUIRED       → no action button
+                   */
+                  type PA = { label: string; isPrimary?: boolean; onClick: () => void } | null;
+                  let pa: PA = null;
+                  if (coll !== 'NOT_REQUIRED' && canEdit) {
+                    if (coll === 'PENDING_COLLECTION')
+                      pa = { label: isBusy ? '…' : 'Mark Collected', isPrimary: true, onClick: () => callAction(doc.id, 'collect') };
+                    else if (coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver !== 'REJECTED')
+                      pa = { label: isBusy && uploadingDoc === doc.id ? '…' : 'Upload File', onClick: () => triggerUpload(doc.id) };
+                    else if (up === 'UPLOADED' && ver === 'NOT_VERIFIED')
+                      pa = { label: isBusy ? '…' : 'Verify', isPrimary: true, onClick: () => callAction(doc.id, 'verify') };
+                    else if (ver === 'REJECTED')
+                      pa = { label: isBusy && uploadingDoc === doc.id ? '…' : 'Replace File', onClick: () => triggerUpload(doc.id) };
+                  }
 
-                  // Which collection actions to show
-                  const canMarkCollected   = canEdit && coll === 'PENDING_COLLECTION';
-                  const canMarkPending     = canEdit && (coll === 'COLLECTED_PHYSICAL' || coll === 'NOT_REQUIRED');
-                  const canMarkNotRequired = canEdit && coll !== 'NOT_REQUIRED';
-                  // Verify/Reject: only meaningful when there's something to review
-                  const canVerifyReject    = canEdit && ver === 'NOT_VERIFIED' && (coll === 'COLLECTED_PHYSICAL' || up === 'UPLOADED');
-
-                  const rowStyle: React.CSSProperties = {
-                    borderBottom: err ? 'none' : '1px solid rgba(15,23,42,0.06)',
-                    background: coll === 'NOT_REQUIRED' ? 'rgba(15,23,42,0.015)' : undefined,
-                  };
+                  const dimName = fmtDocName(doc);
 
                   return (
                     <React.Fragment key={doc.id}>
-                      <tr style={rowStyle}>
-                         {/* Document name */}
-                        <td style={{ ...TD_STYLE, fontWeight: 600, color: 'rgba(15,23,42,0.85)', minWidth: 140 }}>
-                          <div>{doc.documentTypeName ?? doc.documentType?.replace(/_/g, ' ') ?? '—'}</div>
+                      <tr style={{ borderBottom: err ? 'none' : '1px solid rgba(15,23,42,0.06)', background: coll === 'NOT_REQUIRED' ? 'rgba(15,23,42,0.013)' : undefined }}>
+                        {/* Document name */}
+                        <td style={{ ...TD_STYLE, fontWeight: 600, color: coll === 'NOT_REQUIRED' ? 'rgba(15,23,42,0.38)' : 'rgba(15,23,42,0.85)' }}>
+                          {dimName}
+                          {doc.remarks && <span title={doc.remarks} style={{ marginLeft: 5, fontSize: 11, color: 'rgba(15,23,42,0.35)' }}>💬</span>}
+                        </td>
+
+                        {/* Unified status — Collection · Upload · Verification */}
+                        <td style={TD_STYLE}>
+                          <CombinedStatusText doc={doc} />
+                          {ver === 'VERIFIED' && doc.verifiedAt && (
+                            <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.38)', marginTop: 3 }}>{fmtDate(doc.verifiedAt)}</div>
+                          )}
+                        </td>
+
+                        {/* File chip */}
+                        <td style={TD_STYLE}>
                           {doc.fileId ? (
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() => handleDownload(doc.fileId!, doc.id)}
-                              style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600, display: 'block', marginTop: 2, background: 'none', border: 'none', cursor: isBusy ? 'wait' : 'pointer', padding: 0 }}>
-                              View / Download ↗
+                            <button type="button" disabled={isBusy} onClick={() => handleDownload(doc.fileId!, doc.id)}
+                              title={doc.originalFilename ?? undefined}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.18)', color: '#1d4ed8', fontSize: 11, fontWeight: 600, cursor: isBusy ? 'wait' : 'pointer', maxWidth: 160, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtFilename(doc.originalFilename) || 'View file'}</span>
+                              {doc.fileSize && <span style={{ flexShrink: 0, opacity: 0.6 }}>· {fmtFileSize(doc.fileSize)}</span>}
                             </button>
                           ) : doc.fileUrl ? (
-                            <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
-                              style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600, display: 'block', marginTop: 2 }}>
-                              View file ↗
-                            </a>
-                          ) : null}
-                        </td>
-
-                        {/* Collection status */}
-                        <td style={TD_STYLE}>
-                          <LifecyclePill map={COLL_INFO} value={coll} />
-                        </td>
-
-                        {/* Upload status + file metadata */}
-                        <td style={TD_STYLE}>
-                          <LifecyclePill map={UP_INFO} value={up} />
-                          {doc.originalFilename && (
-                            <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.55)', marginTop: 3, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                 title={doc.originalFilename}>
-                              {doc.originalFilename}
-                            </div>
-                          )}
-                          {doc.fileSize != null && (
-                            <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.38)', lineHeight: 1.3 }}>
-                              {fmtFileSize(doc.fileSize)}
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Verification status */}
-                        <td style={TD_STYLE}>
-                          <LifecyclePill map={VER_INFO} value={ver} />
-                          {ver === 'VERIFIED' && doc.verifiedAt && (
-                            <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.4)', marginTop: 3 }}>
-                              {fmtDate(doc.verifiedAt)}
-                            </div>
-                          )}
-                        </td>
-
-                        {/* Remarks */}
-                        <td style={{ ...TD_STYLE, maxWidth: 220 }}>
-                          {isEdit ? (
-                            <div style={{ display: 'grid', gap: 5 }}>
-                              <textarea
-                                autoFocus
-                                value={editRemarkValue}
-                                onChange={(e) => setEditRemarkValue(e.target.value)}
-                                rows={2}
-                                style={{ fontSize: 12, resize: 'vertical', width: '100%', padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.18)' }}
-                                placeholder="Enter remarks…"
-                              />
-                              <div style={{ display: 'flex', gap: 4 }}>
-                                <SmallBtn label={isBusy ? '…' : 'Save'} primary disabled={isBusy || !editRemarkValue.trim() && !doc.remarks}
-                                  onClick={() => submitEditRemark(doc.id)} />
-                                <SmallBtn label="Cancel" onClick={() => { setEditRemarkDoc(null); setEditRemarkValue(''); }} />
-                              </div>
-                            </div>
+                            <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--color-primary)', fontWeight: 600 }}>View ↗</a>
                           ) : (
-                            <div>
-                              <span style={{ color: doc.remarks ? 'rgba(15,23,42,0.72)' : 'rgba(15,23,42,0.28)', fontSize: 12 }}>
-                                {doc.remarks || '—'}
-                              </span>
-                              {canEdit && (
-                                <button type="button" onClick={() => { setEditRemarkDoc(doc.id); setEditRemarkValue(doc.remarks ?? ''); setRejectDoc(null); }}
-                                  style={{ display: 'block', marginTop: 3, fontSize: 10, color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
-                                  {doc.remarks ? 'Edit' : '+ Add remark'}
-                                </button>
-                              )}
-                            </div>
+                            <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.28)' }}>No file</span>
                           )}
                         </td>
 
-                        {/* Actions */}
+                        {/* Primary action / inline forms */}
                         {canEdit && (
                           <td style={TD_STYLE}>
-                            {isReject ? (
-                              <div style={{ display: 'grid', gap: 5 }}>
-                                <textarea
-                                  autoFocus
-                                  value={rejectReason}
-                                  onChange={(e) => setRejectReason(e.target.value)}
-                                  rows={2}
-                                  style={{ fontSize: 12, resize: 'vertical', width: '100%', padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.4)' }}
-                                  placeholder="Reason for rejection (required)…"
-                                />
+                            {isRejecting ? (
+                              <div style={{ display: 'grid', gap: 5, minWidth: 180 }}>
+                                <textarea autoFocus value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={2}
+                                  style={{ fontSize: 12, resize: 'vertical', width: '100%', padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.35)' }}
+                                  placeholder="Reason (required)…" />
                                 <div style={{ display: 'flex', gap: 4 }}>
-                                  <SmallBtn label={isBusy ? '…' : 'Confirm Reject'} danger disabled={isBusy || !rejectReason.trim()}
-                                    onClick={() => submitReject(doc.id)} />
-                                  <SmallBtn label="Cancel" onClick={() => { setRejectDoc(null); setRejectReason(''); }} />
+                                  <button type="button" className="btn" disabled={isBusy || !rejectReason.trim()}
+                                    style={{ fontSize: 11, padding: '3px 9px', background: 'rgba(220,38,38,0.09)', color: '#991b1b', borderColor: 'rgba(220,38,38,0.22)' }}
+                                    onClick={() => submitReject(doc.id)}>{isBusy ? '…' : 'Confirm'}</button>
+                                  <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 9px' }}
+                                    onClick={() => { setRejectDoc(null); setRejectReason(''); }}>Cancel</button>
                                 </div>
                               </div>
-                            ) : (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                {canMarkCollected && (
-                                  <SmallBtn label={isBusy ? '…' : 'Mark Collected'} disabled={isBusy}
-                                    onClick={() => callAction(doc.id, 'collect')} />
-                                )}
-                                {canMarkPending && (
-                                  <SmallBtn label={isBusy ? '…' : 'Mark Pending'} disabled={isBusy}
-                                    onClick={() => callAction(doc.id, 'mark-pending')} />
-                                )}
-                                {canMarkNotRequired && (
-                                  <SmallBtn label="Not Required" disabled={isBusy}
-                                    onClick={() => callAction(doc.id, 'mark-not-required')} />
-                                )}
-                                {/* Upload: available when doc is not NOT_REQUIRED */}
-                                {coll !== 'NOT_REQUIRED' && (
-                                  <SmallBtn
-                                    label={isBusy && uploadingDoc === doc.id ? '…' : (up === 'UPLOADED' ? 'Replace File' : 'Upload File')}
-                                    disabled={isBusy}
-                                    onClick={() => {
-                                      setUploadingDoc(doc.id);
-                                      setTimeout(() => uploadInputRef.current?.click(), 0);
-                                    }}
-                                  />
-                                )}
-                                {canVerifyReject && (
-                                  <>
-                                    <SmallBtn label={isBusy ? '…' : 'Verify'} primary disabled={isBusy}
-                                      onClick={() => callAction(doc.id, 'verify')} />
-                                    <SmallBtn label="Reject" danger disabled={isBusy}
-                                      onClick={() => { setRejectDoc(doc.id); setRejectReason(''); setEditRemarkDoc(null); }} />
-                                  </>
-                                )}
-                                {!canMarkCollected && !canMarkPending && !canMarkNotRequired && !canVerifyReject && coll === 'NOT_REQUIRED' && (
-                                  <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.32)' }}>—</span>
-                                )}
+                            ) : isEditingRemark ? (
+                              <div style={{ display: 'grid', gap: 5, minWidth: 180 }}>
+                                <textarea autoFocus value={editRemarkValue} onChange={e => setEditRemarkValue(e.target.value)} rows={2}
+                                  style={{ fontSize: 12, resize: 'vertical', width: '100%', padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.18)' }}
+                                  placeholder="Enter remark…" />
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  <button type="button" className="btn" disabled={isBusy} style={{ fontSize: 11, padding: '3px 9px' }}
+                                    onClick={() => submitEditRemark(doc.id)}>{isBusy ? '…' : 'Save'}</button>
+                                  <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 9px' }}
+                                    onClick={() => { setEditRemarkDoc(null); setEditRemarkValue(''); }}>Cancel</button>
+                                </div>
                               </div>
-                            )}
+                            ) : pa ? (
+                              <button type="button" className={pa.isPrimary ? 'btn' : 'btn secondary'} disabled={isBusy}
+                                onClick={pa.onClick}
+                                style={{ fontSize: 11, padding: '4px 12px', whiteSpace: 'nowrap', ...(isBusy ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}>
+                                {pa.label}
+                              </button>
+                            ) : coll === 'NOT_REQUIRED' ? (
+                              <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.28)', fontStyle: 'italic' }}>Not required</span>
+                            ) : ver === 'VERIFIED' ? (
+                              <span style={{ fontSize: 11, color: '#166534', fontWeight: 700 }}>✓ Verified</span>
+                            ) : null}
                           </td>
                         )}
-                      </tr>
 
-                      {/* Inline error row */}
+                        {/* Kebab */}
+                        <td style={{ ...TD_STYLE, textAlign: 'right' }}>
+                          <DocMoreMenu doc={doc} canEdit={canEdit} isBusy={isBusy}
+                            onCollect={() => callAction(doc.id, 'collect')}
+                            onMarkPending={() => callAction(doc.id, 'mark-pending')}
+                            onMarkNotRequired={() => callAction(doc.id, 'mark-not-required')}
+                            onUpload={() => triggerUpload(doc.id)}
+                            onVerify={() => callAction(doc.id, 'verify')}
+                            onReject={() => { setRejectDoc(doc.id); setRejectReason(''); setEditRemarkDoc(null); }}
+                            onEditRemark={() => { setEditRemarkDoc(doc.id); setEditRemarkValue(doc.remarks ?? ''); setRejectDoc(null); }}
+                            onView={() => { if (doc.fileId) handleDownload(doc.fileId, doc.id); else if (doc.fileUrl) window.open(doc.fileUrl, '_blank'); }}
+                            onSaveDownload={() => { if (doc.fileId) handleSaveDownload(doc.fileId, doc.originalFilename ?? 'document'); }}
+                          />
+                        </td>
+                      </tr>
                       {err && (
                         <tr style={{ borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
-                          <td colSpan={canEdit ? 6 : 5}
-                            style={{ padding: '4px 12px 10px', color: '#b91c1c', fontSize: 12 }}>
-                            ⚠ {err}
-                          </td>
+                          <td colSpan={canEdit ? 5 : 4} style={{ padding: '4px 12px 10px', color: '#b91c1c', fontSize: 12 }}>⚠ {err}</td>
                         </tr>
                       )}
                     </React.Fragment>
@@ -987,6 +974,103 @@ function DocumentsTab({
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {docs.length > 0 && (
+        <div className="doc-card-list">
+          {docs.map(doc => {
+            const isBusy  = busy === doc.id;
+            const err     = rowError?.docId === doc.id ? rowError.msg : null;
+            const coll    = doc.collectionStatus ?? 'PENDING_COLLECTION';
+            const up      = doc.uploadStatus ?? 'NOT_UPLOADED';
+            const ver     = doc.verificationStatus ?? 'NOT_VERIFIED';
+            const hasFile = !!(doc.fileId || doc.fileUrl);
+            const isRej   = rejectDoc === doc.id;
+            const isEditR = editRemarkDoc === doc.id;
+            const dimName = fmtDocName(doc);
+
+            // Same priority as the table
+            let cardLabel = ''; let cardAction: (() => void) | null = null;
+            if (coll !== 'NOT_REQUIRED' && canEdit) {
+              if (coll === 'PENDING_COLLECTION')                                            { cardLabel = 'Mark Collected';  cardAction = () => callAction(doc.id, 'collect'); }
+              else if (coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver !== 'REJECTED') { cardLabel = 'Upload File';     cardAction = () => triggerUpload(doc.id); }
+              else if (up === 'UPLOADED' && ver === 'NOT_VERIFIED')                        { cardLabel = 'Verify';          cardAction = () => callAction(doc.id, 'verify'); }
+              else if (ver === 'REJECTED')                                                 { cardLabel = 'Replace File';    cardAction = () => triggerUpload(doc.id); }
+            }
+            const isPrimaryCard = cardLabel === 'Mark Collected' || cardLabel === 'Verify';
+
+            return (
+              <div key={doc.id} className="card" style={{ padding: '14px 16px', display: 'grid', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: coll === 'NOT_REQUIRED' ? 'rgba(15,23,42,0.38)' : 'rgba(15,23,42,0.85)' }}>
+                    {dimName}{doc.remarks && <span title={doc.remarks} style={{ marginLeft: 5 }}>💬</span>}
+                  </span>
+                  <div style={{ flexShrink: 0 }}><CombinedStatusText doc={doc} /></div>
+                </div>
+
+                {hasFile && (
+                  <button type="button" disabled={isBusy}
+                    onClick={() => { if (doc.fileId) handleDownload(doc.fileId, doc.id); else if (doc.fileUrl) window.open(doc.fileUrl, '_blank'); }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 6, background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.18)', color: '#1d4ed8', fontSize: 12, fontWeight: 600, cursor: isBusy ? 'wait' : 'pointer', width: 'fit-content' }}>
+                    {fmtFilename(doc.originalFilename) || 'View file'}
+                    {doc.fileSize && <span style={{ opacity: 0.6 }}>· {fmtFileSize(doc.fileSize)}</span>}
+                  </button>
+                )}
+
+                {isRej && (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <textarea autoFocus value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={2}
+                      style={{ fontSize: 13, padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(220,38,38,0.35)', resize: 'vertical', width: '100%' }} placeholder="Reason (required)…" />
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" className="btn" disabled={isBusy || !rejectReason.trim()}
+                        style={{ fontSize: 12, padding: '5px 12px', background: 'rgba(220,38,38,0.09)', color: '#991b1b', borderColor: 'rgba(220,38,38,0.22)' }}
+                        onClick={() => submitReject(doc.id)}>{isBusy ? '…' : 'Confirm Reject'}</button>
+                      <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '5px 10px' }}
+                        onClick={() => { setRejectDoc(null); setRejectReason(''); }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {isEditR && (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <textarea autoFocus value={editRemarkValue} onChange={e => setEditRemarkValue(e.target.value)} rows={2}
+                      style={{ fontSize: 13, padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.18)', resize: 'vertical', width: '100%' }} placeholder="Enter remark…" />
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" className="btn" disabled={isBusy} style={{ fontSize: 12, padding: '5px 12px' }}
+                        onClick={() => submitEditRemark(doc.id)}>{isBusy ? '…' : 'Save'}</button>
+                      <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '5px 10px' }}
+                        onClick={() => { setEditRemarkDoc(null); setEditRemarkValue(''); }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {err && <div style={{ fontSize: 12, color: '#b91c1c' }}>⚠ {err}</div>}
+
+                {!isRej && !isEditR && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {cardAction && (
+                      <button type="button" className={isPrimaryCard ? 'btn' : 'btn secondary'} disabled={isBusy}
+                        onClick={cardAction} style={{ fontSize: 12, padding: '5px 14px' }}>
+                        {isBusy ? '…' : cardLabel}
+                      </button>
+                    )}
+                    <DocMoreMenu doc={doc} canEdit={canEdit} isBusy={isBusy}
+                      onCollect={() => callAction(doc.id, 'collect')}
+                      onMarkPending={() => callAction(doc.id, 'mark-pending')}
+                      onMarkNotRequired={() => callAction(doc.id, 'mark-not-required')}
+                      onUpload={() => triggerUpload(doc.id)}
+                      onVerify={() => callAction(doc.id, 'verify')}
+                      onReject={() => { setRejectDoc(doc.id); setRejectReason(''); setEditRemarkDoc(null); }}
+                      onEditRemark={() => { setEditRemarkDoc(doc.id); setEditRemarkValue(doc.remarks ?? ''); setRejectDoc(null); }}
+                      onView={() => { if (doc.fileId) handleDownload(doc.fileId, doc.id); else if (doc.fileUrl) window.open(doc.fileUrl, '_blank'); }}
+                      onSaveDownload={() => { if (doc.fileId) handleSaveDownload(doc.fileId, doc.originalFilename ?? 'document'); }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1170,7 +1254,7 @@ function AccessTab({
                         </button>
                         <button
                           type="button" className="btn secondary"
-                          style={{ fontSize: 12, padding: '6px 12px', opacity: 0.55, cursor: 'not-allowed', color: '#991b1b' }}
+                          style={{ fontSize: 12, padding: '6px 12px', opacity: 0.55, cursor: 'not-allowed' }}
                           disabled
                           title="Login deactivation is not yet available. Contact your system administrator."
                         >
@@ -1544,7 +1628,7 @@ export function StudentProfilePage() {
                     <button type="button" className="btn secondary" onClick={() => setDeactivateConfirm(false)} disabled={deactivating} style={{ flex: 1 }}>Cancel</button>
                     <button
                       type="button" className="btn"
-                      style={{ flex: 1, background: 'linear-gradient(180deg,#dc2626,#b91c1c)', borderColor: '#b91c1c' }}
+                      style={{ flex: 1, background: 'linear-gradient(180deg,#dc2626,#b91c1b)', borderColor: '#b91c1b' }}
                       disabled={deactivating}
                       onClick={async () => {
                         setDeactivating(true);
