@@ -3336,4 +3336,15 @@ textarea:disabled {
     display: grid;
     gap: 10px;
   }
+
+  /*
+   * backdrop-filter creates a new CSS stacking context on each card.
+   * This traps absolutely-positioned children (dropdown menus) inside each
+   * card's own stacking context, so they render BEHIND the next card.
+   * Remove it on mobile so the dropdown's z-index: 999 works site-wide.
+   */
+  .doc-card-list .card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }

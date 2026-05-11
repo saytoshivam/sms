@@ -681,14 +681,14 @@ function DocMoreMenu({
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
       <button type="button" disabled={isBusy} onClick={() => setOpen(v => !v)}
-        style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid rgba(15,23,42,0.13)', background: 'none', cursor: isBusy ? 'not-allowed' : 'pointer', color: 'rgba(15,23,42,0.5)', fontSize: 16, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+        style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid rgba(15,23,42,0.13)', background: 'none', cursor: isBusy ? 'not-allowed' : 'pointer', color: 'rgba(15,23,42,0.5)', fontSize: 18, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         title="More actions">⋯</button>
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 999, background: '#fff', border: '1px solid rgba(15,23,42,0.11)', borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.12)', minWidth: 170, padding: '4px 0' }}>
+        <div style={{ position: 'absolute', right: 0, bottom: '100%', marginBottom: 4, zIndex: 9999, background: '#fff', border: '1px solid rgba(15,23,42,0.11)', borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.18)', minWidth: 180, padding: '4px 0' }}>
           {items.map(item => (
             <button key={item.label} type="button"
               onClick={() => { setOpen(false); item.onClick(); }}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', color: item.danger ? '#991b1b' : 'rgba(15,23,42,0.8)' }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', color: item.danger ? '#991b1b' : 'rgba(15,23,42,0.8)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = item.danger ? 'rgba(220,38,38,0.06)' : 'rgba(15,23,42,0.04)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; }}
             >{item.label}</button>
