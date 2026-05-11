@@ -359,7 +359,7 @@ public class StaffImportService {
 
         staff.setCreatedBy("bulk-import");
         staff.setUpdatedBy("bulk-import");
-        staff = staffRepo.save(staff);
+        final Staff savedStaff = staffRepo.save(staff);
 
         // ── 2. Roles ────────────────────────────────────────────────────────
         String rolesRaw = normalise(row.getRoles());
@@ -378,7 +378,7 @@ public class StaffImportService {
             for (Integer subId : row.getResolvedSubjectIds()) {
                 subjectRepo.findById(subId).ifPresent(subject -> {
                     StaffTeachableSubject ts = new StaffTeachableSubject();
-                    ts.setStaff(staff);
+                    ts.setStaff(savedStaff);
                     ts.setSubject(subject);
                     teachableSubjectRepo.save(ts);
                 });
@@ -393,7 +393,7 @@ public class StaffImportService {
             User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
             if (existingByEmail != null) {
                 // Link the existing user — no duplicate
-                existingByEmail.setLinkedStaff(staff);
+                existingByEmail.setLinkedStaff(savedStaff);
                 existingByEmail.setSchool(school);
                 existingByEmail.setEnabled(true);
                 if (!roleEntities.isEmpty()) existingByEmail.setRoles(roleEntities);
@@ -407,7 +407,7 @@ public class StaffImportService {
                 user.setPassword(passwordEncoder.encode(tempPwd));
                 user.setEnabled(true);
                 user.setSchool(school);
-                user.setLinkedStaff(staff);
+                user.setLinkedStaff(savedStaff);
                 user.setRoles(roleEntities);
                 userRepo.save(user);
                 // Note: temp password is not returned on import (too many rows)
@@ -416,7 +416,6 @@ public class StaffImportService {
             }
         } else if (!roleEntities.isEmpty()) {
             // Update roles on any existing login without creating a new one
-            final Staff savedStaff = staff;
             userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId2, savedStaff.getId()).ifPresent(u -> {
                 u.setRoles(roleEntities);
                 userRepo.save(u);

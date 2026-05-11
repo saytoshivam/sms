@@ -6,7 +6,7 @@ import com.myhaimi.sms.DTO.staff.StaffReadinessSummaryDTO;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.StaffStatus;
 import com.myhaimi.sms.entity.enums.StaffType;
-import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -70,7 +70,7 @@ public class StaffReadinessService {
         // ── 5. Documents map  (staffId → pending doc count) ──────────────────
         Map<Integer, Long> pendingDocCountByStaffId = new HashMap<>();
         for (StaffDocument doc : documentRepo.findByStaff_School_Id(schoolId)) {
-            if (doc.getCollectionStatus() == StudentDocumentCollectionStatus.PENDING_COLLECTION) {
+            if (doc.getCollectionStatus() == DocumentCollectionStatus.PENDING_COLLECTION) {
                 pendingDocCountByStaffId.merge(doc.getStaff().getId(), 1L, Long::sum);
             }
         }
