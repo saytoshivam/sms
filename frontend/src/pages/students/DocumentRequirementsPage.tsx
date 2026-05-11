@@ -125,6 +125,7 @@ function RequirementsPanel({
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+  const [showApplyConfirm, setShowApplyConfirm] = useState(false);
   const [newDocName, setNewDocName] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -252,7 +253,7 @@ function RequirementsPanel({
             <button
               type="button"
               disabled={isSaving || dirty}
-              onClick={() => { setApplyResult(null); applyMutation.mutate(); }}
+              onClick={() => { setApplyResult(null); setSaveError(null); setShowApplyConfirm(true); }}
               title={dirty ? 'Save changes first before applying to students' : 'Create missing document rows for all active students'}
               style={{
                 padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(59,130,246,0.35)',
@@ -283,6 +284,55 @@ function RequirementsPanel({
       {applyResult && (
         <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(22,163,74,0.09)', border: '1px solid rgba(22,163,74,0.25)', fontSize: 13, color: '#166534' }}>
           ✓ {applyResult.message}
+        </div>
+      )}
+
+      {/* Confirmation dialog — shown before Apply to Existing Students */}
+      {showApplyConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 14, padding: '28px 32px', maxWidth: 480, width: '92%',
+            boxShadow: '0 20px 60px rgba(15,23,42,0.18)',
+          }}>
+            <div style={{ fontWeight: 900, fontSize: 17, marginBottom: 10, color: 'rgba(15,23,42,0.88)' }}>
+              Apply requirements to existing students?
+            </div>
+            <div style={{
+              padding: '10px 14px', borderRadius: 8, background: 'rgba(234,179,8,0.09)',
+              border: '1px solid rgba(234,179,8,0.3)', fontSize: 13, color: '#854d0e', marginBottom: 18, lineHeight: 1.6,
+            }}>
+              ⚠ This will create missing checklist rows for <strong>all active students</strong>.<br />
+              Existing uploaded documents will <strong>not be deleted</strong>.
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.55)', marginBottom: 22, lineHeight: 1.55 }}>
+              Only documents that are currently <strong>missing</strong> from a student's checklist will be added.
+              Documents already collected, uploaded, or verified are untouched.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setShowApplyConfirm(false)}
+                disabled={applyMutation.isPending}
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(15,23,42,0.18)', background: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'rgba(15,23,42,0.65)' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={applyMutation.isPending}
+                onClick={() => {
+                  setShowApplyConfirm(false);
+                  applyMutation.mutate();
+                }}
+                style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#1d4ed8', color: '#fff', fontSize: 13, fontWeight: 700, cursor: applyMutation.isPending ? 'not-allowed' : 'pointer' }}
+              >
+                {applyMutation.isPending ? 'Applying…' : 'Confirm — Apply'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

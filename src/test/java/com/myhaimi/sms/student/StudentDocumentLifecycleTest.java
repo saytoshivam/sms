@@ -3,9 +3,12 @@ package com.myhaimi.sms.student;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.entity.Student;
 import com.myhaimi.sms.entity.StudentDocument;
+import com.myhaimi.sms.entity.enums.DocumentRequirementStatus;
+import com.myhaimi.sms.entity.enums.DocumentTargetType;
 import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import com.myhaimi.sms.modules.files.FileService;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.service.impl.StudentAccessGuard;
 import com.myhaimi.sms.service.impl.StudentCallerContext;
@@ -40,17 +43,20 @@ import static org.mockito.Mockito.*;
 class StudentDocumentLifecycleTest {
 
     // ── mocked dependencies ─────────────────────────────────────────────────────
-    @Mock StudentRepo                  studentRepo;
-    @Mock SchoolRepo                   schoolRepo;
-    @Mock ClassGroupRepo               classGroupRepo;
-    @Mock GuardianRepo                 guardianRepo;
-    @Mock StudentGuardianRepo          studentGuardianRepo;
-    @Mock AcademicYearRepo             academicYearRepo;
-    @Mock StudentAcademicEnrollmentRepo enrollmentRepo;
-    @Mock StudentMedicalInfoRepo       medicalRepo;
-    @Mock StudentDocumentRepo          documentRepo;
-    @Mock UserRepo                     userRepo;
-    @Mock StudentAccessGuard           accessGuard;
+    @Mock StudentRepo                      studentRepo;
+    @Mock SchoolRepo                       schoolRepo;
+    @Mock ClassGroupRepo                   classGroupRepo;
+    @Mock GuardianRepo                     guardianRepo;
+    @Mock StudentGuardianRepo              studentGuardianRepo;
+    @Mock AcademicYearRepo                 academicYearRepo;
+    @Mock StudentAcademicEnrollmentRepo    enrollmentRepo;
+    @Mock StudentMedicalInfoRepo           medicalRepo;
+    @Mock StudentDocumentRepo              documentRepo;
+    @Mock UserRepo                         userRepo;
+    @Mock StudentAccessGuard               accessGuard;
+    @Mock FileService                      fileService;
+    @Mock SchoolDocumentRequirementRepo    requirementRepo;
+    @Mock DocumentTypeRepo                 documentTypeRepo;
 
     @InjectMocks
     StudentService service;
@@ -115,9 +121,18 @@ class StudentDocumentLifecycleTest {
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("New student profile fetch creates 6 default document checklist rows")
+    @DisplayName("New student profile fetch creates 6 default document checklist rows (no school config)")
     void newStudent_gets6DefaultDocumentRows() {
         Student student = stubStudent();
+        when(studentRepo.findById(STUDENT_ID)).thenReturn(Optional.of(student));
+
+        // No school requirements configured — fall back to defaults
+        when(requirementRepo.findActiveChecklistRequirements(
+                SCHOOL_ID, DocumentTargetType.STUDENT, DocumentRequirementStatus.NOT_REQUIRED))
+                .thenReturn(List.of());
+        // DocumentType table also empty (seed not yet run on test DB) → synthetic fallback
+        when(documentTypeRepo.findByCodeAndTargetType(any(), any()))
+                .thenReturn(Optional.empty());
 
         // No existing documents
         when(documentRepo.findByStudent_IdOrderByCreatedAtDesc(STUDENT_ID))
@@ -125,18 +140,11 @@ class StudentDocumentLifecycleTest {
         when(documentRepo.save(any(StudentDocument.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        // Trigger via public helper used inside buildProfile
-        service.ensureDefaultDocumentsExistForStudent(STUDENT_ID);
-        // ensureDefaultDocumentsExistForStudent does studentRepo.findById first
-        when(studentRepo.findById(STUDENT_ID)).thenReturn(Optional.of(student));
-
-        // Re-invoke now that studentRepo is stubbed
         service.ensureDefaultDocumentsExistForStudent(STUDENT_ID);
 
         // 6 saves expected (one per default doc type)
-        @SuppressWarnings("unchecked")
         ArgumentCaptor<StudentDocument> captor = ArgumentCaptor.forClass(StudentDocument.class);
-        verify(documentRepo, atLeast(6)).save(captor.capture());
+        verify(documentRepo, times(6)).save(captor.capture());
 
         List<String> savedTypes = captor.getAllValues().stream()
                 .map(StudentDocument::getDocumentType)
@@ -161,6 +169,13 @@ class StudentDocumentLifecycleTest {
     void oldStudent_onlyMissingDocumentsCreated() {
         Student student = stubStudent();
         when(studentRepo.findById(STUDENT_ID)).thenReturn(Optional.of(student));
+
+        // No school requirements configured — fall back to defaults
+        when(requirementRepo.findActiveChecklistRequirements(
+                SCHOOL_ID, DocumentTargetType.STUDENT, DocumentRequirementStatus.NOT_REQUIRED))
+                .thenReturn(List.of());
+        when(documentTypeRepo.findByCodeAndTargetType(any(), any()))
+                .thenReturn(Optional.empty());
 
         // Two existing documents already present
         StudentDocument existing1 = new StudentDocument();
