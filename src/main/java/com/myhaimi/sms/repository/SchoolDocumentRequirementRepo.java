@@ -5,6 +5,7 @@ import com.myhaimi.sms.entity.enums.DocumentTargetType;
 import com.myhaimi.sms.entity.enums.DocumentRequirementStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -31,18 +32,22 @@ public interface SchoolDocumentRequirementRepo extends JpaRepository<SchoolDocum
     /**
      * Active requirements that are REQUIRED or OPTIONAL (i.e., not explicitly NOT_REQUIRED).
      * Used when generating the student document checklist at onboarding.
+     * <p>
+     * {@code @Param} is mandatory here: the JPQL uses named parameters and Spring Data JPA
+     * cannot reliably recover parameter names without the annotation (depends on
+     * compiler {@code -parameters} flag which is not guaranteed in all build environments).
      */
     @Query("""
            SELECT r FROM SchoolDocumentRequirement r
-           WHERE r.schoolId = :schoolId
-             AND r.targetType = :targetType
-             AND r.active = true
+           WHERE r.schoolId    = :schoolId
+             AND r.targetType  = :targetType
+             AND r.active      = true
              AND r.requirementStatus <> :excludeStatus
            ORDER BY r.sortOrder ASC
            """)
     List<SchoolDocumentRequirement> findActiveChecklistRequirements(
-            Integer schoolId,
-            DocumentTargetType targetType,
-            DocumentRequirementStatus excludeStatus);
+            @Param("schoolId")      Integer schoolId,
+            @Param("targetType")    DocumentTargetType targetType,
+            @Param("excludeStatus") DocumentRequirementStatus excludeStatus);
 }
 
