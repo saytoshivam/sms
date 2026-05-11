@@ -221,7 +221,7 @@ class StudentDocumentLifecycleTest {
                 .thenReturn(Optional.of(student));
         when(documentRepo.findById(DOC_ID)).thenReturn(Optional.of(doc));
 
-        assertThatThrownBy(() -> service.verifyDocument(STUDENT_ID, DOC_ID, null))
+        assertThatThrownBy(() -> service.verifyDocument(STUDENT_ID, DOC_ID, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("collected or uploaded before verification");
     }
@@ -243,9 +243,10 @@ class StudentDocumentLifecycleTest {
         when(documentRepo.findById(DOC_ID)).thenReturn(Optional.of(doc));
         when(documentRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        var result = service.verifyDocument(STUDENT_ID, DOC_ID, "Looks good");
+        var result = service.verifyDocument(STUDENT_ID, DOC_ID, "Looks good", null);
 
         assertThat(result.getVerificationStatus()).isEqualTo(StudentDocumentVerificationStatus.VERIFIED);
+        assertThat(result.getVerificationSource()).isEqualTo(com.myhaimi.sms.entity.enums.VerificationSource.PHYSICAL_ORIGINAL);
         assertThat(result.getVerifiedAt()).isNotNull();
         assertThat(result.getVerifiedByStaffId()).isEqualTo(42); // staffId from editorCtx
         assertThat(result.getRemarks()).isEqualTo("Looks good");

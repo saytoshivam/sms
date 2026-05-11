@@ -5,6 +5,7 @@ import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import com.myhaimi.sms.entity.enums.VerificationSource;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -75,6 +76,15 @@ public class StudentDocument {
     @Enumerated(EnumType.STRING)
     @Column(name = "verification_status", nullable = false, length = 32)
     private StudentDocumentVerificationStatus verificationStatus;
+
+    /**
+     * How the document was verified — null until verificationStatus = VERIFIED.
+     * PHYSICAL_ORIGINAL: admin inspected the physical original (no upload needed).
+     * UPLOADED_COPY: verification done against the uploaded scanned copy.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_source", nullable = true, length = 32)
+    private VerificationSource verificationSource;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = true, length = 32)

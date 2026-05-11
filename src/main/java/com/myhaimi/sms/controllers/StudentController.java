@@ -217,7 +217,8 @@ public class StudentController {
             @RequestBody(required = false) StudentDocumentActionDTO dto) {
         try {
             String remarks = (dto != null) ? dto.getRemarks() : null;
-            return ResponseEntity.ok(studentService.verifyDocument(studentId, docId, remarks));
+            var source = (dto != null) ? dto.getVerificationSource() : null;
+            return ResponseEntity.ok(studentService.verifyDocument(studentId, docId, remarks, source));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (AccessDeniedException ex) {

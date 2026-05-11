@@ -805,10 +805,14 @@ public class StudentService {
     /**
      * Verify a document.
      * Sets verificationStatus=VERIFIED, verifiedAt timestamp, and verifiedByStaffId when available.
-     * Optionally captures remarks.
+     * Supports both physical verification (no upload needed) and uploaded-copy verification.
+     *
+     * @param verificationSource explicit source; if null, inferred from upload/collection state.
      */
     @Transactional
-    public StudentDocumentSummaryDTO verifyDocument(Integer studentId, Integer docId, String remarks) {
+    public StudentDocumentSummaryDTO verifyDocument(Integer studentId, Integer docId,
+                                                    String remarks,
+                                                    com.myhaimi.sms.entity.enums.VerificationSource verificationSource) {
         Integer schoolId = requireSchoolId();
         StudentCallerContext ctx = accessGuard.resolve(schoolId);
         if (!ctx.canEdit()) {
@@ -822,13 +826,26 @@ public class StudentService {
                 .filter(d -> d.getStudent().getId().equals(student.getId()))
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
+        if (doc.getCollectionStatus() == StudentDocumentCollectionStatus.NOT_REQUIRED) {
+            throw new IllegalArgumentException("Cannot verify a document that is marked as not required.");
+        }
+
         boolean physicallyCollected = doc.getCollectionStatus() == StudentDocumentCollectionStatus.COLLECTED_PHYSICAL;
         boolean uploaded            = doc.getUploadStatus()     == StudentDocumentUploadStatus.UPLOADED;
         if (!physicallyCollected && !uploaded) {
             throw new IllegalArgumentException("Document must be collected or uploaded before verification.");
         }
 
+        // Infer verification source if not explicitly provided
+        com.myhaimi.sms.entity.enums.VerificationSource resolvedSource = verificationSource;
+        if (resolvedSource == null) {
+            resolvedSource = uploaded
+                    ? com.myhaimi.sms.entity.enums.VerificationSource.UPLOADED_COPY
+                    : com.myhaimi.sms.entity.enums.VerificationSource.PHYSICAL_ORIGINAL;
+        }
+
         doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
+        doc.setVerificationSource(resolvedSource);
         doc.setVerifiedAt(Instant.now());
         // Capture who verified the document (staff member linked to the current user)
         if (ctx.linkedStaffId() != null) {
@@ -957,6 +974,7 @@ public class StudentService {
         dto.setCollectionStatus(doc.getCollectionStatus());
         dto.setUploadStatus(doc.getUploadStatus());
         dto.setVerificationStatus(doc.getVerificationStatus());
+        dto.setVerificationSource(doc.getVerificationSource());
         dto.setDisplayStatus(computeDisplayStatus(doc));
         dto.setStatus(doc.getStatus());
         dto.setVerifiedByStaffId(doc.getVerifiedByStaffId());

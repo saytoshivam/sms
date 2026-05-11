@@ -98,6 +98,8 @@ export type StudentDocumentSummary = {
   collectionStatus?: string | null;
   uploadStatus?: string | null;
   verificationStatus?: string | null;
+  /** How the document was verified: PHYSICAL_ORIGINAL | UPLOADED_COPY. Null if not yet verified. */
+  verificationSource?: string | null;
   verifiedByStaffId?: number | null;
   verifiedAt?: string | null;
   remarks?: string | null;
@@ -553,12 +555,13 @@ function fmtFilename(name: string | null | undefined): string {
 
 /**
  * Three-axis status display: Collection · Upload · Verification
- * Replaces the single StatusPill in the table/cards.
+ * Verification is always shown based on verificationStatus, independent of uploadStatus.
  */
 function CombinedStatusText({ doc }: { doc: StudentDocumentSummary }) {
   const coll = doc.collectionStatus ?? 'PENDING_COLLECTION';
   const up   = doc.uploadStatus ?? 'NOT_UPLOADED';
   const ver  = doc.verificationStatus ?? 'NOT_VERIFIED';
+  const src  = doc.verificationSource;
 
   if (coll === 'NOT_REQUIRED') {
     return <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Not required</span>;
@@ -571,18 +574,26 @@ function CombinedStatusText({ doc }: { doc: StudentDocumentSummary }) {
     );
   }
 
-  // Collected — show upload + verification axes
+  // Collected — build parts: Collection · Upload · Verification (independently)
   const parts: { text: string; color: string }[] = [
     { text: 'Collected', color: '#1e40af' },
   ];
 
+  // Upload axis
   if (up === 'UPLOADED') {
     parts.push({ text: 'Uploaded', color: '#4338ca' });
-    if (ver === 'VERIFIED')      parts.push({ text: 'Verified ✓', color: '#166534' });
-    else if (ver === 'REJECTED') parts.push({ text: 'Rejected',   color: '#991b1b' });
-    else                         parts.push({ text: 'Not Verified', color: '#92400e' });
   } else {
-    parts.push({ text: 'Not Uploaded', color: 'rgba(15,23,42,0.38)' });
+    parts.push({ text: 'No file', color: 'rgba(15,23,42,0.35)' });
+  }
+
+  // Verification axis — independent of upload
+  if (ver === 'VERIFIED') {
+    const verLabel = src === 'PHYSICAL_ORIGINAL' ? 'Verified from original ✓' : 'Verified from upload ✓';
+    parts.push({ text: verLabel, color: '#166534' });
+  } else if (ver === 'REJECTED') {
+    parts.push({ text: 'Rejected', color: '#991b1b' });
+  } else {
+    parts.push({ text: 'Not verified', color: '#92400e' });
   }
 
   return (
@@ -600,12 +611,12 @@ function CombinedStatusText({ doc }: { doc: StudentDocumentSummary }) {
 // ─── Kebab "More" dropdown ────────────────────────────────────────────────────
 function DocMoreMenu({
   doc, canEdit, isBusy,
-  onCollect, onMarkPending, onMarkNotRequired, onUpload, onVerify,
+  onCollect, onMarkPending, onMarkNotRequired, onUpload, onVerifyPhysical, onVerifyUploaded,
   onReject, onEditRemark, onView, onSaveDownload,
 }: {
   doc: StudentDocumentSummary; canEdit: boolean; isBusy: boolean;
   onCollect: () => void; onMarkPending: () => void; onMarkNotRequired: () => void;
-  onUpload: () => void; onVerify: () => void; onReject: () => void;
+  onUpload: () => void; onVerifyPhysical: () => void; onVerifyUploaded: () => void; onReject: () => void;
   onEditRemark: () => void; onView: () => void; onSaveDownload: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -626,39 +637,41 @@ function DocMoreMenu({
   /**
    * Mirror the primary-action priority used in the table so the More menu
    * never duplicates the primary button.
-   *   collect  → PENDING_COLLECTION                           → "Mark Collected" is primary
-   *   upload   → COLLECTED + NOT_UPLOADED (not rejected)      → "Upload File" is primary
-   *   verify   → UPLOADED + NOT_VERIFIED                      → "Verify" is primary
-   *   replace  → REJECTED                                     → "Replace File" is primary
-   *   none     → VERIFIED / NOT_REQUIRED / etc.
+   *   collect         → PENDING_COLLECTION                                → "Mark Collected" is primary
+   *   verifyPhysical  → COLLECTED_PHYSICAL + NOT_UPLOADED + NOT_VERIFIED  → "Verify Physical" is primary
+   *   verifyUploaded  → UPLOADED + NOT_VERIFIED                           → "Verify" is primary
+   *   replace         → REJECTED                                          → "Replace File" is primary
+   *   none            → VERIFIED / NOT_REQUIRED / etc.
    */
-  const primaryType: 'collect' | 'upload' | 'verify' | 'replace' | 'none' =
-    !canEdit || coll === 'NOT_REQUIRED'                                              ? 'none'
-    : coll === 'PENDING_COLLECTION'                                                  ? 'collect'
-    : coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver !== 'REJECTED'       ? 'upload'
-    : up === 'UPLOADED' && ver === 'NOT_VERIFIED'                                    ? 'verify'
-    : ver === 'REJECTED'                                                             ? 'replace'
+  const primaryType: 'collect' | 'verifyPhysical' | 'verifyUploaded' | 'replace' | 'none' =
+    !canEdit || coll === 'NOT_REQUIRED'                                                     ? 'none'
+    : coll === 'PENDING_COLLECTION'                                                         ? 'collect'
+    : coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver === 'NOT_VERIFIED'          ? 'verifyPhysical'
+    : up === 'UPLOADED' && ver === 'NOT_VERIFIED'                                            ? 'verifyUploaded'
+    : ver === 'REJECTED'                                                                    ? 'replace'
     : 'none';
 
-  // canVerify across both axes (physical + uploaded)
+  // canVerify across both axes (physical collected OR uploaded)
   const canV = canEdit && ver === 'NOT_VERIFIED' && (coll === 'COLLECTED_PHYSICAL' || up === 'UPLOADED');
 
   const items = ([
     // ── File access ──
-    { label: 'View / Open',           onClick: onView,            show: hasFile },
-    { label: 'Download',              onClick: onSaveDownload,    show: !!doc.fileId },
-    // Replace file — secondary when file exists but not the primary-action state (REJECTED)
-    { label: 'Replace file',          onClick: onUpload,          show: canEdit && hasFile && coll !== 'NOT_REQUIRED' && primaryType !== 'replace' },
-    // ── Verification (secondary) ──
-    // Verify appears in More only when it is NOT already the primary button (e.g. collected but not uploaded)
-    { label: 'Verify',                onClick: onVerify,          show: canEdit && canV && primaryType !== 'verify' },
-    // Reject is always a secondary action; shown whenever the doc can be acted upon
+    { label: 'View / Open',           onClick: onView,              show: hasFile },
+    { label: 'Download',              onClick: onSaveDownload,      show: !!doc.fileId },
+    // Upload file — show when physically collected but no file yet
+    { label: 'Upload file',           onClick: onUpload,            show: canEdit && coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver !== 'REJECTED' },
+    // Replace file — secondary when file exists but REJECTED is handled as primary elsewhere
+    { label: 'Replace file',          onClick: onUpload,            show: canEdit && hasFile && coll !== 'NOT_REQUIRED' && primaryType !== 'replace' },
+    // ── Verification (secondary — appears in More only when not already primary) ──
+    // "Verify from original" — secondary when verifyPhysical is NOT the primary (e.g. file uploaded, verify from upload is primary)
+    { label: 'Verify from original',  onClick: onVerifyPhysical,    show: canEdit && canV && coll === 'COLLECTED_PHYSICAL' && primaryType !== 'verifyPhysical' },
+    // "Verify from upload" — secondary when verifyUploaded is NOT the primary (e.g. only physically collected is primary)
+    { label: 'Verify from upload',    onClick: onVerifyUploaded,    show: canEdit && canV && up === 'UPLOADED' && primaryType !== 'verifyUploaded' },
+    // Reject is always secondary
     { label: 'Reject',                onClick: onReject, danger: true, show: canEdit && canV },
     // ── Status transitions ──
-    // Mark Pending: rolls back from collected / not-required
-    { label: 'Mark Pending',          onClick: onMarkPending,     show: canEdit && (coll === 'COLLECTED_PHYSICAL' || coll === 'NOT_REQUIRED') },
-    // Mark Not Required: available unless already marked so
-    { label: 'Mark Not Required',     onClick: onMarkNotRequired, show: canEdit && coll !== 'NOT_REQUIRED' },
+    { label: 'Mark Pending',          onClick: onMarkPending,       show: canEdit && (coll === 'COLLECTED_PHYSICAL' || coll === 'NOT_REQUIRED') },
+    { label: 'Mark Not Required',     onClick: onMarkNotRequired,   show: canEdit && coll !== 'NOT_REQUIRED' },
     // ── Remarks ──
     { label: doc.remarks ? 'Edit Remark' : 'Add Remark', onClick: onEditRemark, show: canEdit },
   ] as { label: string; onClick: () => void; show: boolean; danger?: boolean }[]).filter(i => i.show);
@@ -764,12 +777,13 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
 
   function triggerUpload(docId: number) { setUploadingDoc(docId); setTimeout(() => uploadInputRef.current?.click(), 0); }
 
-  // ── Summary counts (exclude NOT_REQUIRED from totals) ─────────────────────
-  const active       = docs.filter(d => normDocStatus(d) !== 'NOT_REQUIRED');
-  const collected    = active.filter(d => ['COLLECTED_PHYSICAL','UPLOADED','VERIFIED','REJECTED'].includes(normDocStatus(d))).length;
-  const uploaded     = active.filter(d => ['UPLOADED','VERIFIED'].includes(normDocStatus(d))).length;
-  const verified     = active.filter(d => normDocStatus(d) === 'VERIFIED').length;
-  const pending      = active.filter(d => normDocStatus(d) === 'PENDING_COLLECTION').length;
+  // ── Summary counts (use raw lifecycle fields for accuracy) ──────────────────
+  const active    = docs.filter(d => (d.collectionStatus ?? 'PENDING_COLLECTION') !== 'NOT_REQUIRED');
+  const collected = active.filter(d => (d.collectionStatus ?? 'PENDING_COLLECTION') === 'COLLECTED_PHYSICAL').length;
+  const uploaded  = active.filter(d => (d.uploadStatus ?? 'NOT_UPLOADED') === 'UPLOADED').length;
+  // Verified = verificationStatus VERIFIED regardless of upload status (physical verify counts too)
+  const verified  = active.filter(d => (d.verificationStatus ?? 'NOT_VERIFIED') === 'VERIFIED').length;
+  const pending   = active.filter(d => (d.collectionStatus ?? 'PENDING_COLLECTION') === 'PENDING_COLLECTION').length;
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -852,21 +866,21 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
 
                   /**
                    * Primary-action priority (spec order):
-                   *  1. PENDING_COLLECTION            → Mark Collected
-                   *  2. COLLECTED + NOT_UPLOADED      → Upload File
-                   *  3. UPLOADED/COLLECTED + NOT_VER  → Verify
-                   *  4. REJECTED                      → Replace File
-                   *  5. VERIFIED / NOT_REQUIRED       → no action button
+                   *  1. PENDING_COLLECTION                                  → Mark Collected
+                   *  2. COLLECTED_PHYSICAL + NOT_UPLOADED + NOT_VERIFIED    → Verify Physical
+                   *  3. UPLOADED + NOT_VERIFIED                             → Verify
+                   *  4. REJECTED                                            → Replace File
+                   *  5. VERIFIED / NOT_REQUIRED                             → no action button
                    */
                   type PA = { label: string; isPrimary?: boolean; onClick: () => void } | null;
                   let pa: PA = null;
                   if (coll !== 'NOT_REQUIRED' && canEdit) {
                     if (coll === 'PENDING_COLLECTION')
                       pa = { label: isBusy ? '…' : 'Mark Collected', isPrimary: true, onClick: () => callAction(doc.id, 'collect') };
-                    else if (coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver !== 'REJECTED')
-                      pa = { label: isBusy && uploadingDoc === doc.id ? '…' : 'Upload File', onClick: () => triggerUpload(doc.id) };
+                    else if (coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver === 'NOT_VERIFIED')
+                      pa = { label: isBusy ? '…' : 'Verify Physical', isPrimary: true, onClick: () => callAction(doc.id, 'verify', { verificationSource: 'PHYSICAL_ORIGINAL' }) };
                     else if (up === 'UPLOADED' && ver === 'NOT_VERIFIED')
-                      pa = { label: isBusy ? '…' : 'Verify', isPrimary: true, onClick: () => callAction(doc.id, 'verify') };
+                      pa = { label: isBusy ? '…' : 'Verify', isPrimary: true, onClick: () => callAction(doc.id, 'verify', { verificationSource: 'UPLOADED_COPY' }) };
                     else if (ver === 'REJECTED')
                       pa = { label: isBusy && uploadingDoc === doc.id ? '…' : 'Replace File', onClick: () => triggerUpload(doc.id) };
                   }
@@ -955,7 +969,8 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
                             onMarkPending={() => callAction(doc.id, 'mark-pending')}
                             onMarkNotRequired={() => callAction(doc.id, 'mark-not-required')}
                             onUpload={() => triggerUpload(doc.id)}
-                            onVerify={() => callAction(doc.id, 'verify')}
+                            onVerifyPhysical={() => callAction(doc.id, 'verify', { verificationSource: 'PHYSICAL_ORIGINAL' })}
+                            onVerifyUploaded={() => callAction(doc.id, 'verify', { verificationSource: 'UPLOADED_COPY' })}
                             onReject={() => { setRejectDoc(doc.id); setRejectReason(''); setEditRemarkDoc(null); }}
                             onEditRemark={() => { setEditRemarkDoc(doc.id); setEditRemarkValue(doc.remarks ?? ''); setRejectDoc(null); }}
                             onView={() => { if (doc.fileId) handleDownload(doc.fileId, doc.id); else if (doc.fileUrl) window.open(doc.fileUrl, '_blank'); }}
@@ -990,15 +1005,19 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
             const isEditR = editRemarkDoc === doc.id;
             const dimName = fmtDocName(doc);
 
-            // Same priority as the table
-            let cardLabel = ''; let cardAction: (() => void) | null = null;
+            // Same priority as the table — physical verify is now highest when collected but not uploaded
+            let cardLabel = ''; let cardIsPrimary = false;
+            let cardAction: (() => void) | null = null;
             if (coll !== 'NOT_REQUIRED' && canEdit) {
-              if (coll === 'PENDING_COLLECTION')                                            { cardLabel = 'Mark Collected';  cardAction = () => callAction(doc.id, 'collect'); }
-              else if (coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver !== 'REJECTED') { cardLabel = 'Upload File';     cardAction = () => triggerUpload(doc.id); }
-              else if (up === 'UPLOADED' && ver === 'NOT_VERIFIED')                        { cardLabel = 'Verify';          cardAction = () => callAction(doc.id, 'verify'); }
-              else if (ver === 'REJECTED')                                                 { cardLabel = 'Replace File';    cardAction = () => triggerUpload(doc.id); }
+              if (coll === 'PENDING_COLLECTION')
+                { cardLabel = 'Mark Collected';  cardIsPrimary = true;  cardAction = () => callAction(doc.id, 'collect'); }
+              else if (coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver === 'NOT_VERIFIED')
+                { cardLabel = 'Verify Physical'; cardIsPrimary = true;  cardAction = () => callAction(doc.id, 'verify', { verificationSource: 'PHYSICAL_ORIGINAL' }); }
+              else if (up === 'UPLOADED' && ver === 'NOT_VERIFIED')
+                { cardLabel = 'Verify';          cardIsPrimary = true;  cardAction = () => callAction(doc.id, 'verify', { verificationSource: 'UPLOADED_COPY' }); }
+              else if (ver === 'REJECTED')
+                { cardLabel = 'Replace File';    cardIsPrimary = false; cardAction = () => triggerUpload(doc.id); }
             }
-            const isPrimaryCard = cardLabel === 'Mark Collected' || cardLabel === 'Verify';
 
             return (
               <div key={doc.id} className="card" style={{ padding: '14px 16px', display: 'grid', gap: 10 }}>
@@ -1049,18 +1068,23 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
 
                 {!isRej && !isEditR && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    {cardAction && (
-                      <button type="button" className={isPrimaryCard ? 'btn' : 'btn secondary'} disabled={isBusy}
+                    {cardAction ? (
+                      <button type="button" className={cardIsPrimary ? 'btn' : 'btn secondary'} disabled={isBusy}
                         onClick={cardAction} style={{ fontSize: 12, padding: '5px 14px' }}>
                         {isBusy ? '…' : cardLabel}
                       </button>
-                    )}
+                    ) : ver === 'VERIFIED' ? (
+                      <span style={{ fontSize: 12, color: '#166534', fontWeight: 700 }}>✓ Verified</span>
+                    ) : coll === 'NOT_REQUIRED' ? (
+                      <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Not required</span>
+                    ) : null}
                     <DocMoreMenu doc={doc} canEdit={canEdit} isBusy={isBusy}
                       onCollect={() => callAction(doc.id, 'collect')}
                       onMarkPending={() => callAction(doc.id, 'mark-pending')}
                       onMarkNotRequired={() => callAction(doc.id, 'mark-not-required')}
                       onUpload={() => triggerUpload(doc.id)}
-                      onVerify={() => callAction(doc.id, 'verify')}
+                      onVerifyPhysical={() => callAction(doc.id, 'verify', { verificationSource: 'PHYSICAL_ORIGINAL' })}
+                      onVerifyUploaded={() => callAction(doc.id, 'verify', { verificationSource: 'UPLOADED_COPY' })}
                       onReject={() => { setRejectDoc(doc.id); setRejectReason(''); setEditRemarkDoc(null); }}
                       onEditRemark={() => { setEditRemarkDoc(doc.id); setEditRemarkValue(doc.remarks ?? ''); setRejectDoc(null); }}
                       onView={() => { if (doc.fileId) handleDownload(doc.fileId, doc.id); else if (doc.fileUrl) window.open(doc.fileUrl, '_blank'); }}

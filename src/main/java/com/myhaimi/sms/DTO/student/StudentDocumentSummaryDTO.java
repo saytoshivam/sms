@@ -4,6 +4,7 @@ import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import com.myhaimi.sms.entity.enums.VerificationSource;
 import lombok.Data;
 
 import java.time.Instant;
@@ -36,6 +37,8 @@ public class StudentDocumentSummaryDTO {
     private StudentDocumentCollectionStatus   collectionStatus;
     private StudentDocumentUploadStatus       uploadStatus;
     private StudentDocumentVerificationStatus verificationStatus;
+    /** How the document was verified — null if not yet verified. */
+    private VerificationSource verificationSource;
 
     /**
      * Single computed status string derived from the three lifecycle fields.
