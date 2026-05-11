@@ -3348,3 +3348,76 @@ textarea:disabled {
     -webkit-backdrop-filter: none;
   }
 }
+
+/* ── Staff Directory — responsive table/card toggle ───────────────────────── */
+
+/* Desktop: show table, hide card list */
+.staff-dir-table-wrap { display: block; }
+.staff-dir-card-list  { display: none !important; }
+
+@media (max-width: 700px) {
+  /* Mobile: hide table, show card list */
+  .staff-dir-table-wrap { display: none !important; }
+  .staff-dir-card-list  { display: grid !important; }
+
+  /* Fix dropdown z-index inside card stacking contexts */
+  .staff-dir-card-list .card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* ── Staff Onboarding Wizard — responsive layout ──────────────────────────── */
+
+/*
+ * The wizard drawer uses a 3-column CSS grid: [stepper | form | preview]
+ * We collapse columns progressively at smaller widths.
+ */
+
+/* Wide tablet: hide the right live-preview panel */
+@media (max-width: 900px) {
+  .sow-body {
+    grid-template-columns: 200px 1fr !important;
+  }
+  .sow-preview-col {
+    display: none !important;
+  }
+}
+
+/* Mobile: hide stepper too — only show the form */
+@media (max-width: 600px) {
+  .sow-body {
+    grid-template-columns: 1fr !important;
+  }
+  .sow-stepper-col {
+    display: none !important;
+  }
+  .sow-form-col {
+    padding: 20px 16px !important;
+  }
+  /* Make the drawer full-width on mobile */
+  .sow-drawer {
+    max-width: 100% !important;
+  }
+}
+
+/* Step pill nav shown only on mobile (replaces hidden left stepper) */
+.sow-mobile-step-nav {
+  display: none;
+}
+@media (max-width: 600px) {
+  .sow-mobile-step-nav {
+    display: flex;
+    overflow-x: auto;
+    gap: 6px;
+    padding: 10px 16px;
+    background: #fff;
+    border-bottom: 1px solid rgba(15,23,42,0.08);
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .sow-mobile-step-nav::-webkit-scrollbar {
+    display: none;
+  }
+}
+

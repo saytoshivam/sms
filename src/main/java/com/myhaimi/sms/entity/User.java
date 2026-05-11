@@ -1,6 +1,7 @@
 package com.myhaimi.sms.entity;
 import jakarta.persistence.*;
 import lombok.Data;
+import java.time.Instant;
 import java.util.*;
 
 @Data
@@ -16,6 +17,19 @@ public class User {
     private String password;
     @Column(nullable = false, unique = true)
     private String email;
+
+    /**
+     * Admin-controlled flag. When false the user cannot authenticate.
+     * True by default; set to false via disable-login action.
+     */
+    @Column(nullable = false)
+    private boolean enabled = true;
+
+    /**
+     * Timestamp of the last invite/welcome action (no email service yet — tracked for auditing).
+     */
+    @Column(name = "last_invite_sent_at")
+    private Instant lastInviteSentAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "school_id")

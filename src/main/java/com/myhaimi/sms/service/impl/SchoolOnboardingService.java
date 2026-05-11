@@ -43,7 +43,9 @@ import com.myhaimi.sms.DTO.timetable.v2.AutoFillResultDTO;
 import com.myhaimi.sms.DTO.timetable.v2.TimetableVersionViewDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentCreateDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentsSetupResultDTO;
-import com.myhaimi.sms.academic.RoomTypeParsing;
+import com.myhaimi.sms.DTO.staff.StaffProfileDTO;
+import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingRequest;
+import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingResult;
 import com.myhaimi.sms.academic.SubjectAllocationVenueParsing;
 import com.myhaimi.sms.entity.ClassGroup;
 import com.myhaimi.sms.entity.Building;
@@ -69,6 +71,8 @@ import com.myhaimi.sms.entity.Guardian;
 import com.myhaimi.sms.entity.StudentAcademicEnrollment;
 import com.myhaimi.sms.entity.StudentGuardian;
 import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
+import com.myhaimi.sms.entity.enums.StaffStatus;
+import com.myhaimi.sms.entity.enums.StaffType;
 import com.myhaimi.sms.repository.AcademicYearRepo;
 import com.myhaimi.sms.repository.ClassGroupRepo;
 import com.myhaimi.sms.repository.BuildingRepo;
@@ -148,6 +152,7 @@ public class SchoolOnboardingService {
     private final TimetableEntryRepo timetableEntryRepo;
     private final TimetableGridV2Service timetableGridV2Service;
     private final TeacherDemandAnalysisService teacherDemandAnalysisService;
+    private final StaffService staffService;
 
     private List<Integer> parseIntListJson(String json) {
         if (json == null || json.isBlank()) {
@@ -924,6 +929,12 @@ public class SchoolOnboardingService {
                     throw new IllegalArgumentException("EmployeeNo already exists: " + emp);
                 }
                 staff.setEmployeeNo(emp);
+                // Classification defaults
+                staff.setStaffType(dto.staffType() != null ? dto.staffType() : StaffType.TEACHING);
+                staff.setStatus(StaffStatus.DRAFT);
+                if (dto.joiningDate() != null)    staff.setJoiningDate(dto.joiningDate());
+                if (dto.employmentType() != null)  staff.setEmploymentType(dto.employmentType());
+                if (dto.department() != null && !dto.department().isBlank()) staff.setDepartment(dto.department().trim());
                 String actor = actorEmailOrSystem();
                 staff.setCreatedBy(actor);
                 staff.setUpdatedBy(actor);
@@ -1023,11 +1034,13 @@ public class SchoolOnboardingService {
         List<Staff> staff = staffRepo.findBySchool_IdAndIsDeletedFalseOrderByEmployeeNoAsc(schoolId);
 
         Map<Integer, List<String>> rolesByStaff = new HashMap<>();
+        Map<Integer, User> usersByStaffId = new HashMap<>();
         for (User u : userRepo.findBySchool_IdWithProfilesOrderByEmailAsc(schoolId)) {
             if (u.getLinkedStaff() == null) continue;
             Integer sid = u.getLinkedStaff().getId();
             if (sid == null) continue;
             rolesByStaff.put(sid, u.getRoles().stream().map(Role::getName).sorted().toList());
+            usersByStaffId.put(sid, u);
         }
 
         Map<Integer, List<String>> subjectCodesByStaff = new HashMap<>();
@@ -1044,18 +1057,38 @@ public class SchoolOnboardingService {
 
         return staff.stream()
                 .map(
-                        s -> new OnboardingStaffViewDTO(
-                                s.getId(),
-                                s.getFullName(),
-                                s.getEmail(),
-                                s.getPhone(),
-                                s.getEmployeeNo(),
-                                s.getDesignation(),
-                                rolesByStaff.getOrDefault(s.getId(), List.of()),
-                                subjectCodesByStaff.getOrDefault(s.getId(), List.of()),
-                                rolesByStaff.containsKey(s.getId()),
-                                s.getMaxWeeklyLectureLoad(),
-                                parseIntListJson(s.getPreferredClassGroupIdsJson())))
+                        s -> {
+                            List<String> roles    = rolesByStaff.getOrDefault(s.getId(), List.of());
+                            List<String> subjects = subjectCodesByStaff.getOrDefault(s.getId(), List.of());
+                            boolean isActive      = s.getStatus() != null && "ACTIVE".equals(s.getStatus().name());
+                            boolean isTeaching    = s.getStaffType() != null && "TEACHING".equals(s.getStaffType().name());
+                            boolean hasTeacher    = roles.stream().anyMatch(r -> "TEACHER".equalsIgnoreCase(r));
+                            boolean hasSubjects   = !subjects.isEmpty();
+                            boolean ttEligible    = isActive && isTeaching && hasTeacher && hasSubjects;
+                            List<String> reasons  = StaffService.computeIneligibilityReasons(isActive, isTeaching, hasTeacher, hasSubjects);
+                            User user = usersByStaffId.get(s.getId());
+                            String loginStatus = user == null ? "NOT_CREATED" : (user.isEnabled() ? "ACTIVE" : "DISABLED");
+                            return new OnboardingStaffViewDTO(
+                                    s.getId(),
+                                    s.getFullName(),
+                                    s.getEmail(),
+                                    s.getPhone(),
+                                    s.getEmployeeNo(),
+                                    s.getDesignation(),
+                                    s.getStaffType(),
+                                    s.getStatus(),
+                                    roles,
+                                    subjects,
+                                    user != null,
+                                    s.getMaxWeeklyLectureLoad(),
+                                    parseIntListJson(s.getPreferredClassGroupIdsJson()),
+                                    ttEligible,
+                                    reasons,
+                                    loginStatus,
+                                    s.isCanBeClassTeacher(),
+                                    s.isCanTakeSubstitution(),
+                                    s.getDepartment());
+                        })
                 .toList();
     }
 
@@ -1130,6 +1163,11 @@ public class SchoolOnboardingService {
         staff.setPhone(phone);
         staff.setDesignation(designation);
         staff.setEmployeeNo(emp);
+        if (dto.staffType() != null)      staff.setStaffType(dto.staffType());
+        if (dto.status() != null)         staff.setStatus(dto.status());
+        if (dto.joiningDate() != null)    staff.setJoiningDate(dto.joiningDate());
+        if (dto.employmentType() != null)  staff.setEmploymentType(dto.employmentType());
+        if (dto.department() != null)     staff.setDepartment(dto.department().isBlank() ? null : dto.department().trim());
         applyStaffLoadAndPrefs(staff, dto.maxWeeklyLectureLoad(), dto.preferredClassGroupIds());
         staff.setUpdatedBy(actorEmailOrSystem());
         staffRepo.save(staff);
@@ -1219,6 +1257,346 @@ public class SchoolOnboardingService {
                 user.getUsername(),
                 tempPassword,
                 user.getRoles().stream().map(Role::getName).sorted().toList());
+    }
+
+    // ── Structured onboarding (StaffOnboardingRequest) ─────────────────────────
+
+    /** Delegate to StaffService — exposes staff profile from the onboarding controller. */
+    @Transactional(readOnly = true)
+    public com.myhaimi.sms.DTO.staff.StaffProfileDTO getStaffProfile(Integer staffId) {
+        return staffService.getById(staffId);
+    }
+
+    /**
+     * Create a single staff member from a structured {@link StaffOnboardingRequest}.
+     * Returns a full {@link StaffProfileDTO} with computed fields and, optionally
+     * wrapped in a {@link StaffOnboardingResult} that also carries warnings and a
+     * one-time temp password.
+     */
+    @Transactional
+    public StaffOnboardingResult onboardStaff(StaffOnboardingRequest req) {
+        Integer schoolId = requireSchoolId();
+        School  school   = schoolRepo.findById(schoolId).orElseThrow();
+        String  actor    = actorEmailOrSystem();
+
+        // ── 1. Extract sections  ───────────────────────────────��───────────────
+        var id   = req.getIdentity();
+        var emp  = req.getEmployment();
+        var rac  = req.getRolesAndAccess();
+        var ac   = req.getAcademicCapabilities();
+        var con  = req.getContact();
+        var qual = req.getQualification();
+        var pay  = req.getPayrollSetup();
+
+        // ── 2. Normalise / validate ────────────────────────────────────────────
+        String email    = id.getEmail()    == null ? null : id.getEmail().trim().toLowerCase(Locale.ROOT);
+        String phone    = id.getPhone()    == null ? "" : id.getPhone().trim();
+        if (phone.isBlank()) throw new IllegalArgumentException("Phone number is required.");
+        String phoneDigits = phone.replaceAll("[^0-9]", "");
+        if (phoneDigits.length() < 10 || phoneDigits.length() > 15)
+            throw new IllegalArgumentException("Invalid phone number. Provide 10–15 digits.");
+
+        if (rac.isCreateLoginAccount() && (email == null || email.isBlank()))
+            throw new IllegalArgumentException("Email is required to create a login account.");
+
+        if (emp.getStatus() == com.myhaimi.sms.entity.enums.StaffStatus.ACTIVE && emp.getJoiningDate() == null)
+            throw new IllegalArgumentException("Joining date is required before a staff member can be activated.");
+
+        // ── 3. Resolve roles ───────────────────────────────────────────────────
+        List<String> requestedRoles = rac.getRoles() == null ? List.of() : rac.getRoles();
+        Set<Role> roleEntities = new HashSet<>();
+        for (String r : requestedRoles) {
+            if (r == null || r.isBlank()) continue;
+            String name = r.trim().toUpperCase(Locale.ROOT);
+            if (RoleNames.SUPER_ADMIN.equals(name) || RoleNames.STUDENT.equals(name) || RoleNames.PARENT.equals(name))
+                throw new IllegalArgumentException("Role not permitted for staff: " + name);
+            roleEntities.add(roleRepo.findByName(name).stream().findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Unknown role: " + name)));
+        }
+
+        // ── 4. Build warnings (non-fatal) ──────────────────────────────────────
+        List<String> warnings = new ArrayList<>();
+        boolean isTeaching   = emp.getStaffType() == StaffType.TEACHING;
+        boolean hasTeacherRole = requestedRoles.stream()
+                .anyMatch(r -> r != null && RoleNames.TEACHER.equalsIgnoreCase(r.trim()));
+        List<Integer> subjectIds = ac == null ? null : ac.getTeachableSubjectIds();
+        if (isTeaching && !hasTeacherRole)
+            warnings.add("TEACHER role is recommended for TEACHING staff to enable timetable assignment.");
+        if (hasTeacherRole && (subjectIds == null || subjectIds.isEmpty()))
+            warnings.add("At least one teachable subject should be assigned for timetable eligibility.");
+
+        // ── 5. Find or create staff row ────────────────────────────────────────
+        Staff staff = null;
+        if (email != null && !email.isBlank()) {
+            staff = staffRepo.findFirstBySchool_IdAndEmailIgnoreCaseAndIsDeletedFalse(schoolId, email).orElse(null);
+            if (staff == null) {
+                Staff byEmailAny = staffRepo.findFirstBySchool_IdAndEmailIgnoreCase(schoolId, email).orElse(null);
+                if (byEmailAny != null && byEmailAny.isDeleted()) { staff = byEmailAny; staff.setDeleted(false); }
+            }
+        }
+        String empNo = id.getEmployeeNo() == null ? "" : id.getEmployeeNo().trim();
+        if (staff == null && !empNo.isBlank()) {
+            Staff byEmp = staffRepo.findFirstBySchool_IdAndEmployeeNoIgnoreCase(schoolId, empNo).orElse(null);
+            if (byEmp != null && byEmp.isDeleted()) { staff = byEmp; staff.setDeleted(false); }
+        }
+        if (staff == null) {
+            if (empNo.isBlank()) {
+                empNo = "EMP-" + String.format("%04d", staffRepo.countBySchool_Id(schoolId) + 1);
+            }
+            if (staffRepo.countBySchool_IdAndEmployeeNoIgnoreCaseAndIsDeletedFalse(schoolId, empNo) > 0)
+                throw new IllegalArgumentException("Employee No already exists: " + empNo);
+            staff = new Staff();
+            staff.setSchool(school);
+            staff.setEmployeeNo(empNo);
+            staff.setCreatedBy(actor);
+        } else if (!empNo.isBlank()) {
+            // Keep existing empNo unless explicitly changed and unique
+            if (!empNo.equalsIgnoreCase(staff.getEmployeeNo())
+                    && staffRepo.countBySchool_IdAndEmployeeNoIgnoreCaseAndIsDeletedFalse(schoolId, empNo) > 0)
+                throw new IllegalArgumentException("Employee No already exists: " + empNo);
+            if (!empNo.equalsIgnoreCase(staff.getEmployeeNo())) staff.setEmployeeNo(empNo);
+        }
+
+        // ── 6. Apply all fields from request sections ──────────────────────────
+        applyIdentity(staff, id, phone, email);
+        applyEmployment(staff, emp);
+        if (ac   != null) applyAcademicCapabilities(staff, ac);
+        if (con  != null) applyContact(staff, con);
+        if (qual != null) applyQualification(staff, qual);
+        if (pay  != null) applyPayroll(staff, pay);
+
+        staff.setUpdatedBy(actor);
+        staff = staffRepo.save(staff);
+
+        // ── 7. Teachable subjects ──────────────────────────────────────────────
+        if (hasTeacherRole && subjectIds != null && !subjectIds.isEmpty()) {
+            replaceTeachableForStaff(staff, subjectIds, schoolId);
+        } else if (!hasTeacherRole) {
+            replaceTeachableForStaff(staff, List.of(), schoolId);
+        }
+
+        // ── 8. Login account ─────────────────────────────────────���─────────────
+        String tempPassword = null;
+        if (rac.isCreateLoginAccount() && email != null && !email.isBlank()) {
+            User existingUser = userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staff.getId()).orElse(null);
+            if (existingUser != null) {
+                existingUser.setRoles(roleEntities);
+                userRepo.save(existingUser);
+            } else {
+                User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
+                if (existingByEmail != null) {
+                    existingByEmail.setSchool(school);
+                    existingByEmail.setLinkedStaff(staff);
+                    existingByEmail.setLinkedStudent(null);
+                    existingByEmail.setRoles(roleEntities);
+                    userRepo.save(existingByEmail);
+                } else {
+                    tempPassword = generateTempPassword();
+                    String preferredUsername = rac.getUsername();
+                    String username = preferredUsername != null && !preferredUsername.isBlank()
+                            ? ensureUniqueUsername(preferredUsername.trim())
+                            : ensureUniqueUsername(deriveUsername(email));
+                    User user = new User();
+                    user.setEmail(email);
+                    user.setUsername(username);
+                    user.setPassword(passwordEncoder.encode(tempPassword));
+                    user.setSchool(school);
+                    user.setLinkedStaff(staff);
+                    user.setRoles(roleEntities);
+                    userRepo.save(user);
+                }
+            }
+        } else if (!roleEntities.isEmpty()) {
+            // Still update roles on any existing login even if createLoginAccount=false
+            userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staff.getId()).ifPresent(u -> {
+                u.setRoles(roleEntities);
+                userRepo.save(u);
+            });
+        }
+
+        // ── 9. Build response ──────────────────────────────────────────────────
+        StaffProfileDTO profile = staffService.getById(staff.getId());
+        return new StaffOnboardingResult(profile, warnings, tempPassword);
+    }
+
+    /**
+     * Update an existing staff record using the structured request.
+     * Only sections present in the request body are applied; null sections are skipped.
+     */
+    @Transactional
+    public StaffOnboardingResult updateStaffOnboarding(Integer staffId, StaffOnboardingRequest req) {
+        Integer schoolId = requireSchoolId();
+        Staff staff = staffRepo.findByIdAndSchool_IdAndIsDeletedFalse(staffId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Staff not found."));
+
+        var id   = req.getIdentity();
+        var emp  = req.getEmployment();
+        var rac  = req.getRolesAndAccess();
+        var ac   = req.getAcademicCapabilities();
+        var con  = req.getContact();
+        var qual = req.getQualification();
+        var pay  = req.getPayrollSetup();
+
+        String email = id.getEmail() == null ? null : id.getEmail().trim().toLowerCase(Locale.ROOT);
+        String phone = id.getPhone() == null ? "" : id.getPhone().trim();
+        if (phone.isBlank()) throw new IllegalArgumentException("Phone number is required.");
+        String phoneDigits = phone.replaceAll("[^0-9]", "");
+        if (phoneDigits.length() < 10 || phoneDigits.length() > 15)
+            throw new IllegalArgumentException("Invalid phone number. Provide 10–15 digits.");
+
+        if (rac.isCreateLoginAccount() && (email == null || email.isBlank()))
+            throw new IllegalArgumentException("Email is required to create a login account.");
+
+        if (emp.getStatus() == com.myhaimi.sms.entity.enums.StaffStatus.ACTIVE && emp.getJoiningDate() == null
+                && staff.getJoiningDate() == null)
+            throw new IllegalArgumentException("Joining date is required before activating staff.");
+
+        // EmployeeNo update
+        String empNo = id.getEmployeeNo() == null ? "" : id.getEmployeeNo().trim();
+        if (!empNo.isBlank() && !empNo.equalsIgnoreCase(staff.getEmployeeNo())) {
+            if (staffRepo.countBySchool_IdAndEmployeeNoIgnoreCaseAndIsDeletedFalse(schoolId, empNo) > 0)
+                throw new IllegalArgumentException("Employee No already exists: " + empNo);
+            staff.setEmployeeNo(empNo);
+        }
+
+        applyIdentity(staff, id, phone, email);
+        applyEmployment(staff, emp);
+        if (ac   != null) applyAcademicCapabilities(staff, ac);
+        if (con  != null) applyContact(staff, con);
+        if (qual != null) applyQualification(staff, qual);
+        if (pay  != null) applyPayroll(staff, pay);
+        staff.setUpdatedBy(actorEmailOrSystem());
+        staff = staffRepo.save(staff);
+
+        // Roles and teachable subjects
+        List<String> requestedRoles = rac.getRoles() == null ? List.of() : rac.getRoles();
+        Set<Role> roleEntities = new HashSet<>();
+        for (String r : requestedRoles) {
+            if (r == null || r.isBlank()) continue;
+            String name = r.trim().toUpperCase(Locale.ROOT);
+            if (RoleNames.SUPER_ADMIN.equals(name) || RoleNames.STUDENT.equals(name) || RoleNames.PARENT.equals(name))
+                throw new IllegalArgumentException("Role not permitted for staff: " + name);
+            roleEntities.add(roleRepo.findByName(name).stream().findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Unknown role: " + name)));
+        }
+
+        List<String> warnings      = new ArrayList<>();
+        boolean isTeaching         = emp.getStaffType() == StaffType.TEACHING;
+        boolean hasTeacherRole     = requestedRoles.stream().anyMatch(r -> r != null && RoleNames.TEACHER.equalsIgnoreCase(r.trim()));
+        List<Integer> subjectIds   = ac == null ? null : ac.getTeachableSubjectIds();
+
+        if (isTeaching && !hasTeacherRole) warnings.add("TEACHER role is recommended for TEACHING staff.");
+        if (hasTeacherRole && (subjectIds == null || subjectIds.isEmpty()))
+            warnings.add("At least one teachable subject should be assigned for timetable eligibility.");
+
+        if (hasTeacherRole && subjectIds != null) replaceTeachableForStaff(staff, subjectIds, schoolId);
+        else if (!hasTeacherRole)                  replaceTeachableForStaff(staff, List.of(), schoolId);
+
+        // Login account
+        String tempPassword = null;
+        School school = schoolRepo.findById(schoolId).orElseThrow();
+        if (rac.isCreateLoginAccount() && email != null && !email.isBlank()) {
+            User existing = userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staff.getId()).orElse(null);
+            if (existing != null) {
+                existing.setRoles(roleEntities);
+                userRepo.save(existing);
+            } else {
+                User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
+                if (existingByEmail != null) {
+                    existingByEmail.setSchool(school); existingByEmail.setLinkedStaff(staff);
+                    existingByEmail.setLinkedStudent(null); existingByEmail.setRoles(roleEntities);
+                    userRepo.save(existingByEmail);
+                } else {
+                    tempPassword = generateTempPassword();
+                    User user = new User();
+                    user.setEmail(email);
+                    user.setUsername(ensureUniqueUsername(deriveUsername(email)));
+                    user.setPassword(passwordEncoder.encode(tempPassword));
+                    user.setSchool(school); user.setLinkedStaff(staff); user.setRoles(roleEntities);
+                    userRepo.save(user);
+                }
+            }
+        } else {
+            userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staff.getId()).ifPresent(u -> {
+                u.setRoles(roleEntities); userRepo.save(u);
+            });
+        }
+
+        StaffProfileDTO profile = staffService.getById(staff.getId());
+        return new StaffOnboardingResult(profile, warnings, tempPassword);
+    }
+
+    // ── Private field-application helpers ─────────────────────────────────────
+
+    private void applyIdentity(Staff s, com.myhaimi.sms.DTO.staff.onboarding.StaffIdentityDTO id,
+                                String normalizedPhone, String normalizedEmail) {
+        if (id.getFullName() != null) s.setFullName(id.getFullName().trim());
+        s.setPhone(normalizedPhone);
+        if (normalizedEmail != null) s.setEmail(normalizedEmail);
+        if (id.getGender()       != null) s.setGender(id.getGender().trim());
+        if (id.getDateOfBirth()  != null) s.setDateOfBirth(id.getDateOfBirth());
+        if (id.getPhotoUrl()     != null) s.setPhotoUrl(id.getPhotoUrl().trim());
+        if (id.getAlternatePhone() != null) s.setAlternatePhone(id.getAlternatePhone().trim());
+    }
+
+    private void applyEmployment(Staff s, com.myhaimi.sms.DTO.staff.onboarding.StaffEmploymentDTO emp) {
+        if (emp.getStaffType()    != null) s.setStaffType(emp.getStaffType());
+        if (emp.getStatus()       != null) s.setStatus(emp.getStatus());
+        if (emp.getDesignation()  != null) s.setDesignation(emp.getDesignation().trim());
+        if (emp.getDepartment()   != null) s.setDepartment(emp.getDepartment().isBlank() ? null : emp.getDepartment().trim());
+        if (emp.getJoiningDate()  != null) s.setJoiningDate(emp.getJoiningDate());
+        if (emp.getEmploymentType() != null) s.setEmploymentType(emp.getEmploymentType());
+        if (emp.getReportingManagerStaffId() != null) s.setReportingManagerStaffId(emp.getReportingManagerStaffId());
+    }
+
+    private void applyAcademicCapabilities(Staff s, com.myhaimi.sms.DTO.staff.onboarding.StaffAcademicCapabilitiesDTO ac) {
+        if (ac.getMaxWeeklyLectureLoad() != null) s.setMaxWeeklyLectureLoad(ac.getMaxWeeklyLectureLoad());
+        if (ac.getMaxDailyLectureLoad()  != null) s.setMaxDailyLectureLoad(ac.getMaxDailyLectureLoad());
+        if (ac.getCanBeClassTeacher()    != null) s.setCanBeClassTeacher(ac.getCanBeClassTeacher());
+        if (ac.getCanTakeSubstitution()  != null) s.setCanTakeSubstitution(ac.getCanTakeSubstitution());
+        try {
+            if (ac.getPreferredClassGroupIds() != null && !ac.getPreferredClassGroupIds().isEmpty()) {
+                s.setPreferredClassGroupIdsJson(objectMapper.writeValueAsString(ac.getPreferredClassGroupIds()));
+            }
+            if (ac.getRestrictedClassGroupIds() != null) {
+                s.setRestrictedClassGroupIdsJson(
+                    ac.getRestrictedClassGroupIds().isEmpty() ? null
+                        : objectMapper.writeValueAsString(ac.getRestrictedClassGroupIds()));
+            }
+        } catch (Exception e) { throw new IllegalArgumentException("Could not store class group ids", e); }
+        // Unavailable periods: store as-is (opaque JSON placeholder — not yet validated by scheduler)
+        if (ac.getUnavailablePeriodsJson() != null) {
+            s.setUnavailablePeriodsJson(ac.getUnavailablePeriodsJson().isBlank() ? null : ac.getUnavailablePeriodsJson());
+        }
+    }
+
+    private void applyContact(Staff s, com.myhaimi.sms.DTO.staff.onboarding.StaffContactDTO c) {
+        if (c.getCurrentAddressLine1()    != null) s.setCurrentAddressLine1(c.getCurrentAddressLine1().trim());
+        if (c.getCurrentAddressLine2()    != null) s.setCurrentAddressLine2(c.getCurrentAddressLine2().trim());
+        if (c.getCity()                   != null) s.setCity(c.getCity().trim());
+        if (c.getState()                  != null) s.setState(c.getState().trim());
+        if (c.getPincode()                != null) s.setPincode(c.getPincode().trim());
+        if (c.getEmergencyContactName()   != null) s.setEmergencyContactName(c.getEmergencyContactName().trim());
+        if (c.getEmergencyContactPhone()  != null) s.setEmergencyContactPhone(c.getEmergencyContactPhone().trim());
+        if (c.getEmergencyContactRelation() != null) s.setEmergencyContactRelation(c.getEmergencyContactRelation().trim());
+    }
+
+    private void applyQualification(Staff s, com.myhaimi.sms.DTO.staff.onboarding.StaffQualificationDTO q) {
+        if (q.getHighestQualification()      != null) s.setHighestQualification(q.getHighestQualification().trim());
+        if (q.getProfessionalQualification() != null) s.setProfessionalQualification(q.getProfessionalQualification().trim());
+        if (q.getSpecialization()            != null) s.setSpecialization(q.getSpecialization().trim());
+        if (q.getYearsOfExperience()         != null) s.setYearsOfExperience(q.getYearsOfExperience());
+        if (q.getPreviousInstitution()       != null) s.setPreviousInstitution(q.getPreviousInstitution().trim());
+    }
+
+    private void applyPayroll(Staff s, com.myhaimi.sms.DTO.staff.onboarding.StaffPayrollSetupDTO p) {
+        s.setPayrollEnabled(p.isPayrollEnabled());
+        if (p.getSalaryType()             != null) s.setSalaryType(p.getSalaryType());
+        if (p.getBankAccountHolderName()  != null) s.setBankAccountHolderName(p.getBankAccountHolderName().trim());
+        if (p.getBankName()               != null) s.setBankName(p.getBankName().trim());
+        if (p.getBankAccountNumber()      != null) s.setBankAccountNumber(p.getBankAccountNumber().trim());
+        if (p.getIfsc()                   != null) s.setIfsc(p.getIfsc().trim().toUpperCase(Locale.ROOT));
+        if (p.getPanNumber()              != null) s.setPanNumber(p.getPanNumber().trim().toUpperCase(Locale.ROOT));
     }
 
     @Transactional
@@ -1422,14 +1800,30 @@ public class SchoolOnboardingService {
                     u.getRoles().stream().map(Role::getName).sorted().toList());
         }
         List<OnboardingAcademicStaffItemDTO> stRows = staff.stream()
-                .map(st -> new OnboardingAcademicStaffItemDTO(
-                        st.getId(),
-                        st.getFullName(),
-                        st.getEmail(),
-                        teachableByStaff.getOrDefault(st.getId(), List.of()),
-                        roleNamesByStaff.getOrDefault(st.getId(), List.of()),
-                        st.getMaxWeeklyLectureLoad(),
-                        parseIntListJson(st.getPreferredClassGroupIdsJson())))
+                .map(st -> {
+                    List<String> stRoles       = roleNamesByStaff.getOrDefault(st.getId(), List.of());
+                    List<Integer> stSubjectIds = teachableByStaff.getOrDefault(st.getId(), List.of());
+                    boolean stActive      = st.getStatus() != null && "ACTIVE".equals(st.getStatus().name());
+                    boolean stTeaching    = st.getStaffType() != null && "TEACHING".equals(st.getStaffType().name());
+                    boolean stHasTeacher  = stRoles.stream().anyMatch(r -> "TEACHER".equalsIgnoreCase(r));
+                    boolean stHasSubjects = !stSubjectIds.isEmpty();
+                    boolean stEligible    = stActive && stTeaching && stHasTeacher && stHasSubjects;
+                    List<String> stReasons = StaffService.computeIneligibilityReasons(stActive, stTeaching, stHasTeacher, stHasSubjects);
+                    return new OnboardingAcademicStaffItemDTO(
+                            st.getId(),
+                            st.getFullName(),
+                            st.getEmail(),
+                            stSubjectIds,
+                            stRoles,
+                            st.getMaxWeeklyLectureLoad(),
+                            parseIntListJson(st.getPreferredClassGroupIdsJson()),
+                            st.getStaffType(),
+                            st.getStatus(),
+                            st.isCanBeClassTeacher(),
+                            st.isCanTakeSubstitution(),
+                            stEligible,
+                            stReasons);
+                })
                 .toList();
 
         List<OnboardingAcademicClassGroupItemDTO> cgRows = classGroupRepo

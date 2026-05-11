@@ -57,6 +57,7 @@ import { TimeModulePage } from './pages/modules/TimeModulePage';
 import { TimetableModulePage } from './pages/modules/TimetableModulePage';
 import { ClassesSectionsModulePage } from './pages/modules/ClassesSectionsModulePage';
 import { DocumentRequirementsPage } from './pages/students/DocumentRequirementsPage';
+import { StaffProfilePage } from './pages/StaffProfilePage';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useAuth();
@@ -87,6 +88,7 @@ export default function App() {
         <Route path="academic" element={<AcademicModulePage />} />
         <Route path="subjects" element={<SubjectsModulePage />} />
         <Route path="teachers" element={<TeachersModulePage />} />
+        <Route path="teachers/:staffId" element={<StaffProfilePage />} />
         <Route path="rooms" element={<RoomsModulePage />} />
         <Route path="time" element={<TimeModulePage />} />
         <Route

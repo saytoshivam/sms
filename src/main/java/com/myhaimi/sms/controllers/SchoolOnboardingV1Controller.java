@@ -25,6 +25,8 @@ import com.myhaimi.sms.DTO.OnboardingTimetableAutoGenerateViewDTO;
 import com.myhaimi.sms.DTO.TeacherDemandSummaryDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentCreateDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentsSetupResultDTO;
+import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingRequest;
+import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingResult;
 import com.myhaimi.sms.service.impl.SchoolOnboardingService;
 import com.myhaimi.sms.service.impl.TeacherDemandAnalysisService;
 import jakarta.validation.Valid;
@@ -165,6 +167,55 @@ public class SchoolOnboardingV1Controller {
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public ResponseEntity<OnboardingStaffUserCredentialDTO> resetStaffLogin(@PathVariable Integer id) {
         return ResponseEntity.ok(schoolOnboardingService.resetStaffLoginPassword(id));
+    }
+
+    // ── Structured onboarding (v2) ───────────────────────────────────���────────
+
+    /**
+     * Create a single staff member using the structured {@link StaffOnboardingRequest}.
+     * Returns the full {@link StaffOnboardingResult} including computed profile,
+     * non-fatal warnings, and a one-time temp password when a login was newly created.
+     */
+    @PostMapping("/staff/onboard")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<StaffOnboardingResult> onboardStaff(
+            @Valid @RequestBody StaffOnboardingRequest body) {
+        try {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
+                    .body(schoolOnboardingService.onboardStaff(body));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest()
+                    .body(new StaffOnboardingResult(null, java.util.List.of(ex.getMessage()), null));
+        }
+    }
+
+    /**
+     * Update an existing staff member using the structured {@link StaffOnboardingRequest}.
+     * Only sections included in the body are modified.
+     */
+    @PutMapping("/staff/{id}/onboard")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<StaffOnboardingResult> updateStaffOnboarding(
+            @PathVariable Integer id,
+            @Valid @RequestBody StaffOnboardingRequest body) {
+        try {
+            return ResponseEntity.ok(schoolOnboardingService.updateStaffOnboarding(id, body));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest()
+                    .body(new StaffOnboardingResult(null, java.util.List.of(ex.getMessage()), null));
+        }
+    }
+
+    /** Get full staff profile (computed fields, masked payroll). */
+    @GetMapping("/staff/{id}/profile")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
+    public ResponseEntity<?> getStaffProfile(@PathVariable Integer id) {
+        try {
+            return ResponseEntity.ok(schoolOnboardingService.getStaffProfile(id));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", ex.getMessage()));
+        }
     }
 
     @GetMapping("/fees")
