@@ -56,6 +56,7 @@ import { RoomsModulePage } from './pages/modules/RoomsModulePage';
 import { TimeModulePage } from './pages/modules/TimeModulePage';
 import { TimetableModulePage } from './pages/modules/TimetableModulePage';
 import { ClassesSectionsModulePage } from './pages/modules/ClassesSectionsModulePage';
+import { DocumentRequirementsPage } from './pages/students/DocumentRequirementsPage';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useAuth();
@@ -108,6 +109,7 @@ export default function App() {
         <Route path="admin/schools/:schoolId" element={<PlatformSchoolEditPage />} />
         <Route path="school-theme" element={<SchoolThemePage />} />
         <Route path="school/management" element={<SchoolManagementPage />} />
+        <Route path="school/document-requirements" element={<DocumentRequirementsPage />} />
         {/* Kept for existing deep links; dashboard no longer exposes the wizard directly. */}
         <Route path="onboarding" element={<SchoolOnboardingWizardPage />} />
         <Route path="user-access" element={<UserAccessManagementPage />} />

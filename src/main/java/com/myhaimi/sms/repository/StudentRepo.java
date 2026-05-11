@@ -28,6 +28,9 @@ public interface StudentRepo extends JpaRepository<Student, Integer>, JpaSpecifi
 
     Optional<Student> findBySchool_IdAndAdmissionNo(Integer schoolId, String admissionNo);
 
+    /** Retrieve all students for a school with a given lifecycle status (used for bulk operations). */
+    List<Student> findBySchool_IdAndStatus(Integer schoolId, StudentLifecycleStatus status);
+
     long countBySchool_Id(Integer schoolId);
 
     long countBySchool_IdAndStatus(Integer schoolId, StudentLifecycleStatus status);

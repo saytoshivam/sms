@@ -12,6 +12,12 @@ import java.time.Instant;
 public class StudentDocumentSummaryDTO {
     private Integer id;
     private String documentType;
+    /**
+     * Human-readable name from the document_types master table.
+     * Populated for all new rows created from school requirements.
+     * Null for legacy rows — frontend should fall back to formatting documentType code.
+     */
+    private String documentTypeName;
 
     /** @deprecated Use fileId + GET /api/files/{fileId}/download-url instead. Never contains a raw S3 URL. */
     @Deprecated

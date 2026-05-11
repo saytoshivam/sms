@@ -9,6 +9,8 @@ import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import com.myhaimi.sms.entity.enums.DocumentTargetType;
+import com.myhaimi.sms.entity.enums.DocumentRequirementStatus;
 import com.myhaimi.sms.entity.FileObject;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import com.myhaimi.sms.entity.enums.GuardianLoginStatus;
@@ -60,12 +62,14 @@ public class StudentService {
     private final UserRepo userRepo;
     private final StudentAccessGuard accessGuard;
     private final FileService fileService;
+    private final SchoolDocumentRequirementRepo requirementRepo;
+    private final DocumentTypeRepo documentTypeRepo;
 
     /**
-     * Default document types required during student onboarding.
-     * These are created as checklist rows with PENDING_COLLECTION status.
+     * Fallback document codes used when a school has not yet configured any document requirements.
+     * These match the system-seeded document_types table rows for STUDENT target type.
      */
-    private static final List<String> DEFAULT_DOCUMENT_TYPES = Arrays.asList(
+    private static final List<String> DEFAULT_DOCUMENT_CODES = Arrays.asList(
             "BIRTH_CERTIFICATE",
             "AADHAAR_CARD",
             "TRANSFER_CERTIFICATE",
@@ -630,8 +634,8 @@ public class StudentService {
     }
 
     /**
-     * Ensures default document checklist rows exist for a student.
-     * Creates missing default documents with PENDING_COLLECTION / NOT_UPLOADED / NOT_VERIFIED status.
+     * Ensures document checklist rows exist for a student using the school's configured requirements.
+     * Falls back to the 6 default document types when no school configuration is present.
      * This method handles its own transaction for writes.
      */
     @Transactional
@@ -642,21 +646,26 @@ public class StudentService {
     }
 
     /**
-     * Internal helper that ensures default document checklist rows exist for a student.
-     * Caller must ensure transaction is available for writes.
+     * Internal helper: creates missing student_document rows from school requirements config.
+     * Caller must be inside a transaction.
      */
     private void ensureDefaultDocumentsExist(Student student) {
-        Set<String> existingTypes = documentRepo.findByStudent_IdOrderByCreatedAtDesc(student.getId())
+        Integer schoolId = student.getSchool().getId();
+
+        Set<String> existingCodes = documentRepo.findByStudent_IdOrderByCreatedAtDesc(student.getId())
                 .stream()
                 .map(StudentDocument::getDocumentType)
                 .collect(Collectors.toSet());
 
-        for (String docType : DEFAULT_DOCUMENT_TYPES) {
-            if (!existingTypes.contains(docType)) {
+        // Resolve which document types to create for this student
+        List<DocumentType> typesToCreate = resolveRequiredDocumentTypes(schoolId);
+
+        for (DocumentType dt : typesToCreate) {
+            if (!existingCodes.contains(dt.getCode())) {
                 StudentDocument doc = new StudentDocument();
                 doc.setStudent(student);
-                doc.setDocumentType(docType);
-                doc.setFileUrl(null);
+                doc.setDocumentType(dt.getCode());
+                doc.setDocumentTypeId(dt.getId());
                 doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
                 doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
                 doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
@@ -667,6 +676,44 @@ public class StudentService {
                 documentRepo.save(doc);
             }
         }
+    }
+
+    /**
+     * Returns the ordered list of DocumentType objects that should form the checklist for a student.
+     * If the school has configured requirements, those are used; otherwise falls back to DEFAULT_DOCUMENT_CODES.
+     */
+    private List<DocumentType> resolveRequiredDocumentTypes(Integer schoolId) {
+        // Load active, non-NOT_REQUIRED requirements from school config
+        List<SchoolDocumentRequirement> reqs = requirementRepo
+                .findActiveChecklistRequirements(schoolId, DocumentTargetType.STUDENT,
+                        DocumentRequirementStatus.NOT_REQUIRED);
+
+        if (!reqs.isEmpty()) {
+            return reqs.stream()
+                    .map(SchoolDocumentRequirement::getDocumentType)
+                    .toList();
+        }
+
+        // Fall back to default codes — look up from document_types master table
+        List<DocumentType> defaults = new ArrayList<>();
+        for (String code : DEFAULT_DOCUMENT_CODES) {
+            documentTypeRepo.findByCodeAndTargetType(code, DocumentTargetType.STUDENT)
+                    .ifPresent(defaults::add);
+        }
+        if (!defaults.isEmpty()) {
+            return defaults;
+        }
+
+        // Last resort: synthetic DocumentType objects in case the seed hasn't run yet
+        return DEFAULT_DOCUMENT_CODES.stream()
+                .map(code -> {
+                    DocumentType dt = new DocumentType();
+                    dt.setCode(code);
+                    dt.setName(code.replace('_', ' '));
+                    dt.setTargetType(DocumentTargetType.STUDENT);
+                    return dt;
+                })
+                .toList();
     }
 
     /**
@@ -898,6 +945,13 @@ public class StudentService {
         StudentDocumentSummaryDTO dto = new StudentDocumentSummaryDTO();
         dto.setId(doc.getId());
         dto.setDocumentType(doc.getDocumentType());
+
+        // Populate human-readable name from the master DocumentType if available
+        DocumentType dtRef = doc.getDocumentTypeRef();
+        if (dtRef != null) {
+            dto.setDocumentTypeName(dtRef.getName());
+        }
+
         dto.setFileUrl(doc.getFileUrl());
         dto.setFileId(doc.getFileId());
         dto.setCollectionStatus(doc.getCollectionStatus());

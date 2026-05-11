@@ -81,6 +81,8 @@ export type DocLifecycleStatus =
 export type StudentDocumentSummary = {
   id: number;
   documentType?: string | null;
+  /** Human-readable name from the document_types master table. Falls back to documentType code when null. */
+  documentTypeName?: string | null;
   /** @deprecated Use fileId + GET /api/files/{fileId}/download-url instead. */
   fileUrl?: string | null;
   /** FileObject id from the managed file module. Present after upload via POST …/upload. */
@@ -828,7 +830,7 @@ function DocumentsTab({
                       <tr style={rowStyle}>
                          {/* Document name */}
                         <td style={{ ...TD_STYLE, fontWeight: 600, color: 'rgba(15,23,42,0.85)', minWidth: 140 }}>
-                          <div>{doc.documentType?.replace(/_/g, ' ') || '—'}</div>
+                          <div>{doc.documentTypeName ?? doc.documentType?.replace(/_/g, ' ') ?? '—'}</div>
                           {doc.fileId ? (
                             <button
                               type="button"

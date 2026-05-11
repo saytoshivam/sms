@@ -8,7 +8,6 @@ import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import lombok.ToString;
 
 import java.time.Instant;
 
@@ -29,6 +28,22 @@ public class StudentDocument {
     @Column(name = "document_type", nullable = false, length = 64)
     private String documentType;
 
+    /**
+     * FK to document_types.id — set when document row is created from the school requirements config.
+     * Null for legacy rows created before the document_types table existed.
+     */
+    @Column(name = "document_type_id")
+    private Integer documentTypeId;
+
+    /**
+     * Navigation property to the master DocumentType — for reading the human-readable name.
+     * {@code insertable=false, updatable=false} — managed via {@link #documentTypeId}.
+     */
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "document_type_id", insertable = false, updatable = false)
+    private DocumentType documentTypeRef;
+
     @Column(name = "file_url", nullable = true, length = 1024)
     private String fileUrl;
 
@@ -44,7 +59,6 @@ public class StudentDocument {
      * Navigation property to the linked FileObject.
      * {@code insertable=false, updatable=false} — the underlying FK is managed via {@link #fileId}.
      */
-    @ToString.Exclude
     @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "file_id", insertable = false, updatable = false)

@@ -138,6 +138,7 @@ function buildLeaderNavGroups(attendancePath: string, roles: string[]): NavGroup
       label: 'System',
       items: [
         { to: '/app/school/management', label: 'Settings', icon: Settings2, prefix: '/app/school/management' },
+        { to: '/app/school/document-requirements', label: 'Document Requirements', icon: FileText, prefix: '/app/school/document-requirements' },
         { to: '/app/onboarding', label: 'Imports', icon: Upload, prefix: '/app/onboarding' },
         { to: '/app/user-access', label: 'Access', icon: Shield, prefix: '/app/user-access' },
       ],
