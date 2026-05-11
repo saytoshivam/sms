@@ -5,5 +5,6 @@
 -- Nullable: only set when verification_status = 'VERIFIED'
 
 ALTER TABLE student_documents
-    ADD COLUMN IF NOT EXISTS verification_source VARCHAR(32) NULL;
+    ADD COLUMN verification_source VARCHAR(32) NULL;
+
 
