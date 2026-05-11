@@ -610,11 +610,14 @@ function CombinedStatusText({ doc }: { doc: StudentDocumentSummary }) {
 
 // ─── Kebab "More" dropdown ────────────────────────────────────────────────────
 function DocMoreMenu({
-  doc, canEdit, isBusy,
+  doc, canEdit, isBusy, align = 'right',
   onCollect, onMarkPending, onMarkNotRequired, onUpload, onVerifyPhysical, onVerifyUploaded,
   onReject, onEditRemark, onView, onSaveDownload,
 }: {
   doc: StudentDocumentSummary; canEdit: boolean; isBusy: boolean;
+  /** 'right' (default): dropdown extends leftward — use when button is at the right edge (table).
+   *  'left': dropdown extends rightward — use when button is near left edge (mobile cards). */
+  align?: 'left' | 'right';
   onCollect: () => void; onMarkPending: () => void; onMarkNotRequired: () => void;
   onUpload: () => void; onVerifyPhysical: () => void; onVerifyUploaded: () => void; onReject: () => void;
   onEditRemark: () => void; onView: () => void; onSaveDownload: () => void;
@@ -684,7 +687,7 @@ function DocMoreMenu({
         style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid rgba(15,23,42,0.13)', background: 'none', cursor: isBusy ? 'not-allowed' : 'pointer', color: 'rgba(15,23,42,0.5)', fontSize: 18, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         title="More actions">⋯</button>
       {open && (
-        <div style={{ position: 'absolute', right: 0, bottom: '100%', marginBottom: 4, zIndex: 9999, background: '#fff', border: '1px solid rgba(15,23,42,0.11)', borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.18)', minWidth: 180, padding: '4px 0' }}>
+        <div style={{ position: 'absolute', ...(align === 'left' ? { left: 0 } : { right: 0 }), bottom: '100%', marginBottom: 4, zIndex: 9999, background: '#fff', border: '1px solid rgba(15,23,42,0.11)', borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.18)', minWidth: 180, padding: '4px 0' }}>
           {items.map(item => (
             <button key={item.label} type="button"
               onClick={() => { setOpen(false); item.onClick(); }}
@@ -1078,7 +1081,7 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
                     ) : coll === 'NOT_REQUIRED' ? (
                       <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Not required</span>
                     ) : null}
-                    <DocMoreMenu doc={doc} canEdit={canEdit} isBusy={isBusy}
+                    <DocMoreMenu doc={doc} canEdit={canEdit} isBusy={isBusy} align="left"
                       onCollect={() => callAction(doc.id, 'collect')}
                       onMarkPending={() => callAction(doc.id, 'mark-pending')}
                       onMarkNotRequired={() => callAction(doc.id, 'mark-not-required')}
