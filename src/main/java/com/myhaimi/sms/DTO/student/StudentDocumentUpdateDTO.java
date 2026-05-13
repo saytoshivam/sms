@@ -1,8 +1,8 @@
 package com.myhaimi.sms.DTO.student;
 
-import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.DocumentUploadStatus;
+import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -12,9 +12,9 @@ import lombok.Data;
  */
 @Data
 public class StudentDocumentUpdateDTO {
-    private StudentDocumentCollectionStatus collectionStatus;
-    private StudentDocumentUploadStatus uploadStatus;
-    private StudentDocumentVerificationStatus verificationStatus;
+    private DocumentCollectionStatus   collectionStatus;
+    private DocumentUploadStatus       uploadStatus;
+    private DocumentVerificationStatus verificationStatus;
 
     @Size(max = 1024)
     private String remarks;

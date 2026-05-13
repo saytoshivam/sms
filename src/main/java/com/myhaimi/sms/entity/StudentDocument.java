@@ -1,10 +1,10 @@
 package com.myhaimi.sms.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.DocumentUploadStatus;
+import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.VerificationSource;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -67,15 +67,15 @@ public class StudentDocument {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "collection_status", nullable = false, length = 32)
-    private StudentDocumentCollectionStatus collectionStatus;
+    private DocumentCollectionStatus collectionStatus;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "upload_status", nullable = false, length = 32)
-    private StudentDocumentUploadStatus uploadStatus;
+    private DocumentUploadStatus uploadStatus;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "verification_status", nullable = false, length = 32)
-    private StudentDocumentVerificationStatus verificationStatus;
+    private DocumentVerificationStatus verificationStatus;
 
     /**
      * How the document was verified — null until verificationStatus = VERIFIED.
@@ -86,6 +86,11 @@ public class StudentDocument {
     @Column(name = "verification_source", nullable = true, length = 32)
     private VerificationSource verificationSource;
 
+    /**
+     * @deprecated Legacy single-field status. Use {@link #collectionStatus},
+     * {@link #uploadStatus}, and {@link #verificationStatus} instead.
+     */
+    @Deprecated
     @Enumerated(EnumType.STRING)
     @Column(nullable = true, length = 32)
     private StudentDocumentStatus status;

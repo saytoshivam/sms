@@ -1,8 +1,10 @@
 package com.myhaimi.sms.entity.enums;
 
 /**
- * Tracks the verification status of an uploaded document.
+ * @deprecated Use {@link DocumentVerificationStatus} instead.
+ * Retained for backward compatibility with existing test code.
  */
+@Deprecated
 public enum StudentDocumentVerificationStatus {
     /** Document has not been verified yet. */
     NOT_VERIFIED,

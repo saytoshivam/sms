@@ -1,9 +1,9 @@
 package com.myhaimi.sms.DTO.student;
 
+import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.DocumentUploadStatus;
+import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.VerificationSource;
 import lombok.Data;
 
@@ -34,9 +34,9 @@ public class StudentDocumentSummaryDTO {
     private Instant uploadedAt;
 
     // ── Lifecycle status ──────────────────────────────────────────────────────
-    private StudentDocumentCollectionStatus   collectionStatus;
-    private StudentDocumentUploadStatus       uploadStatus;
-    private StudentDocumentVerificationStatus verificationStatus;
+    private DocumentCollectionStatus   collectionStatus;
+    private DocumentUploadStatus       uploadStatus;
+    private DocumentVerificationStatus verificationStatus;
     /** How the document was verified — null if not yet verified. */
     private VerificationSource verificationSource;
 
@@ -47,7 +47,10 @@ public class StudentDocumentSummaryDTO {
      */
     private String displayStatus;
 
-    /** @deprecated Use collectionStatus, uploadStatus, verificationStatus instead. */
+    /**
+     * @deprecated Use collectionStatus, uploadStatus, verificationStatus instead.
+     * Kept for backward compatibility with legacy data.
+     */
     @Deprecated
     private StudentDocumentStatus status;
 

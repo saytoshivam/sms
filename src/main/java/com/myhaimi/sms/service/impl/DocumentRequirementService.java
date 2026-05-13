@@ -4,9 +4,9 @@ import com.myhaimi.sms.DTO.docreq.*;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.DocumentRequirementStatus;
 import com.myhaimi.sms.entity.enums.DocumentTargetType;
-import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.DocumentUploadStatus;
+import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
@@ -180,9 +180,9 @@ public class DocumentRequirementService {
                     doc.setStudent(student);
                     doc.setDocumentType(dt.getCode());
                     doc.setDocumentTypeId(dt.getId());
-                    doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-                    doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-                    doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+                    doc.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
+                    doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+                    doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
                     documentRepo.save(doc);
                     totalRows++;
                 }

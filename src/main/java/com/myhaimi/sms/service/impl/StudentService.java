@@ -6,9 +6,9 @@ import com.myhaimi.sms.DTO.student.*;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
 import com.myhaimi.sms.entity.enums.StudentDocumentStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentCollectionStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentUploadStatus;
-import com.myhaimi.sms.entity.enums.StudentDocumentVerificationStatus;
+import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.DocumentUploadStatus;
+import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.DocumentTargetType;
 import com.myhaimi.sms.entity.enums.DocumentRequirementStatus;
 import com.myhaimi.sms.entity.FileObject;
@@ -616,12 +616,12 @@ public class StudentService {
             // Use new verificationStatus field; fall back to legacy status for backward compat
             boolean isVerified = false;
             if (d.getVerificationStatus() != null) {
-                isVerified = d.getVerificationStatus() == StudentDocumentVerificationStatus.VERIFIED;
+                isVerified = d.getVerificationStatus() == DocumentVerificationStatus.VERIFIED;
             } else if (d.getStatus() != null) {
                 isVerified = d.getStatus() == StudentDocumentStatus.VERIFIED;
             }
             // Skip NOT_REQUIRED documents from counts entirely
-            if (d.getCollectionStatus() == StudentDocumentCollectionStatus.NOT_REQUIRED) {
+            if (d.getCollectionStatus() == DocumentCollectionStatus.NOT_REQUIRED) {
                 continue;
             }
             if (isVerified) {
@@ -666,9 +666,9 @@ public class StudentService {
                 doc.setStudent(student);
                 doc.setDocumentType(dt.getCode());
                 doc.setDocumentTypeId(dt.getId());
-                doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-                doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-                doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+                doc.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
+                doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+                doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
                 doc.setStatus(null);
                 doc.setVerifiedByStaffId(null);
                 doc.setVerifiedAt(null);
@@ -735,7 +735,7 @@ public class StudentService {
                 .filter(d -> d.getStudent().getId().equals(student.getId()))
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
+        doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
         if (remarks != null && !remarks.isBlank()) {
             doc.setRemarks(remarks.trim());
         }
@@ -763,9 +763,9 @@ public class StudentService {
                 .filter(d -> d.getStudent().getId().equals(student.getId()))
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
+        doc.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
         // Resetting to pending clears verification state; preserve fileUrl & uploadStatus if file exists
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
         doc.setVerifiedAt(null);
         doc.setVerifiedByStaffId(null);
         documentRepo.save(doc);
@@ -792,9 +792,9 @@ public class StudentService {
                 .filter(d -> d.getStudent().getId().equals(student.getId()))
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.NOT_REQUIRED);
-        doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        doc.setCollectionStatus(DocumentCollectionStatus.NOT_REQUIRED);
+        doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
         doc.setVerifiedAt(null);
         doc.setVerifiedByStaffId(null);
         documentRepo.save(doc);
@@ -826,12 +826,12 @@ public class StudentService {
                 .filter(d -> d.getStudent().getId().equals(student.getId()))
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
-        if (doc.getCollectionStatus() == StudentDocumentCollectionStatus.NOT_REQUIRED) {
+        if (doc.getCollectionStatus() == DocumentCollectionStatus.NOT_REQUIRED) {
             throw new IllegalArgumentException("Cannot verify a document that is marked as not required.");
         }
 
-        boolean physicallyCollected = doc.getCollectionStatus() == StudentDocumentCollectionStatus.COLLECTED_PHYSICAL;
-        boolean uploaded            = doc.getUploadStatus()     == StudentDocumentUploadStatus.UPLOADED;
+        boolean physicallyCollected = doc.getCollectionStatus() == DocumentCollectionStatus.COLLECTED_PHYSICAL;
+        boolean uploaded            = doc.getUploadStatus()     == DocumentUploadStatus.UPLOADED;
         if (!physicallyCollected && !uploaded) {
             throw new IllegalArgumentException("Document must be collected or uploaded before verification.");
         }
@@ -844,7 +844,7 @@ public class StudentService {
                     : com.myhaimi.sms.entity.enums.VerificationSource.PHYSICAL_ORIGINAL;
         }
 
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
+        doc.setVerificationStatus(DocumentVerificationStatus.VERIFIED);
         doc.setVerificationSource(resolvedSource);
         doc.setVerifiedAt(Instant.now());
         // Capture who verified the document (staff member linked to the current user)
@@ -882,7 +882,7 @@ public class StudentService {
                 .filter(d -> d.getStudent().getId().equals(student.getId()))
                 .orElseThrow(() -> new IllegalArgumentException("Document not found for this student."));
 
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.REJECTED);
+        doc.setVerificationStatus(DocumentVerificationStatus.REJECTED);
         doc.setVerifiedAt(Instant.now());
         if (ctx.linkedStaffId() != null) {
             doc.setVerifiedByStaffId(ctx.linkedStaffId());
@@ -921,7 +921,7 @@ public class StudentService {
         if (dto.getVerificationStatus() != null) {
             doc.setVerificationStatus(dto.getVerificationStatus());
             // Auto-set verifiedAt when status changes to VERIFIED
-            if (dto.getVerificationStatus() == StudentDocumentVerificationStatus.VERIFIED && doc.getVerifiedAt() == null) {
+            if (dto.getVerificationStatus() == DocumentVerificationStatus.VERIFIED && doc.getVerifiedAt() == null) {
                 doc.setVerifiedAt(Instant.now());
             }
         }
@@ -943,14 +943,14 @@ public class StudentService {
      * NOT_REQUIRED wins first so a waived document never shows as verified/rejected.
      */
     static String computeDisplayStatus(StudentDocument doc) {
-        StudentDocumentCollectionStatus cs = doc.getCollectionStatus();
-        if (cs == StudentDocumentCollectionStatus.NOT_REQUIRED) return "NOT_REQUIRED";
-        StudentDocumentVerificationStatus vs = doc.getVerificationStatus();
-        if (vs == StudentDocumentVerificationStatus.REJECTED)   return "REJECTED";
-        if (vs == StudentDocumentVerificationStatus.VERIFIED)   return "VERIFIED";
-        StudentDocumentUploadStatus us = doc.getUploadStatus();
-        if (us == StudentDocumentUploadStatus.UPLOADED)         return "UPLOADED";
-        if (cs == StudentDocumentCollectionStatus.COLLECTED_PHYSICAL) return "COLLECTED_PHYSICAL";
+        DocumentCollectionStatus cs = doc.getCollectionStatus();
+        if (cs == DocumentCollectionStatus.NOT_REQUIRED) return "NOT_REQUIRED";
+        DocumentVerificationStatus vs = doc.getVerificationStatus();
+        if (vs == DocumentVerificationStatus.REJECTED)   return "REJECTED";
+        if (vs == DocumentVerificationStatus.VERIFIED)   return "VERIFIED";
+        DocumentUploadStatus us = doc.getUploadStatus();
+        if (us == DocumentUploadStatus.UPLOADED)         return "UPLOADED";
+        if (cs == DocumentCollectionStatus.COLLECTED_PHYSICAL) return "COLLECTED_PHYSICAL";
         return "PENDING_COLLECTION";
     }
 
