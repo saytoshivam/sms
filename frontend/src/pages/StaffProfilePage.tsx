@@ -1200,9 +1200,6 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
   const hasLogin     = loginStatus !== 'NOT_CREATED';
   const isActive     = loginStatus === 'ACTIVE';
   const isDisabled   = loginStatus === 'DISABLED';
-  // isInvited intentionally kept as a constant false so existing render guards
-  // that reference it still compile but never activate.
-  const isInvited    = false;
 
   const hasTeacherRole = profile.roles.includes('TEACHER') || profile.roles.includes('CLASS_TEACHER');
   const teacherNoLogin = hasTeacherRole && !hasLogin;
