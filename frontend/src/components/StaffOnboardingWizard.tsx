@@ -822,9 +822,23 @@ function PreviewRow({ icon, label, children }: { icon: string; label: string; ch
 
 // ─── Main Wizard ──────────────────────────────────────────────────────────────
 
+/** Response shape from POST/PUT /api/v1/onboarding/staff/onboard */
+interface StaffOnboardingResponse {
+  staff: {
+    id: number;
+    fullName: string;
+    timetableEligible: boolean;
+    missingRequiredItems: string[];
+    [key: string]: unknown;
+  };
+  warnings: string[];
+  tempPassword: string | null;
+}
+
 interface StaffOnboardingWizardProps {
   onClose: () => void;
-  onSuccess: () => void;
+  /** Called with the newly-created staff ID after a successful save or activate. */
+  onSuccess: (staffId: number) => void;
 }
 
 export function StaffOnboardingWizard({ onClose, onSuccess }: StaffOnboardingWizardProps) {
@@ -930,9 +944,14 @@ export function StaffOnboardingWizard({ onClose, onSuccess }: StaffOnboardingWiz
     if (missing.length > 0) { toast.error('Missing fields', missing.join(', ')); return; }
     setBusy(true);
     try {
-      await api.post('/api/v1/onboarding/staff/onboard', buildBody('DRAFT'));
-      toast.success('Draft saved', `${draft.fullName} added as draft.`);
-      onSuccess();
+      const res = await api.post<StaffOnboardingResponse>('/api/v1/onboarding/staff/onboard', buildBody('DRAFT'));
+      const result = res.data;
+      if (result.warnings?.length) {
+        toast.info('Saved with warnings', result.warnings.join(' · '));
+      } else {
+        toast.success('Draft saved', `${draft.fullName} added as draft.`);
+      }
+      onSuccess(result.staff.id);
     } catch (e) {
       toast.error('Could not save', formatApiError(e));
     } finally {
@@ -945,9 +964,17 @@ export function StaffOnboardingWizard({ onClose, onSuccess }: StaffOnboardingWiz
     if (missing.length > 0) { toast.error('Missing fields', missing.join(', ')); return; }
     setBusy(true);
     try {
-      await api.post('/api/v1/onboarding/staff/onboard', buildBody('ACTIVE'));
-      toast.success('Staff activated!', `${draft.fullName} is now active.`);
-      onSuccess();
+      const res = await api.post<StaffOnboardingResponse>('/api/v1/onboarding/staff/onboard', buildBody('ACTIVE'));
+      const result = res.data;
+      if (result.tempPassword) {
+        toast.success('Login created', `Temp password: ${result.tempPassword} — copy it now, shown once.`);
+      }
+      if (result.warnings?.length) {
+        toast.info('Activated with warnings', result.warnings.join(' · '));
+      } else {
+        toast.success('Staff activated!', `${draft.fullName} is now active.`);
+      }
+      onSuccess(result.staff.id);
     } catch (e) {
       toast.error('Could not activate', formatApiError(e));
     } finally {

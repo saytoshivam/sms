@@ -7,7 +7,7 @@
  */
 import React, { useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
@@ -208,13 +208,28 @@ function EditModal({ staffId, initial, subjects, busy, onSave, onClose }: { staf
     if (!d.phone.trim())    { toast.error('Validation', 'Phone is required.'); return; }
     if (!d.designation.trim()) { toast.error('Validation', 'Designation is required.'); return; }
     if (d.roles.length === 0)  { toast.error('Validation', 'At least one role is required.'); return; }
+    const isTeacher = d.roles.includes('TEACHER');
+    // Build structured StaffOnboardingRequest body matching PUT /api/v1/onboarding/staff/{id}/onboard
     onSave(staffId, {
-      fullName: d.fullName.trim(), email: d.email.trim() || null, phone: d.phone.trim(),
-      employeeNo: d.employeeNo.trim() || null, designation: d.designation.trim(),
-      roles: d.roles, teachableSubjectIds: d.teachableSubjectIds,
-      createLoginAccount: d.createLoginAccount,
-      maxWeeklyLectureLoad: d.maxWeeklyLectureLoad === '' ? null : Math.max(0, Math.trunc(Number(d.maxWeeklyLectureLoad))),
-      preferredClassGroupIds: [],
+      identity: {
+        fullName: d.fullName.trim(),
+        phone: d.phone.trim(),
+        email: d.email.trim() || null,
+        employeeNo: d.employeeNo.trim() || null,
+      },
+      employment: {
+        staffType: 'TEACHING',
+        designation: d.designation.trim(),
+      },
+      rolesAndAccess: {
+        roles: d.roles,
+        createLoginAccount: d.createLoginAccount,
+      },
+      academicCapabilities: isTeacher ? {
+        teachableSubjectIds: d.teachableSubjectIds,
+        maxWeeklyLectureLoad: d.maxWeeklyLectureLoad === '' ? null : Math.max(0, Math.trunc(Number(d.maxWeeklyLectureLoad))),
+        preferredClassGroupIds: [],
+      } : null,
     });
   };
 
@@ -293,6 +308,7 @@ export function TeachersModulePage() {
   const [searchParams] = useSearchParams();
   const canEdit = !isWorkspaceReadOnly(searchParams);
   const invalidate = useApiTags();
+  const navigate = useNavigate();
 
   // ── View tab ──────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<'directory' | 'readiness'>('directory');
@@ -382,7 +398,7 @@ export function TeachersModulePage() {
   });
 
   const updateMut = useMutation({
-    mutationFn: async ({ id, body }: { id: number; body: object }) => { await api.put(`/api/v1/onboarding/staff/${id}`, body); },
+    mutationFn: async ({ id, body }: { id: number; body: object }) => { await api.put(`/api/v1/onboarding/staff/${id}/onboard`, body); },
     onSuccess: async () => { toast.success('Staff updated.'); setEditTarget(null); await invalidate(['staff']); },
     onError: (e) => toast.error('Could not update', formatApiError(e)),
   });
@@ -669,9 +685,10 @@ export function TeachersModulePage() {
       {showWizard && (
         <StaffOnboardingWizard
           onClose={() => setShowWizard(false)}
-          onSuccess={async () => {
+          onSuccess={async (staffId) => {
             setShowWizard(false);
             await invalidate(['staff']);
+            navigate(`/app/teachers/${staffId}`);
           }}
         />
       )}

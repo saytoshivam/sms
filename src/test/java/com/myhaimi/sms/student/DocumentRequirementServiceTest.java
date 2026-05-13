@@ -115,17 +115,17 @@ class DocumentRequirementServiceTest {
         StudentDocument d = new StudentDocument();
         d.setStudent(student);
         d.setDocumentType(code);
-        d.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-        d.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        d.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        d.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
+        d.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        d.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
         return d;
     }
 
     private StudentDocument uploadedDoc(Student student, String code) {
         StudentDocument d = existingDoc(student, code);
-        d.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
-        d.setUploadStatus(StudentDocumentUploadStatus.UPLOADED);
-        d.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
+        d.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
+        d.setUploadStatus(DocumentUploadStatus.UPLOADED);
+        d.setVerificationStatus(DocumentVerificationStatus.VERIFIED);
         d.setFileId(999L);   // has a real file
         return d;
     }
@@ -340,8 +340,8 @@ class DocumentRequirementServiceTest {
 
         // Uploaded doc state must be unchanged (service never touches existing rows)
         assertThat(uploaded.getFileId()).isEqualTo(999L);
-        assertThat(uploaded.getUploadStatus()).isEqualTo(StudentDocumentUploadStatus.UPLOADED);
-        assertThat(uploaded.getVerificationStatus()).isEqualTo(StudentDocumentVerificationStatus.VERIFIED);
+        assertThat(uploaded.getUploadStatus()).isEqualTo(DocumentUploadStatus.UPLOADED);
+        assertThat(uploaded.getVerificationStatus()).isEqualTo(DocumentVerificationStatus.VERIFIED);
     }
 }
 

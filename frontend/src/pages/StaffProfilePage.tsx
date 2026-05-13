@@ -67,6 +67,9 @@ interface StaffProfile {
   professionalQualification: string | null;
   previousInstitution: string | null;
 
+  // work details
+  workLocation: string | null;
+
   // payroll (masked)
   salaryType: string | null;
   payrollEnabled: boolean;
@@ -75,6 +78,10 @@ interface StaffProfile {
   bankAccountNumberMasked: string | null;
   ifsc: string | null;
   panNumberMasked: string | null;
+
+  // timetable scheduling constraints
+  unavailablePeriods: { dayOfWeek: string; periodNumber: number }[] | null;
+  timetableEligibilityReasons: string[] | null;
 
   // completeness
   profileCompleteness: {
@@ -374,6 +381,7 @@ function TabEmployment({ profile }: { profile: StaffProfile }) {
         <InfoRow label="Employment Type"   value={profile.employmentType} />
         <InfoRow label="Joining Date"      value={fmtDate(profile.joiningDate)} />
         <InfoRow label="Status"            value={profile.status} />
+        <InfoRow label="Work Location"     value={profile.workLocation} />
         <InfoRow label="Reporting Manager" value={profile.reportingManagerStaffId ? `Staff #${profile.reportingManagerStaffId}` : null} />
       </SectionCard>
 
@@ -401,7 +409,7 @@ function TabEmployment({ profile }: { profile: StaffProfile }) {
 
       <div style={{ padding: '12px 16px', background: 'rgba(15,23,42,0.03)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.07)' }}>
         <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-          📋 HR status history and employment event log are available once the HR Events module is activated for your school.
+          📋 HR status history and employment event log are not enabled for this school.
         </div>
       </div>
     </div>
@@ -538,6 +546,49 @@ function TabAcademics({ profile, subjects, structure, classGroups }: {
           )}
         </SectionCard>
       )}
+
+      {/* Unavailable periods */}
+      <SectionCard title="Unavailable Periods">
+        {(profile.unavailablePeriods ?? []).length === 0 ? (
+          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.4)' }}>No unavailable periods configured. Scheduler will treat all periods as available.</div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {(profile.unavailablePeriods ?? []).map((p, i) => (
+              <span key={i} style={{ ...B, background: 'rgba(234,179,8,0.1)', color: '#92400e', fontSize: 12 }}>
+                {p.dayOfWeek} · Period {p.periodNumber}
+              </span>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* Timetable eligibility reasons */}
+      <SectionCard title="Timetable Eligibility">
+        {profile.timetableEligible ? (
+          <div>
+            <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534', marginBottom: 8, display: 'inline-block' }}>✓ Eligible</span>
+            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', marginTop: 6 }}>
+              This teacher has an active TEACHER role and at least one teachable subject assigned.
+            </div>
+          </div>
+        ) : (
+          <div>
+            <span style={{ ...B, background: 'rgba(220,38,38,0.09)', color: '#b91c1c', marginBottom: 8, display: 'inline-block' }}>✗ Not Eligible</span>
+            {((profile.timetableEligibilityReasons ?? []).length > 0) ? (
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                {(profile.timetableEligibilityReasons ?? []).map((r, i) => (
+                  <li key={i} style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600, marginBottom: 3 }}>{r}</li>
+                ))}
+              </ul>
+            ) : (
+              <div style={{ marginTop: 6, fontSize: 12, color: '#b91c1c', fontWeight: 600 }}>
+                {!profile.roles.includes('TEACHER') && <div>Missing: TEACHER role.</div>}
+                {profile.teachableSubjectCodes.length === 0 && <div>Missing: at least one teachable subject.</div>}
+              </div>
+            )}
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }
@@ -593,7 +644,7 @@ function TabTimetable({ profile }: { profile: StaffProfile }) {
 
       <div style={{ padding: '12px 16px', background: 'rgba(15,23,42,0.02)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.07)' }}>
         <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.42)', fontWeight: 600 }}>
-          📋 An embedded per-teacher weekly timetable view is available after the timetable is published. Open the Timetable Grid above to view and manage the full schedule.
+          📋 Per-teacher weekly timetable is managed through the Timetable Grid. Open the grid above to view and manage the full schedule.
         </div>
       </div>
 
@@ -1367,7 +1418,7 @@ function TabActivity({ profile }: { profile: StaffProfile }) {
 
       <div style={{ padding: '12px 16px', background: 'rgba(15,23,42,0.02)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.07)' }}>
         <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-          📋 Detailed HR event log — status transitions, role updates, login events, and document actions — is available once the audit module is activated for your school.
+          📋 Detailed staff activity log — status transitions, role updates, login events, and document actions — is not enabled for this school.
         </div>
       </div>
     </div>
@@ -1513,8 +1564,10 @@ export function StaffProfilePage() {
                 {profile.fullName}
               </h1>
               <span style={{ ...B, ...sc, fontSize: 12, marginTop: 4 }}>{profile.status ?? '—'}</span>
-              {profile.timetableEligible && (
-                <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534', fontSize: 11, marginTop: 4 }}>📚 TT Eligible</span>
+              {profile.timetableEligible ? (
+                <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534', fontSize: 11, marginTop: 4 }}>📚 Timetable Eligible</span>
+              ) : (
+                <span style={{ ...B, background: 'rgba(15,23,42,0.07)', color: '#64748b', fontSize: 11, marginTop: 4 }}>📚 Not Timetable Eligible</span>
               )}
             </div>
 
@@ -1604,7 +1657,7 @@ export function StaffProfilePage() {
           <ModuleDisabledTab
             icon="🏖"
             name="Leave Management"
-            reason="Leave management is not active for this school. Leave requests, balances, and approval workflows will be available once the HR Leave module is enabled by your administrator."
+            reason="Leave tracking is not enabled for this school. Individual leave balances, leave requests, and approval workflows are not active."
           />
         )}
         {activeTab === 'payroll'    && (
@@ -1619,14 +1672,14 @@ export function StaffProfilePage() {
                 <InfoRow label="PAN"                value={profile.panNumberMasked} mono />
               </SectionCard>
               <div style={{ padding: '12px 16px', background: 'rgba(234,179,8,0.08)', borderRadius: 10, border: '1px solid rgba(234,179,8,0.2)', fontSize: 12, color: '#92400e', fontWeight: 600 }}>
-                ℹ️ Payroll processing — salary runs, deductions, and payslip generation — requires the Payroll module to be activated for your school. Contact your administrator to enable it.
+                ℹ️ Payroll setup is captured. Salary processing is not enabled for this school.
               </div>
             </div>
           ) : (
             <ModuleDisabledTab
               icon="💰"
               name="Payroll"
-              reason="Payroll is not configured for this staff member. Enable payroll in the Employment section and ensure the Payroll module is active for your school."
+              reason="Payroll details have not been set up for this staff member. Salary processing is not enabled for this school."
             />
           )
         )}

@@ -98,9 +98,9 @@ class StudentDocumentLifecycleTest {
         doc.setId(DOC_ID);
         doc.setStudent(student);
         doc.setDocumentType("BIRTH_CERTIFICATE");
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-        doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        doc.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
+        doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
         return doc;
     }
 
@@ -235,7 +235,7 @@ class StudentDocumentLifecycleTest {
     void canVerify_collectedPhysicalDocument() {
         Student student = stubStudent();
         StudentDocument doc = freshDoc(student);
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
+        doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
 
         when(accessGuard.resolve(SCHOOL_ID)).thenReturn(editorCtx());
         when(studentRepo.findByIdAndSchool_Id(STUDENT_ID, SCHOOL_ID))
@@ -245,7 +245,7 @@ class StudentDocumentLifecycleTest {
 
         var result = service.verifyDocument(STUDENT_ID, DOC_ID, "Looks good", null);
 
-        assertThat(result.getVerificationStatus()).isEqualTo(StudentDocumentVerificationStatus.VERIFIED);
+        assertThat(result.getVerificationStatus()).isEqualTo(DocumentVerificationStatus.VERIFIED);
         assertThat(result.getVerificationSource()).isEqualTo(com.myhaimi.sms.entity.enums.VerificationSource.PHYSICAL_ORIGINAL);
         assertThat(result.getVerifiedAt()).isNotNull();
         assertThat(result.getVerifiedByStaffId()).isEqualTo(42); // staffId from editorCtx
@@ -262,7 +262,7 @@ class StudentDocumentLifecycleTest {
         Student student = stubStudent();
         StudentDocument doc = freshDoc(student);
         // Simulate a previously verified document
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
+        doc.setVerificationStatus(DocumentVerificationStatus.VERIFIED);
         doc.setVerifiedAt(Instant.now());
         doc.setVerifiedByStaffId(99);
 
@@ -274,9 +274,9 @@ class StudentDocumentLifecycleTest {
 
         var result = service.markDocumentNotRequired(STUDENT_ID, DOC_ID);
 
-        assertThat(result.getCollectionStatus()).isEqualTo(StudentDocumentCollectionStatus.NOT_REQUIRED);
-        assertThat(result.getUploadStatus()).isEqualTo(StudentDocumentUploadStatus.NOT_UPLOADED);
-        assertThat(result.getVerificationStatus()).isEqualTo(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        assertThat(result.getCollectionStatus()).isEqualTo(DocumentCollectionStatus.NOT_REQUIRED);
+        assertThat(result.getUploadStatus()).isEqualTo(DocumentUploadStatus.NOT_UPLOADED);
+        assertThat(result.getVerificationStatus()).isEqualTo(DocumentVerificationStatus.NOT_VERIFIED);
         assertThat(result.getVerifiedAt()).isNull();
         assertThat(result.getVerifiedByStaffId()).isNull();
     }
@@ -291,12 +291,12 @@ class StudentDocumentLifecycleTest {
         Student student = stubStudent();
         StudentDocument doc = freshDoc(student);
         // Simulate a verified document being rolled back
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
+        doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
+        doc.setVerificationStatus(DocumentVerificationStatus.VERIFIED);
         doc.setVerifiedAt(Instant.now());
         doc.setVerifiedByStaffId(42);
         doc.setFileUrl("http://example.com/file.pdf");
-        doc.setUploadStatus(StudentDocumentUploadStatus.UPLOADED);
+        doc.setUploadStatus(DocumentUploadStatus.UPLOADED);
 
         when(accessGuard.resolve(SCHOOL_ID)).thenReturn(editorCtx());
         when(studentRepo.findByIdAndSchool_Id(STUDENT_ID, SCHOOL_ID))
@@ -306,13 +306,13 @@ class StudentDocumentLifecycleTest {
 
         var result = service.markDocumentPending(STUDENT_ID, DOC_ID);
 
-        assertThat(result.getCollectionStatus()).isEqualTo(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-        assertThat(result.getVerificationStatus()).isEqualTo(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        assertThat(result.getCollectionStatus()).isEqualTo(DocumentCollectionStatus.PENDING_COLLECTION);
+        assertThat(result.getVerificationStatus()).isEqualTo(DocumentVerificationStatus.NOT_VERIFIED);
         assertThat(result.getVerifiedAt()).isNull();
         assertThat(result.getVerifiedByStaffId()).isNull();
         // fileUrl / uploadStatus are preserved (not touched by markPending)
         assertThat(result.getFileUrl()).isEqualTo("http://example.com/file.pdf");
-        assertThat(result.getUploadStatus()).isEqualTo(StudentDocumentUploadStatus.UPLOADED);
+        assertThat(result.getUploadStatus()).isEqualTo(DocumentUploadStatus.UPLOADED);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -344,7 +344,7 @@ class StudentDocumentLifecycleTest {
     void reject_setsRejectedWithTimestamp() {
         Student student = stubStudent();
         StudentDocument doc = freshDoc(student);
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
+        doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
 
         when(accessGuard.resolve(SCHOOL_ID)).thenReturn(editorCtx());
         when(studentRepo.findByIdAndSchool_Id(STUDENT_ID, SCHOOL_ID))
@@ -354,7 +354,7 @@ class StudentDocumentLifecycleTest {
 
         var result = service.rejectDocument(STUDENT_ID, DOC_ID, "Missing page 2");
 
-        assertThat(result.getVerificationStatus()).isEqualTo(StudentDocumentVerificationStatus.REJECTED);
+        assertThat(result.getVerificationStatus()).isEqualTo(DocumentVerificationStatus.REJECTED);
         assertThat(result.getVerifiedAt()).isNotNull();
         assertThat(result.getVerifiedByStaffId()).isEqualTo(42); // staffId from editorCtx
         assertThat(result.getRemarks()).isEqualTo("Missing page 2");
@@ -376,9 +376,9 @@ class StudentDocumentLifecycleTest {
         docOfOther.setId(DOC_ID);
         docOfOther.setStudent(otherStudent);
         docOfOther.setDocumentType("AADHAAR_CARD");
-        docOfOther.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-        docOfOther.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        docOfOther.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        docOfOther.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
+        docOfOther.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        docOfOther.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
 
         when(accessGuard.resolve(SCHOOL_ID)).thenReturn(editorCtx());
         when(studentRepo.findByIdAndSchool_Id(STUDENT_ID, SCHOOL_ID))
@@ -400,9 +400,9 @@ class StudentDocumentLifecycleTest {
     @DisplayName("NOT_REQUIRED takes highest display precedence even when verification is VERIFIED")
     void displayStatus_notRequired_winsOverVerified() {
         StudentDocument doc = new StudentDocument();
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.NOT_REQUIRED);
-        doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED); // shouldn't matter
+        doc.setCollectionStatus(DocumentCollectionStatus.NOT_REQUIRED);
+        doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.VERIFIED); // shouldn't matter
 
         assertThat(StudentService.computeDisplayStatus(doc)).isEqualTo("NOT_REQUIRED");
     }
@@ -411,9 +411,9 @@ class StudentDocumentLifecycleTest {
     @DisplayName("REJECTED appears before VERIFIED when collection is not NOT_REQUIRED")
     void displayStatus_rejectedBeforeVerified() {
         StudentDocument doc = new StudentDocument();
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
-        doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.REJECTED);
+        doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
+        doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.REJECTED);
 
         assertThat(StudentService.computeDisplayStatus(doc)).isEqualTo("REJECTED");
     }
@@ -422,9 +422,9 @@ class StudentDocumentLifecycleTest {
     @DisplayName("VERIFIED shows correctly when document is collected and verified")
     void displayStatus_verifiedWhenCollectedAndVerified() {
         StudentDocument doc = new StudentDocument();
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
-        doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.VERIFIED);
+        doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
+        doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.VERIFIED);
 
         assertThat(StudentService.computeDisplayStatus(doc)).isEqualTo("VERIFIED");
     }
@@ -433,9 +433,9 @@ class StudentDocumentLifecycleTest {
     @DisplayName("UPLOADED shows when upload status is UPLOADED and not yet verified")
     void displayStatus_uploadedBeforeCollectedPhysical() {
         StudentDocument doc = new StudentDocument();
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-        doc.setUploadStatus(StudentDocumentUploadStatus.UPLOADED);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        doc.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
+        doc.setUploadStatus(DocumentUploadStatus.UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
 
         assertThat(StudentService.computeDisplayStatus(doc)).isEqualTo("UPLOADED");
     }
@@ -444,9 +444,9 @@ class StudentDocumentLifecycleTest {
     @DisplayName("PENDING_COLLECTION is the fallback display status")
     void displayStatus_pendingIsFallback() {
         StudentDocument doc = new StudentDocument();
-        doc.setCollectionStatus(StudentDocumentCollectionStatus.PENDING_COLLECTION);
-        doc.setUploadStatus(StudentDocumentUploadStatus.NOT_UPLOADED);
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
+        doc.setCollectionStatus(DocumentCollectionStatus.PENDING_COLLECTION);
+        doc.setUploadStatus(DocumentUploadStatus.NOT_UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
 
         assertThat(StudentService.computeDisplayStatus(doc)).isEqualTo("PENDING_COLLECTION");
     }

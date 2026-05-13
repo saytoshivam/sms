@@ -168,27 +168,40 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
     mutationFn: async ({ staffId, body }: { staffId: number; body: StaffDraft }) => {
       const roles = (body.roles ?? []).map((r) => String(r).trim().toUpperCase()).filter(Boolean);
       const isTeacher = roles.includes('TEACHER');
-      const r = await api.put(`/api/v1/onboarding/staff/${staffId}`, {
-        fullName: body.fullName,
-        email: body.email,
-        phone: body.phone ?? '',
-        employeeNo: body.employeeNo ?? '',
-        designation: body.designation ?? '',
-        roles,
-        teachableSubjectIds: isTeacher ? body.teachableSubjectIds ?? [] : [],
-        createLoginAccount: body.createLoginAccount ?? true,
-        maxWeeklyLectureLoad: isTeacher ? body.maxWeeklyLectureLoad ?? null : null,
-        preferredClassGroupIds: isTeacher ? body.preferredClassGroupIds ?? [] : [],
+      // Use the structured onboard endpoint — PUT /api/v1/onboarding/staff/{id}/onboard
+      const r = await api.put(`/api/v1/onboarding/staff/${staffId}/onboard`, {
+        identity: {
+          fullName: body.fullName,
+          phone: body.phone ?? '',
+          email: body.email || null,
+          employeeNo: body.employeeNo || null,
+        },
+        employment: {
+          staffType: 'TEACHING',
+          designation: body.designation ?? '',
+        },
+        rolesAndAccess: {
+          roles,
+          createLoginAccount: body.createLoginAccount ?? true,
+        },
+        academicCapabilities: isTeacher ? {
+          teachableSubjectIds: body.teachableSubjectIds ?? [],
+          maxWeeklyLectureLoad: body.maxWeeklyLectureLoad ?? null,
+          preferredClassGroupIds: body.preferredClassGroupIds ?? [],
+        } : null,
       });
-      return r.data as { email: string; username: string; temporaryPassword: string; roles: string[] } | null;
+      return r.data as { staff: { id: number }; warnings: string[]; tempPassword: string | null } | null;
     },
-    onSuccess: async (cred) => {
+    onSuccess: async (result) => {
       setStaffEdit({ open: false });
       await invalidate(['staff', 'allocations']);
-      if (cred?.temporaryPassword) {
-        toast.success('Login created', `Username: ${cred.username}`);
+      if (result?.tempPassword) {
+        toast.success('Login created', `Temp password: ${result.tempPassword} — copy it now.`);
       } else {
         toast.success('Saved', 'Staff updated.');
+      }
+      if (result?.warnings?.length) {
+        toast.info('Saved with warnings', result.warnings.join(' · '));
       }
     },
   });
