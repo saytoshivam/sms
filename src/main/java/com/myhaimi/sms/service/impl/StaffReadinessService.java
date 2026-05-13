@@ -9,8 +9,6 @@ import com.myhaimi.sms.entity.enums.StaffType;
 import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,21 +29,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class StaffReadinessService {
 
-    private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
-
     private final StaffRepo                        staffRepo;
     private final StaffTeachableSubjectRepository  teachableSubjectRepo;
     private final UserRepo                         userRepo;
     private final SubjectAllocationRepo            allocationRepo;
     private final StaffDocumentRepo                documentRepo;
     private final SchoolRepo                       schoolRepo;
-    private final ObjectMapper                     objectMapper;
-
-    /** Parse a JSON string-list stored on Staff (e.g. staffRolesJson). */
-    private List<String> parseStringList(String json) {
-        if (json == null || json.isBlank()) return List.of();
-        try { return objectMapper.readValue(json, STRING_LIST); } catch (Exception e) { return List.of(); }
-    }
+    private final StaffRoleMappingRepository       staffRoleMappingRepository;
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -87,10 +77,19 @@ public class StaffReadinessService {
             }
         }
 
-        // ── 5b. School default weekly load (used when staff has no individual cap) ─
+        // ── 5b. School default weekly load ───────────────────────────────────
         Integer schoolDefaultLoad = schoolRepo.findById(schoolId)
                 .map(s -> s.getDefaultTeacherWeeklyLoad())
                 .orElse(null);
+
+        // ── 5c. Staff roles map from StaffRoleMapping (authoritative) ─────────
+        // staffId → Set<roleName>
+        Map<Integer, Set<String>> rolesByStaffId = new HashMap<>();
+        for (StaffRoleMapping srm : staffRoleMappingRepository.findByStaff_School_Id(schoolId)) {
+            rolesByStaffId
+                    .computeIfAbsent(srm.getStaff().getId(), k -> new HashSet<>())
+                    .add(srm.getRole().getName());
+        }
 
         // ── 6. Build queues and summary counters ──────────────────────────────
         List<StaffReadinessIssueDTO> missingSubjects      = new ArrayList<>();
@@ -118,13 +117,18 @@ public class StaffReadinessService {
             User    user         = userByStaffId.get(staffId);
             boolean hasLogin     = user != null;
 
-            // Roles come from staffRolesJson first (first-class assignment); fall back to User.roles
-            List<String> staffOwnRoles = parseStringList(staff.getStaffRolesJson());
-            List<String> effectiveRoles = staffOwnRoles.isEmpty()
-                    ? (hasLogin && user.getRoles() != null
-                        ? user.getRoles().stream().map(r -> r.getName()).collect(Collectors.toList())
-                        : List.of())
-                    : staffOwnRoles;
+            // Roles: StaffRoleMapping first (authoritative); fall back to User.roles for pre-migration records
+            Set<String> ownRoles = rolesByStaffId.get(staffId);
+            Set<String> effectiveRoles;
+            if (ownRoles != null && !ownRoles.isEmpty()) {
+                effectiveRoles = ownRoles;
+            } else if (hasLogin && user.getRoles() != null) {
+                effectiveRoles = user.getRoles().stream()
+                        .map(Role::getName)
+                        .collect(Collectors.toSet());
+            } else {
+                effectiveRoles = Set.of();
+            }
             boolean hasTeacherRole = effectiveRoles.stream().anyMatch(r -> "TEACHER".equalsIgnoreCase(r));
 
             boolean hasSubjects        = staffIdsWithSubjects.contains(staffId);
@@ -179,7 +183,7 @@ public class StaffReadinessService {
                         List.of("OPEN_PROFILE")));
             }
 
-            // ── Queue: over capacity ───────────────────────────────────────���─
+            // ── Queue: over capacity ──────────────────────────────────────────
             if (isOverloaded) {
                 overCapacity.add(issue(staffId, staffName, employeeNo,
                         "Load " + assignedLoad + "/" + maxLoad + " periods — overloaded",
@@ -247,4 +251,3 @@ public class StaffReadinessService {
         return id;
     }
 }
-

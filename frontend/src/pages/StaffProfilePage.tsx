@@ -41,7 +41,7 @@ interface StaffProfile {
   restrictedClassGroupIds: number[];
   specialization: string | null;
   yearsOfExperience: number | null;
-  loginStatus: string | null;     // NOT_CREATED | INVITED | ACTIVE | DISABLED
+  loginStatus: string | null;     // NOT_CREATED | ACTIVE | DISABLED  (INVITED not used)
   username: string | null;
   userId: number | null;
   lastInviteSentAt: string | null;
@@ -1194,15 +1194,19 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
   const [linkOpen, setLinkOpen] = useState(false);
   const [confirm, setConfirm] = useState<null | 'reset' | 'disable' | 'enable'>(null);
 
+  // loginStatus is one of: NOT_CREATED | ACTIVE | DISABLED
+  // INVITED is not used — lastInviteSentAt is recorded as metadata only.
   const loginStatus  = profile.loginStatus ?? 'NOT_CREATED';
   const hasLogin     = loginStatus !== 'NOT_CREATED';
   const isActive     = loginStatus === 'ACTIVE';
   const isDisabled   = loginStatus === 'DISABLED';
-  const isInvited    = loginStatus === 'INVITED';
+  // isInvited intentionally kept as a constant false so existing render guards
+  // that reference it still compile but never activate.
+  const isInvited    = false;
 
   const hasTeacherRole = profile.roles.includes('TEACHER') || profile.roles.includes('CLASS_TEACHER');
   const teacherNoLogin = hasTeacherRole && !hasLogin;
-  const teacherDisabled = hasTeacherRole && (isDisabled || isInvited);
+  const teacherDisabled = hasTeacherRole && isDisabled;
 
   function refresh() { qc.invalidateQueries({ queryKey: ['staff-profile', staffId] }); onRefresh(); }
 
@@ -1313,12 +1317,10 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
               <Btn label="Disable" busy={busy} onClick={() => setConfirm('disable')} variant="danger" />
             </ActionRow>
           )}
-          {hasLogin && (isDisabled || isInvited) && (
+          {hasLogin && (isDisabled) && (
             <ActionRow
               title="Enable Login"
-              desc={isInvited
-                ? "Activate this account — clears the pending invite flag and grants portal access."
-                : "Restore portal access for this staff member."}
+              desc="Restore portal access for this staff member."
             >
               <Btn label="Enable" busy={busy} onClick={() => setConfirm('enable')} variant="primary" />
             </ActionRow>
@@ -1337,10 +1339,10 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
           {/* Send invite */}
           {hasLogin && isActive && (
             <ActionRow
-              title="Send Invite"
-              desc="Record that an invite notification was dispatched. Email delivery requires the communications module to be enabled for your school."
+              title="Record Invite"
+              desc="Records the invite timestamp for audit purposes. Email delivery is not enabled yet — no email is actually sent."
             >
-              <Btn label="Record Invite" busy={busy} onClick={() => doAction(`/api/staff/${staffId}/send-invite`, 'Invite recorded.')} />
+              <Btn label="Record Invite" busy={busy} onClick={() => doAction(`/api/staff/${staffId}/send-invite`, 'Invite recorded. Email delivery is not enabled yet.')} />
             </ActionRow>
           )}
 

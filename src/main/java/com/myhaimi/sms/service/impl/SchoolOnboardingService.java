@@ -91,12 +91,14 @@ import com.myhaimi.sms.repository.StudentRepo;
 import com.myhaimi.sms.repository.StudentGuardianRepo;
 import com.myhaimi.sms.repository.StudentAcademicEnrollmentRepo;
 import com.myhaimi.sms.repository.GuardianRepo;
+import com.myhaimi.sms.repository.StaffRoleMappingRepository;
 import com.myhaimi.sms.repository.StaffTeachableSubjectRepository;
 import com.myhaimi.sms.repository.SubjectAllocationRepo;
 import com.myhaimi.sms.repository.TimetableEntryRepo;
 import com.myhaimi.sms.repository.UserRepo;
 import com.myhaimi.sms.entity.Role;
 import com.myhaimi.sms.entity.Staff;
+import com.myhaimi.sms.entity.StaffRoleMapping;
 import com.myhaimi.sms.entity.User;
 import com.myhaimi.sms.security.RoleNames;
 import com.myhaimi.sms.utils.TenantContext;
@@ -150,6 +152,7 @@ public class SchoolOnboardingService {
     private final SubjectAllocationRepo subjectAllocationRepo;
     private final ClassSubjectConfigRepo classSubjectConfigRepo;
     private final StaffTeachableSubjectRepository staffTeachableSubjectRepository;
+    private final StaffRoleMappingRepository staffRoleMappingRepository;
     private final TimetableEntryRepo timetableEntryRepo;
     private final TimetableGridV2Service timetableGridV2Service;
     private final TeacherDemandAnalysisService teacherDemandAnalysisService;
@@ -994,9 +997,17 @@ public class SchoolOnboardingService {
                 // we "move" the login to this school (person changed school) instead of skipping.
                 User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
                 if (existingByEmail != null) {
+                    // Safety: NEVER call user.setLinkedStudent(null)
+                    if (existingByEmail.getLinkedStudent() != null)
+                        throw new IllegalArgumentException("Email " + email + " is already linked to a student account.");
+                    if (existingByEmail.getLinkedGuardian() != null)
+                        throw new IllegalArgumentException("Email " + email + " is already linked to a guardian account.");
+                    boolean hasForbiddenRole = existingByEmail.getRoles().stream()
+                            .anyMatch(r -> RoleNames.STUDENT.equalsIgnoreCase(r.getName()) || RoleNames.PARENT.equalsIgnoreCase(r.getName()));
+                    if (hasForbiddenRole)
+                        throw new IllegalArgumentException("User " + email + " has a STUDENT or PARENT role and cannot be linked to a staff profile.");
                     existingByEmail.setSchool(school);
                     existingByEmail.setLinkedStaff(staff);
-                    existingByEmail.setLinkedStudent(null);
                     existingByEmail.setRoles(roles);
                     userRepo.save(existingByEmail);
                     usersCreated += 1;
@@ -1218,9 +1229,17 @@ public class SchoolOnboardingService {
 
         User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
         if (existingByEmail != null) {
+            // Safety: NEVER call user.setLinkedStudent(null)
+            if (existingByEmail.getLinkedStudent() != null)
+                throw new IllegalArgumentException("Email " + email + " is already linked to a student account.");
+            if (existingByEmail.getLinkedGuardian() != null)
+                throw new IllegalArgumentException("Email " + email + " is already linked to a guardian account.");
+            boolean hasForbiddenRole = existingByEmail.getRoles().stream()
+                    .anyMatch(r -> RoleNames.STUDENT.equalsIgnoreCase(r.getName()) || RoleNames.PARENT.equalsIgnoreCase(r.getName()));
+            if (hasForbiddenRole)
+                throw new IllegalArgumentException("User " + email + " has a STUDENT or PARENT role and cannot be linked to a staff profile.");
             existingByEmail.setSchool(school);
             existingByEmail.setLinkedStaff(staff);
-            existingByEmail.setLinkedStudent(null);
             existingByEmail.setRoles(roles);
             userRepo.save(existingByEmail);
             return null;
@@ -1367,13 +1386,17 @@ public class SchoolOnboardingService {
         if (qual != null) applyQualification(staff, qual);
         if (pay  != null) applyPayroll(staff, pay);
 
-        // ── 6.5. Save staff roles as first-class JSON (independent of login) ──
-        try {
-            staff.setStaffRolesJson(objectMapper.writeValueAsString(requestedRoles));
-        } catch (Exception ignored) { /* should never happen with a List<String> */ }
-
         staff.setUpdatedBy(actor);
         staff = staffRepo.save(staff);
+
+        // ── 6.5. Persist first-class staff role mappings ──────────────────────
+        // StaffRoleMapping is the authoritative source for staff roles.
+        // Roles exist independently of any portal login account.
+        final Staff savedStaff = staff;
+        staffRoleMappingRepository.deleteByStaff_Id(savedStaff.getId());
+        for (Role role : roleEntities) {
+            staffRoleMappingRepository.save(new StaffRoleMapping(savedStaff, role));
+        }
 
         // ── 7. Teachable subjects ──────────────────────────────────────────────
         if (hasTeacherRole && subjectIds != null && !subjectIds.isEmpty()) {
@@ -1382,7 +1405,9 @@ public class SchoolOnboardingService {
             replaceTeachableForStaff(staff, List.of(), schoolId);
         }
 
-        // ── 8. Login account ─────────────────────────────────────���─────────────
+        // ── 8. Login account ──────────────────────────────────────────────────
+        // Safety: NEVER call user.setLinkedStudent(null).
+        // Reject linking an email that already belongs to a student/guardian user.
         String tempPassword = null;
         if (rac.isCreateLoginAccount() && email != null && !email.isBlank()) {
             User existingUser = userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staff.getId()).orElse(null);
@@ -1392,9 +1417,25 @@ public class SchoolOnboardingService {
             } else {
                 User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
                 if (existingByEmail != null) {
+                    // Hard safety guards
+                    if (existingByEmail.getLinkedStudent() != null)
+                        throw new IllegalArgumentException(
+                                "Email " + email + " is already linked to a student account. Use a separate email for staff login.");
+                    if (existingByEmail.getLinkedGuardian() != null)
+                        throw new IllegalArgumentException(
+                                "Email " + email + " is already linked to a guardian account. Use a separate email for staff login.");
+                    boolean hasForbiddenRole = existingByEmail.getRoles().stream()
+                            .anyMatch(r -> RoleNames.STUDENT.equalsIgnoreCase(r.getName())
+                                    || RoleNames.PARENT.equalsIgnoreCase(r.getName()));
+                    if (hasForbiddenRole)
+                        throw new IllegalArgumentException(
+                                "User " + email + " has a STUDENT or PARENT role and cannot be linked to a staff profile.");
+                    if (existingByEmail.getSchool() != null && !existingByEmail.getSchool().getId().equals(schoolId))
+                        throw new IllegalArgumentException("User " + email + " belongs to a different school.");
+                    if (existingByEmail.getLinkedStaff() != null && !existingByEmail.getLinkedStaff().getId().equals(staff.getId()))
+                        throw new IllegalArgumentException("User " + email + " is already linked to a different staff member.");
                     existingByEmail.setSchool(school);
                     existingByEmail.setLinkedStaff(staff);
-                    existingByEmail.setLinkedStudent(null);
                     existingByEmail.setRoles(roleEntities);
                     userRepo.save(existingByEmail);
                 } else {
@@ -1488,10 +1529,11 @@ public class SchoolOnboardingService {
                     .orElseThrow(() -> new IllegalArgumentException("Unknown role: " + name)));
         }
 
-        // Save roles as first-class JSON on Staff (independent of login account)
-        try {
-            staff.setStaffRolesJson(objectMapper.writeValueAsString(requestedRoles));
-        } catch (Exception ignored) {}
+        // Save roles as first-class StaffRoleMapping (authoritative; independent of login account)
+        staffRoleMappingRepository.deleteByStaff_Id(staff.getId());
+        for (Role role : roleEntities) {
+            staffRoleMappingRepository.save(new StaffRoleMapping(staff, role));
+        }
 
         staff.setUpdatedBy(actorEmailOrSystem());
         staff = staffRepo.save(staff);
@@ -1508,7 +1550,7 @@ public class SchoolOnboardingService {
         if (hasTeacherRole && subjectIds != null) replaceTeachableForStaff(staff, subjectIds, schoolId);
         else if (!hasTeacherRole)                  replaceTeachableForStaff(staff, List.of(), schoolId);
 
-        // Login account
+        // Login account — Safety: NEVER call user.setLinkedStudent(null).
         String tempPassword = null;
         School school = schoolRepo.findById(schoolId).orElseThrow();
         if (rac.isCreateLoginAccount() && email != null && !email.isBlank()) {
@@ -1519,8 +1561,25 @@ public class SchoolOnboardingService {
             } else {
                 User existingByEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
                 if (existingByEmail != null) {
+                    // Hard safety guards
+                    if (existingByEmail.getLinkedStudent() != null)
+                        throw new IllegalArgumentException(
+                                "Email " + email + " is already linked to a student account. Use a separate email for staff login.");
+                    if (existingByEmail.getLinkedGuardian() != null)
+                        throw new IllegalArgumentException(
+                                "Email " + email + " is already linked to a guardian account. Use a separate email for staff login.");
+                    boolean hasForbiddenRole = existingByEmail.getRoles().stream()
+                            .anyMatch(r -> RoleNames.STUDENT.equalsIgnoreCase(r.getName())
+                                    || RoleNames.PARENT.equalsIgnoreCase(r.getName()));
+                    if (hasForbiddenRole)
+                        throw new IllegalArgumentException(
+                                "User " + email + " has a STUDENT or PARENT role and cannot be linked to a staff profile.");
+                    if (existingByEmail.getSchool() != null && !existingByEmail.getSchool().getId().equals(schoolId))
+                        throw new IllegalArgumentException("User " + email + " belongs to a different school.");
+                    if (existingByEmail.getLinkedStaff() != null && !existingByEmail.getLinkedStaff().getId().equals(staff.getId()))
+                        throw new IllegalArgumentException("User " + email + " is already linked to a different staff member.");
                     existingByEmail.setSchool(school); existingByEmail.setLinkedStaff(staff);
-                    existingByEmail.setLinkedStudent(null); existingByEmail.setRoles(roleEntities);
+                    existingByEmail.setRoles(roleEntities);
                     userRepo.save(existingByEmail);
                 } else {
                     tempPassword = generateTempPassword();

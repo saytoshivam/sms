@@ -6,13 +6,14 @@ import com.myhaimi.sms.DTO.staff.StaffProfileDTO;
 import com.myhaimi.sms.DTO.staff.StaffSummaryDTO;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.entity.Staff;
+import com.myhaimi.sms.entity.StaffRoleMapping;
 import com.myhaimi.sms.entity.enums.StaffStatus;
 import com.myhaimi.sms.entity.enums.StaffType;
 import com.myhaimi.sms.repository.SchoolRepo;
 import com.myhaimi.sms.repository.StaffRepo;
+import com.myhaimi.sms.repository.StaffRoleMappingRepository;
 import com.myhaimi.sms.repository.StaffTeachableSubjectRepository;
 import com.myhaimi.sms.repository.UserRepo;
-import com.myhaimi.sms.entity.Role;
 import com.myhaimi.sms.entity.StaffTeachableSubject;
 import com.myhaimi.sms.entity.User;
 import com.myhaimi.sms.security.RoleNames;
@@ -33,13 +34,13 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class StaffService {
 
-    private static final TypeReference<List<Integer>> INT_LIST    = new TypeReference<>() {};
-    private static final TypeReference<List<String>>  STRING_LIST = new TypeReference<>() {};
+    private static final TypeReference<List<Integer>> INT_LIST = new TypeReference<>() {};
 
     private final StaffRepo                     staffRepo;
     private final SchoolRepo                    schoolRepo;
     private final UserRepo                      userRepo;
     private final StaffTeachableSubjectRepository staffTeachableSubjectRepository;
+    private final StaffRoleMappingRepository    staffRoleMappingRepository;
     private final ObjectMapper                  objectMapper;
 
     // ── Tenant helper ──────────────────────────────────────────────────────────
@@ -107,16 +108,36 @@ public class StaffService {
     // ── Mapping helpers ────────────────────────────────────────────────────────
 
     /**
-     * Builds a staffId → List&lt;String&gt; roleName map from linked User records.
-     * Used as a <em>fallback</em> when {@code Staff.staffRolesJson} is not yet populated
-     * (backward-compatibility for records created before the staff role migration).
+     * Builds a staffId → List&lt;String&gt; roleName map from {@link StaffRoleMapping}.
+     *
+     * <p>StaffRoleMapping is the <em>authoritative</em> source for staff roles.
+     * Staff roles exist independently of a portal login account, so this map
+     * is correct even when {@code loginStatus = NOT_CREATED}.</p>
+     *
+     * <p>Legacy fallback: if a staff member has no entries in StaffRoleMapping
+     * (pre-migration record), their roles are read from the linked User entity
+     * to preserve backward compatibility.</p>
      */
     private Map<Integer, List<String>> buildRolesMap(Integer schoolId) {
+        // Primary source: StaffRoleMapping
         Map<Integer, List<String>> map = new HashMap<>();
+        for (StaffRoleMapping m : staffRoleMappingRepository.findByStaff_School_Id(schoolId)) {
+            if (m.getStaff() == null || m.getRole() == null) continue;
+            map.computeIfAbsent(m.getStaff().getId(), k -> new ArrayList<>())
+               .add(m.getRole().getName());
+        }
+        map.values().forEach(list -> list.sort(String::compareToIgnoreCase));
+
+        // Backward-compat fallback: populate from User.roles for stale records
         for (User u : userRepo.findBySchool_IdWithProfilesOrderByEmailAsc(schoolId)) {
-            if (u.getLinkedStaff() == null || u.getLinkedStaff().getId() == null) continue;
-            map.put(u.getLinkedStaff().getId(),
-                    u.getRoles().stream().map(Role::getName).sorted().toList());
+            if (u.getLinkedStaff() == null) continue;
+            int sid = u.getLinkedStaff().getId();
+            if (!map.containsKey(sid)) {
+                // Only add from User.roles if StaffRoleMapping has nothing for this staff
+                List<String> fromUser = u.getRoles().stream()
+                        .map(r -> r.getName()).sorted().toList();
+                if (!fromUser.isEmpty()) map.put(sid, new ArrayList<>(fromUser));
+            }
         }
         return map;
     }
@@ -152,11 +173,6 @@ public class StaffService {
         try { return objectMapper.readValue(json, INT_LIST); } catch (Exception e) { return List.of(); }
     }
 
-    private List<String> parseStringListJson(String json) {
-        if (json == null || json.isBlank()) return List.of();
-        try { return objectMapper.readValue(json, STRING_LIST); } catch (Exception e) { return List.of(); }
-    }
-
     /** Populate the summary fields shared between Summary and Profile DTOs. */
     private void fillSummary(StaffSummaryDTO dto, Staff s,
                              Map<Integer, List<String>> rolesMap,
@@ -184,13 +200,8 @@ public class StaffService {
         dto.setPreferredClassGroupIds(parseIntListJson(s.getPreferredClassGroupIdsJson()));
         dto.setRestrictedClassGroupIds(parseIntListJson(s.getRestrictedClassGroupIdsJson()));
 
-        // ── Roles: staffRolesJson is the authoritative source; fall back to User.roles
-        //    for records that pre-date the migration.
-        List<String> staffOwnRoles = parseStringListJson(s.getStaffRolesJson());
-        List<String> roles = staffOwnRoles.isEmpty()
-                ? rolesMap.getOrDefault(s.getId(), List.of())
-                : staffOwnRoles;
-
+        // ── Roles from StaffRoleMapping (authoritative) ────────────────────────
+        List<String> roles    = rolesMap.getOrDefault(s.getId(), List.of());
         List<String> subjects = subjectsMap.getOrDefault(s.getId(), List.of());
         User         user     = loginMap.get(s.getId());
 
@@ -201,11 +212,10 @@ public class StaffService {
         dto.setUsername(user != null ? user.getUsername() : null);
         dto.setLastInviteSentAt(user != null ? user.getLastInviteSentAt() : null);
 
-        // loginStatus: NOT_CREATED → INVITED → ACTIVE / DISABLED
+        // ── loginStatus: 3 honest states (NOT_CREATED / ACTIVE / DISABLED) ────
+        // lastInviteSentAt is metadata only; it does not change the status.
         if (user == null) {
             dto.setLoginStatus("NOT_CREATED");
-        } else if (user.isInvitePending()) {
-            dto.setLoginStatus("INVITED");
         } else {
             dto.setLoginStatus(user.isEnabled() ? "ACTIVE" : "DISABLED");
         }
@@ -237,17 +247,17 @@ public class StaffService {
             boolean isActive, boolean isTeaching, boolean hasTeacherRole,
             boolean hasSubjects, boolean hasLoadCapacity) {
         List<String> r = new ArrayList<>();
-        if (!isActive)       r.add("Staff not ACTIVE");
-        if (!isTeaching)     r.add("Not TEACHING staff type");
-        if (!hasTeacherRole) r.add("No TEACHER role");
-        if (!hasSubjects)    r.add("No teachable subjects");
-        if (!hasLoadCapacity)r.add("No max weekly lecture load (set on staff or school default)");
+        if (!isActive)        r.add("Staff not ACTIVE");
+        if (!isTeaching)      r.add("Not TEACHING staff type");
+        if (!hasTeacherRole)  r.add("No TEACHER role");
+        if (!hasSubjects)     r.add("No teachable subjects");
+        if (!hasLoadCapacity) r.add("Missing max weekly lecture load (set on staff or configure school default)");
         return r;
     }
 
     /**
-     * Backward-compatible overload that omits the load-capacity check.
-     * @deprecated Use {@link #computeIneligibilityReasons(boolean, boolean, boolean, boolean, boolean)}.
+     * Backward-compatible 4-arg overload (assumes load capacity is satisfied).
+     * @deprecated Use the 5-arg version.
      */
     @Deprecated
     public static List<String> computeIneligibilityReasons(
@@ -274,7 +284,7 @@ public class StaffService {
                 if (subjects.isEmpty())
                     missing.add("At least one teachable subject is required for timetable eligibility.");
                 if (s.getMaxWeeklyLectureLoad() == null && schoolDefaultWeeklyLoad == null)
-                    missing.add("Max weekly lecture load is required for timetable eligibility (set here or configure a school default).");
+                    missing.add("Max weekly lecture load is required (set here or configure a school default).");
             }
         }
         if (s.getEmail() == null || s.getEmail().isBlank())
@@ -298,15 +308,11 @@ public class StaffService {
                 new Section("Department",
                         s.getDepartment() != null && !s.getDepartment().isBlank())
         );
-
         int filled = (int) sections.stream().filter(Section::filled).count();
         int total  = sections.size();
         int pct    = total == 0 ? 100 : (filled * 100 / total);
         List<String> empty = sections.stream()
-                .filter(sec -> !sec.filled())
-                .map(Section::name)
-                .toList();
-
+                .filter(sec -> !sec.filled()).map(Section::name).toList();
         return new StaffProfileDTO.ProfileCompleteness(filled, total, pct, empty);
     }
 
