@@ -89,16 +89,16 @@ function BulkChangeStatusModal({
             <label style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.52)', marginBottom: 5 }}>
               New Status *
             </label>
-            <select
+            <SelectKeeper
               value={newStatus}
-              onChange={(e) => setNewStatus(e.target.value)}
-              style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(15,23,42,0.15)', fontSize: 13 }}
-            >
-              <option value="ACTIVE">Active</option>
-              <option value="INACTIVE">Inactive</option>
-              <option value="TRANSFERRED">Transferred</option>
-              <option value="ALUMNI">Alumni</option>
-            </select>
+              onChange={(v) => setNewStatus(v)}
+              options={[
+                { value: 'ACTIVE', label: 'Active' },
+                { value: 'INACTIVE', label: 'Inactive' },
+                { value: 'TRANSFERRED', label: 'Transferred' },
+                { value: 'ALUMNI', label: 'Alumni' },
+              ]}
+            />
           </div>
           <div>
             <label style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.52)', marginBottom: 5 }}>

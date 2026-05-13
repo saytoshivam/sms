@@ -243,6 +243,13 @@ function RequirementsPanel({
   return (
     <div style={{ display: 'grid', gap: 20 }}>
 
+      {/* Teacher tab contextual note */}
+      {targetType === 'TEACHER' && (
+        <div style={{ padding: '10px 14px', background: 'rgba(37,99,235,0.06)', border: '1px solid rgba(37,99,235,0.15)', borderRadius: 9, fontSize: 13, color: '#1e3a8a', fontWeight: 500 }}>
+          📋 Documents marked <strong>Required</strong> or <strong>Optional</strong> here will be shown in each teacher's profile under the <strong>Documents</strong> tab. Documents marked <strong>Not Required</strong> will be hidden from all teacher profiles.
+        </div>
+      )}
+
       {/* Summary bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.5)' }}>
@@ -460,6 +467,7 @@ export function DocumentRequirementsPage() {
         <p style={{ margin: '6px 0 0', fontSize: 14, color: 'rgba(15,23,42,0.5)', lineHeight: 1.55 }}>
           Configure which documents are required, optional, or not needed for each person type.
           Student checklists are generated from this configuration when a student is onboarded.
+          Teacher document checklists are shown on the staff profile <strong>Documents</strong> tab based on the <strong>Teacher Documents</strong> configuration below.
         </p>
       </div>
 

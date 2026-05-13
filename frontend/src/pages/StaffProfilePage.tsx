@@ -695,6 +695,15 @@ interface StaffDoc {
   createdAt: string | null;
 }
 
+/** School-configured document requirement (from /api/schools/document-requirements) */
+interface SchoolDocReq {
+  documentTypeId: number;
+  documentTypeCode: string;
+  documentTypeName: string;
+  requirementStatus: 'REQUIRED' | 'OPTIONAL' | 'NOT_REQUIRED';
+  active: boolean;
+}
+
 function docDisplayLabel(code: string): string {
   return code.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -978,11 +987,37 @@ function TabDocuments({ staffId }: { staffId: number }) {
     retry: 1,
   });
 
+  // Fetch configured TEACHER document requirements from settings
+  const reqsQ = useQuery({
+    queryKey: ['school-document-requirements', 'TEACHER'],
+    queryFn: async () =>
+      (await api.get<SchoolDocReq[]>('/api/schools/document-requirements', {
+        params: { targetType: 'TEACHER' },
+      })).data,
+    retry: 1,
+  });
+
   function refresh() {
     qc.invalidateQueries({ queryKey: ['staff-documents', staffId] });
   }
 
-  const docs = docsQ.data ?? [];
+  const allDocs = docsQ.data ?? [];
+
+  // Build the set of configured (REQUIRED / OPTIONAL) doc type codes from settings
+  const configuredCodes = new Set(
+    (reqsQ.data ?? [])
+      .filter(r => r.requirementStatus !== 'NOT_REQUIRED' && r.active)
+      .map(r => r.documentTypeCode),
+  );
+  const hasAnyRequirements = configuredCodes.size > 0;
+
+  // Only show docs that match configured requirements; if requirements not loaded yet show all
+  const docs = reqsQ.isSuccess && hasAnyRequirements
+    ? allDocs.filter(d => configuredCodes.has(d.documentType))
+    : reqsQ.isSuccess && !hasAnyRequirements
+      ? [] // configured but all set to NOT_REQUIRED → show nothing
+      : allDocs; // requirements loading or failed → show all as fallback
+
   const verified = docs.filter(d => d.verificationStatus === 'VERIFIED').length;
   const pending  = docs.filter(d => d.collectionStatus === 'PENDING_COLLECTION').length;
   const notReq   = docs.filter(d => d.collectionStatus === 'NOT_REQUIRED').length;
@@ -1005,28 +1040,46 @@ function TabDocuments({ staffId }: { staffId: number }) {
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      {/* Summary header */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Verified',     count: verified, color: '#166534', bg: 'rgba(22,163,74,0.08)' },
-          { label: 'Pending',      count: pending,  color: '#92400e', bg: 'rgba(234,179,8,0.08)' },
-          { label: 'Not Required', count: notReq,   color: 'rgba(15,23,42,0.4)', bg: 'rgba(15,23,42,0.04)' },
-        ].map(s => (
-          <div key={s.label} style={{ padding: '8px 16px', borderRadius: 10, background: s.bg, minWidth: 100 }}>
-            <div style={{ fontSize: 22, fontWeight: 900, color: s.color }}>{s.count}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: s.color, opacity: 0.8 }}>{s.label}</div>
+
+      {/* No requirements configured banner */}
+      {reqsQ.isSuccess && !hasAnyRequirements && (
+        <div style={{ padding: '12px 16px', background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: 10, fontSize: 13, color: '#92400e', fontWeight: 600, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 16 }}>⚙️</span>
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 2 }}>No teacher document requirements configured</div>
+            <div style={{ fontWeight: 500, opacity: 0.85 }}>
+              Configure required documents in <strong>Settings → Document Requirements → Teacher Documents</strong> to populate this checklist.
+            </div>
           </div>
-        ))}
-        <div style={{ padding: '8px 16px', borderRadius: 10, background: 'rgba(37,99,235,0.06)', minWidth: 100 }}>
-          <div style={{ fontSize: 22, fontWeight: 900, color: '#1e40af' }}>{docs.length}</div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#1e40af', opacity: 0.8 }}>Total</div>
         </div>
-      </div>
+      )}
+
+      {/* Summary header */}
+      {docs.length > 0 && (
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Verified',     count: verified, color: '#166534', bg: 'rgba(22,163,74,0.08)' },
+            { label: 'Pending',      count: pending,  color: '#92400e', bg: 'rgba(234,179,8,0.08)' },
+            { label: 'Not Required', count: notReq,   color: 'rgba(15,23,42,0.4)', bg: 'rgba(15,23,42,0.04)' },
+          ].map(s => (
+            <div key={s.label} style={{ padding: '8px 16px', borderRadius: 10, background: s.bg, minWidth: 100 }}>
+              <div style={{ fontSize: 22, fontWeight: 900, color: s.color }}>{s.count}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: s.color, opacity: 0.8 }}>{s.label}</div>
+            </div>
+          ))}
+          <div style={{ padding: '8px 16px', borderRadius: 10, background: 'rgba(37,99,235,0.06)', minWidth: 100 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#1e40af' }}>{docs.length}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1e40af', opacity: 0.8 }}>Total</div>
+          </div>
+        </div>
+      )}
 
       {/* Note about upload */}
-      <div style={{ padding: '10px 14px', background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.18)', borderRadius: 9, fontSize: 12, color: '#92400e', fontWeight: 600 }}>
-        ℹ️ Digital file upload is not enabled. Physical document collection and verification are fully operational and tracked below.
-      </div>
+      {docs.length > 0 && (
+        <div style={{ padding: '10px 14px', background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.18)', borderRadius: 9, fontSize: 12, color: '#92400e', fontWeight: 600 }}>
+          ℹ️ Digital file upload is not enabled. Physical document collection and verification are fully operational and tracked below.
+        </div>
+      )}
 
       {/* Desktop table */}
       {!isMobile && docs.length > 0 && (
@@ -1052,9 +1105,9 @@ function TabDocuments({ staffId }: { staffId: number }) {
         </div>
       )}
 
-      {docs.length === 0 && (
+      {docs.length === 0 && hasAnyRequirements && (
         <div style={{ padding: 24, textAlign: 'center', color: 'rgba(15,23,42,0.4)', fontSize: 13 }}>
-          No documents found.
+          No document records found. They will be auto-created on the next page load.
         </div>
       )}
     </div>

@@ -17,6 +17,7 @@ import { StaffOnboardingWizard } from '../../components/StaffOnboardingWizard';
 import { StaffReadinessDashboard } from '../../components/StaffReadinessDashboard';
 import { buildEffectiveAllocRows, type ClassSubjectConfigRow, type SectionSubjectOverrideRow } from '../../lib/academicStructureUtils';
 import { isWorkspaceReadOnly } from '../../lib/workspaceViewMode';
+import { SelectKeeper } from '../../components/SelectKeeper';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -130,9 +131,7 @@ function FSelect({ label, value, onChange, options }: { label: string; value: st
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
       <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
-      <select value={value} onChange={e => onChange(e.target.value)} style={{ fontSize: 12, padding: '5px 8px', borderRadius: 8, border: '1px solid rgba(15,23,42,0.15)', background: '#fff', minWidth: 110 }}>
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      <SelectKeeper value={value} onChange={onChange} options={options} />
     </label>
   );
 }

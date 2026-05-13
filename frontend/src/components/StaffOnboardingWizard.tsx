@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { toast } from '../lib/toast';
+import { SelectKeeper } from './SelectKeeper';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -284,9 +285,7 @@ function StepIdentity({ d, set }: { d: WizardDraft; set: (p: Partial<WizardDraft
           <input style={inputSt} value={d.phone} placeholder="+91 9876543210" onChange={e => set({ phone: e.target.value })} />
         </Field>
         <Field label="Staff Type" required>
-          <select style={inputSt} value={d.staffType} onChange={e => set({ staffType: e.target.value })}>
-            {STAFF_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
+          <SelectKeeper value={d.staffType} onChange={v => set({ staffType: v })} options={STAFF_TYPES} />
         </Field>
       </Row>
     </div>
@@ -309,9 +308,7 @@ function StepEmployment({ d, set }: { d: WizardDraft; set: (p: Partial<WizardDra
           <input style={inputSt} type="date" value={d.joiningDate} onChange={e => set({ joiningDate: e.target.value })} />
         </Field>
         <Field label="Employment Type">
-          <select style={inputSt} value={d.employmentType} onChange={e => set({ employmentType: e.target.value })}>
-            {EMPLOYMENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
+          <SelectKeeper value={d.employmentType} onChange={v => set({ employmentType: v })} options={EMPLOYMENT_TYPES} emptyValueLabel="— select —" />
         </Field>
       </Row>
     </div>

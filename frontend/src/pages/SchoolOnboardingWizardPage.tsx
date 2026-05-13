@@ -3004,12 +3004,16 @@ export function SchoolOnboardingWizardPage() {
           </div>
           <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
             <label>Staff type</label>
-            <select value={staffStaffType} onChange={(e) => setStaffStaffType(e.target.value)}>
-              <option value="TEACHING">Teaching</option>
-              <option value="NON_TEACHING">Non-Teaching</option>
-              <option value="ADMIN">Admin</option>
-              <option value="SUPPORT">Support</option>
-            </select>
+            <SelectKeeper
+              value={staffStaffType}
+              onChange={(v) => setStaffStaffType(v || 'TEACHING')}
+              options={[
+                { value: 'TEACHING', label: 'Teaching' },
+                { value: 'NON_TEACHING', label: 'Non-Teaching' },
+                { value: 'ADMIN', label: 'Admin' },
+                { value: 'SUPPORT', label: 'Support' },
+              ]}
+            />
             <div className="sms-form-field__error" aria-live="polite">&nbsp;</div>
           </div>
           <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
@@ -3023,13 +3027,17 @@ export function SchoolOnboardingWizardPage() {
           </div>
           <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
             <label>Employment type (optional)</label>
-            <select value={staffEmploymentType} onChange={(e) => setStaffEmploymentType(e.target.value)}>
-              <option value="">— select —</option>
-              <option value="FULL_TIME">Full-time</option>
-              <option value="PART_TIME">Part-time</option>
-              <option value="CONTRACT">Contract</option>
-              <option value="VISITING">Visiting</option>
-            </select>
+            <SelectKeeper
+              value={staffEmploymentType}
+              onChange={(v) => setStaffEmploymentType(v)}
+              emptyValueLabel="— select —"
+              options={[
+                { value: 'FULL_TIME', label: 'Full-time' },
+                { value: 'PART_TIME', label: 'Part-time' },
+                { value: 'CONTRACT', label: 'Contract' },
+                { value: 'VISITING', label: 'Visiting' },
+              ]}
+            />
             <div className="sms-form-field__error" aria-live="polite">&nbsp;</div>
           </div>
           <div className="sms-form-field" style={{ flex: '1 1 180px' }}>

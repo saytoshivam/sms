@@ -242,19 +242,27 @@ public class StaffDocumentService {
     }
 
     private List<DocumentType> resolveRequiredDocumentTypes(Integer schoolId) {
+        // School configures teacher/staff documents under TEACHER target type
+        // (matches the "Teacher Documents" tab in Settings → Document Requirements)
         boolean hasSchoolConfig = requirementRepo.existsBySchoolIdAndTargetTypeAndActiveTrue(
-                schoolId, DocumentTargetType.STAFF);
+                schoolId, DocumentTargetType.TEACHER);
 
         if (hasSchoolConfig) {
             return requirementRepo
-                    .findActiveChecklistRequirements(schoolId, DocumentTargetType.STAFF,
+                    .findActiveChecklistRequirements(schoolId, DocumentTargetType.TEACHER,
                             DocumentRequirementStatus.NOT_REQUIRED)
                     .stream()
                     .map(SchoolDocumentRequirement::getDocumentType)
                     .toList();
         }
 
+        // Fallback: return all active document types for STAFF or TEACHER target types
         List<DocumentType> defaults = documentTypeRepo
+                .findByTargetTypeAndActiveTrueOrderBySortOrderAsc(DocumentTargetType.TEACHER);
+        if (!defaults.isEmpty()) return defaults;
+
+        // Also try STAFF target type (legacy seed data)
+        defaults = documentTypeRepo
                 .findByTargetTypeAndActiveTrueOrderBySortOrderAsc(DocumentTargetType.STAFF);
         if (!defaults.isEmpty()) return defaults;
 
@@ -264,7 +272,7 @@ public class StaffDocumentService {
                     DocumentType dt = new DocumentType();
                     dt.setCode(code);
                     dt.setName(code.replace('_', ' '));
-                    dt.setTargetType(DocumentTargetType.STAFF);
+                    dt.setTargetType(DocumentTargetType.TEACHER);
                     return dt;
                 })
                 .toList();

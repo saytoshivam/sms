@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from '../../lib/toast';
+import { SelectKeeper } from '../SelectKeeper';
 import './adminDailyAttendanceDashboard.css';
 
 export type AdminDailySectionRow = {
@@ -314,22 +315,12 @@ export function AdminDailyAttendanceDashboard({
                 </button>
               ))}
               {gradeOptions.length > 0 ? (
-                <select
-                  className="adad-select adad-select--compact"
-                  aria-label="Filter by grade"
+                <SelectKeeper
                   value={gradeFilter === 'all' ? '' : String(gradeFilter)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setGradeFilter(v === '' ? 'all' : Number(v));
-                  }}
-                >
-                  <option value="">All grades</option>
-                  {gradeOptions.map((g) => (
-                    <option key={g} value={g}>
-                      Grade {g}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => setGradeFilter(v === '' ? 'all' : Number(v))}
+                  emptyValueLabel="All grades"
+                  options={gradeOptions.map((g) => ({ value: String(g), label: `Grade ${g}` }))}
+                />
               ) : null}
             </div>
           </div>
