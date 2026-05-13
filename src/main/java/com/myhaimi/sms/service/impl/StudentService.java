@@ -1255,13 +1255,13 @@ public class StudentService {
         doc.setFileId(fo.getId());
 
         // Upgrade collection status if the document was waiting to be collected
-        if (doc.getCollectionStatus() == StudentDocumentCollectionStatus.PENDING_COLLECTION) {
-            doc.setCollectionStatus(StudentDocumentCollectionStatus.COLLECTED_PHYSICAL);
+        if (doc.getCollectionStatus() == DocumentCollectionStatus.PENDING_COLLECTION) {
+            doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
         }
 
         // A newly uploaded file always resets verification to NOT_VERIFIED
-        doc.setVerificationStatus(StudentDocumentVerificationStatus.NOT_VERIFIED);
-        doc.setUploadStatus(StudentDocumentUploadStatus.UPLOADED);
+        doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
+        doc.setUploadStatus(DocumentUploadStatus.UPLOADED);
 
         documentRepo.save(doc);
 
