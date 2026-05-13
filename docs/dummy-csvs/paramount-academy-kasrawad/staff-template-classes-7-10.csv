@@ -1,23 +1,18 @@
-fullName,email,phone,employeeNo,designation,roles,subjects,createLoginAccount
-Anika Sharma,anika.sharma@paramountkasrawad.edu,9876510001,TCH0701,English Teacher,TEACHER,ENG007|ENG008|ENG009|ENG010,true
-Ravi Verma,ravi.verma@paramountkasrawad.edu,9876510002,TCH0702,Hindi Teacher,TEACHER,HIN007|HIN008|HIN009|HIN010,true
-Riya Iyer,riya.iyer@paramountkasrawad.edu,9876510009,TCH0709,Sanskrit Teacher,TEACHER,SNK007|SNK008|SNK009|SNK010,true
-Seema Sharma,seema.sharma@paramountkasrawad.edu,9876510012,TCH0712,Punjabi Teacher,TEACHER,PNJ007|PNJ008|PNJ009|PNJ010,true
-Faizan Ali,faizan.ali@paramountkasrawad.edu,9876510013,TCH0713,Urdu Teacher,TEACHER,URD007|URD008|URD009|URD010,true
-
-Meera Singh,meera.singh@paramountkasrawad.edu,9876510003,TCH0703,Mathematics Teacher,TEACHER,MTH007|MTH008|MTH009|MTH010|BMT009|BMT010,true
-Kabir Khan,kabir.khan@paramountkasrawad.edu,9876510004,TCH0704,Science Teacher,TEACHER,SCI007|SCI008|SCI009|SCI010,true
-Priya Joshi,priya.joshi@paramountkasrawad.edu,9876510005,TCH0705,Social Science Teacher,TEACHER,SSC007|SSC008|SSC009|SSC010|HIS009|HIS010|GEO009|GEO010|POL009|POL010|ECO009|ECO010|CIV009|CIV010,true
-
-Neel Patel,neel.patel@paramountkasrawad.edu,9876510008,TCH0708,French Teacher,TEACHER,FRE007|FRE008|FRE009|FRE010,true
-Arjun Mehta,arjun.mehta@paramountkasrawad.edu,9876510014,TCH0714,German Teacher,TEACHER,GER007|GER008|GER009|GER010,true
-
-Isha Gupta,isha.gupta@paramountkasrawad.edu,9876510007,TCH0707,General Knowledge Teacher,TEACHER,GKE007|GKE008,true
-Nikhil Soni,nikhil.soni@paramountkasrawad.edu,9876510015,TCH0715,Computer Applications Teacher,TEACHER,CAP007|CAP008,true
-
-Aman Bansal,aman.bansal@paramountkasrawad.edu,9876510010,TCH0710,AI Teacher,TEACHER,AI0009|AI0010,true
-Pooja Nair,pooja.nair@paramountkasrawad.edu,9876510011,TCH0711,IT Teacher,TEACHER,ITO009|ITO010,true
-
-Devika Rao,devika.rao@paramountkasrawad.edu,9876510016,TCH0716,Yoga Teacher,TEACHER,YOG007|YOG008|YOG009|YOG010,true
-Harsh Vardhan,harsh.vardhan@paramountkasrawad.edu,9876510017,TCH0717,Work Education Teacher,TEACHER,WED007|WED008|WED009|WED010,true
-Kiran Desai,kiran.desai@paramountkasrawad.edu,9876510018,TCH0718,Value Education Teacher,TEACHER,VED007|VED008|VED009|VED010,true
+﻿fullName,email,phone,employeeNo,designation,staffType,department,employmentType,joiningDate,roles,subjects,maxWeeklyLectureLoad,maxDailyLectureLoad,canBeClassTeacher,canTakeSubstitution,address,emergencyContactName,emergencyContactPhone,emergencyContactRelation,highestQualification,previousInstitution,bankName,bankAccount,ifscCode,panNumber,createLoginAccount
+Anika Sharma,anika.sharma@paramountkasrawad.edu,9876510001,TCH0701,English Teacher,TEACHING,English,FULL_TIME,2024-06-01,TEACHER,ENG007|ENG008|ENG009|ENG010,32,6,true,true,10 English Colony Kasrawad,Suresh Sharma,9876510101,Spouse,M.A. English,Kendriya Vidyalaya Barwani,SBI,70001001001001,SBIN0030001,AAASH1234A,true
+Ravi Verma,ravi.verma@paramountkasrawad.edu,9876510002,TCH0702,Hindi Teacher,TEACHING,Hindi,FULL_TIME,2024-06-01,TEACHER,HIN007|HIN008|HIN009|HIN010,32,6,true,true,12 Hindi Lane Kasrawad,Priya Verma,9876510102,Spouse,M.A. Hindi,Govt. HS Barwani,SBI,70001001001002,SBIN0030001,BBBSH1234B,true
+Riya Iyer,riya.iyer@paramountkasrawad.edu,9876510009,TCH0709,Sanskrit Teacher,TEACHING,Sanskrit,FULL_TIME,2024-06-01,TEACHER,SNK007|SNK008|SNK009|SNK010,28,5,true,true,14 Devbhasha Nagar Kasrawad,Krishna Iyer,9876510109,Spouse,M.A. Sanskrit,Saraswati Niketan,SBI,70001001001009,SBIN0030001,CCCSI1234C,true
+Seema Sharma,seema.sharma@paramountkasrawad.edu,9876510012,TCH0712,Punjabi Teacher,TEACHING,Punjabi,FULL_TIME,2024-06-01,TEACHER,PNJ007|PNJ008|PNJ009|PNJ010,25,5,true,true,16 Punjab Colony Kasrawad,Harjinder Singh,9876510112,Spouse,M.A. Punjabi,Punjabi University,SBI,70001001001012,SBIN0030001,DDDSS1234D,true
+Faizan Ali,faizan.ali@paramountkasrawad.edu,9876510013,TCH0713,Urdu Teacher,TEACHING,Urdu,FULL_TIME,2024-06-01,TEACHER,URD007|URD008|URD009|URD010,25,5,true,true,18 Urdu Bagh Kasrawad,Salma Ali,9876510113,Spouse,M.A. Urdu,Madrasa Barwani,SBI,70001001001013,SBIN0030001,EEEFA1234E,true
+Meera Singh,meera.singh@paramountkasrawad.edu,9876510003,TCH0703,Mathematics Teacher,TEACHING,Mathematics,FULL_TIME,2024-06-01,TEACHER,MTH007|MTH008|MTH009|MTH010|BMT009|BMT010,35,7,true,true,20 Maths Colony Kasrawad,Rajiv Singh,9876510103,Spouse,M.Sc. Mathematics,CBSE School Barwani,HDFC,70002002002003,HDFC0009999,FFFMS1234F,true
+Kabir Khan,kabir.khan@paramountkasrawad.edu,9876510004,TCH0704,Science Teacher,TEACHING,Science,FULL_TIME,2024-06-01,TEACHER,SCI007|SCI008|SCI009|SCI010,30,6,true,true,22 Science Nagar Kasrawad,Nadia Khan,9876510104,Spouse,M.Sc. Science,Science School Badwani,SBI,70001001001004,SBIN0030001,GGGKK1234G,true
+Priya Joshi,priya.joshi@paramountkasrawad.edu,9876510005,TCH0705,Social Science Teacher,TEACHING,Social Science,FULL_TIME,2024-06-01,TEACHER,SSC007|SSC008|SSC009|SSC010|HIS009|HIS010|GEO009|GEO010|POL009|POL010|ECO009|ECO010|CIV009|CIV010,32,6,true,true,24 History Lane Kasrawad,Ashok Joshi,9876510105,Spouse,M.A. History,Navodaya Vidyalaya,SBI,70001001001005,SBIN0030001,HHHPJ1234H,true
+Neel Patel,neel.patel@paramountkasrawad.edu,9876510008,TCH0708,French Teacher,TEACHING,French,FULL_TIME,2024-06-01,TEACHER,FRE007|FRE008|FRE009|FRE010,25,5,true,true,26 French Quarter Kasrawad,Sonal Patel,9876510108,Spouse,M.A. French,Alliance Francaise Indore,SBI,70001001001008,SBIN0030001,IIINP1234I,true
+Arjun Mehta,arjun.mehta@paramountkasrawad.edu,9876510014,TCH0714,German Teacher,TEACHING,German,FULL_TIME,2024-06-01,TEACHER,GER007|GER008|GER009|GER010,25,5,true,true,28 German Colony Kasrawad,Rekha Mehta,9876510114,Spouse,M.A. German,Goethe Institut Indore,SBI,70001001001014,SBIN0030001,JJJAM1234J,true
+Isha Gupta,isha.gupta@paramountkasrawad.edu,9876510007,TCH0707,General Knowledge Teacher,TEACHING,GK,FULL_TIME,2024-06-01,TEACHER,GKE007|GKE008,18,4,true,true,30 Gupta Colony Kasrawad,Vinay Gupta,9876510107,Spouse,B.A.,Primary School Kasrawad,SBI,70001001001007,SBIN0030001,KKKIG1234K,true
+Nikhil Soni,nikhil.soni@paramountkasrawad.edu,9876510015,TCH0715,Computer Applications Teacher,TEACHING,Computer,FULL_TIME,2024-06-01,TEACHER,CAP007|CAP008,18,4,true,true,32 Tech Colony Kasrawad,Anjali Soni,9876510115,Spouse,BCA,NIIT Barwani,SBI,70001001001015,SBIN0030001,LLLNS1234L,true
+Aman Bansal,aman.bansal@paramountkasrawad.edu,9876510010,TCH0710,AI Teacher,TEACHING,AI,FULL_TIME,2024-06-01,TEACHER,AI0009|AI0010,18,4,true,true,34 AI Nagar Kasrawad,Radha Bansal,9876510110,Spouse,B.Tech. CS,Coding Institute Indore,HDFC,70002002002010,HDFC0009999,MMMAB1234M,true
+Pooja Nair,pooja.nair@paramountkasrawad.edu,9876510011,TCH0711,IT Teacher,TEACHING,IT,FULL_TIME,2024-06-01,TEACHER,ITO009|ITO010,18,4,true,true,36 IT Colony Kasrawad,Suresh Nair,9876510111,Spouse,MCA,NIIT Bhopal,SBI,70001001001011,SBIN0030001,NNPPN1234N,true
+Devika Rao,devika.rao@paramountkasrawad.edu,9876510016,TCH0716,Yoga Teacher,TEACHING,Yoga,FULL_TIME,2024-06-01,TEACHER,YOG007|YOG008|YOG009|YOG010,20,4,true,true,38 Yoga Nagar Kasrawad,Ramesh Rao,9876510116,Spouse,B.A. Yoga,Patanjali Yoga Inst.,SBI,70001001001016,SBIN0030001,OOODR1234O,true
+Harsh Vardhan,harsh.vardhan@paramountkasrawad.edu,9876510017,TCH0717,Work Education Teacher,TEACHING,Work Education,FULL_TIME,2024-06-01,TEACHER,WED007|WED008|WED009|WED010,18,3,true,true,40 Craft Colony Kasrawad,Sunita Vardhan,9876510117,Spouse,B.Voc.,Vocational Inst. Kasrawad,SBI,70001001001017,SBIN0030001,PPPPHV1234P,true
+Kiran Desai,kiran.desai@paramountkasrawad.edu,9876510018,TCH0718,Value Education Teacher,TEACHING,Value Education,FULL_TIME,2024-06-01,TEACHER,VED007|VED008|VED009|VED010,18,3,true,true,42 Moral Lane Kasrawad,Mahesh Desai,9876510118,Spouse,B.A.,Dharmic Inst. Ujjain,SBI,70001001001018,SBIN0030001,QQQKD1234Q,true
