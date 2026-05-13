@@ -34,7 +34,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class StaffService {
 
-    private static final TypeReference<List<Integer>> INT_LIST = new TypeReference<>() {};
+    private static final TypeReference<List<Integer>> INT_LIST    = new TypeReference<>() {};
+    /** Used only to parse the deprecated {@code staffRolesJson} fallback. */
+    private static final TypeReference<List<String>>  STRING_LIST = new TypeReference<>() {};
 
     private final StaffRepo                     staffRepo;
     private final SchoolRepo                    schoolRepo;
@@ -58,7 +60,7 @@ public class StaffService {
         Integer schoolId = requireSchoolId();
         Page<Staff> page = staffRepo.findBySchool_IdAndIsDeletedFalse(schoolId, pageable);
 
-        Map<Integer, List<String>> rolesByStaff    = buildRolesMap(schoolId);
+        Map<Integer, List<String>> rolesByStaff    = buildRolesMap(schoolId, page.getContent());
         Map<Integer, List<String>> subjectsByStaff = buildSubjectsMap(schoolId);
         Map<Integer, User>         loginByStaff    = buildLoginMap(schoolId);
         Integer schoolDefaultLoad = schoolDefaultWeeklyLoad(schoolId);
@@ -78,7 +80,7 @@ public class StaffService {
         Staff staff = staffRepo.findByIdAndSchool_IdAndIsDeletedFalse(staffId, schoolId)
                 .orElseThrow(() -> new IllegalArgumentException("Staff not found."));
 
-        Map<Integer, List<String>> rolesByStaff    = buildRolesMap(schoolId);
+        Map<Integer, List<String>> rolesByStaff    = buildRolesMap(schoolId, List.of(staff));
         Map<Integer, List<String>> subjectsByStaff = buildSubjectsMap(schoolId);
         Map<Integer, User>         loginByStaff    = buildLoginMap(schoolId);
         Integer schoolDefaultLoad = schoolDefaultWeeklyLoad(schoolId);
@@ -108,18 +110,28 @@ public class StaffService {
     // ── Mapping helpers ────────────────────────────────────────────────────────
 
     /**
-     * Builds a staffId → List&lt;String&gt; roleName map from {@link StaffRoleMapping}.
+     * Builds a staffId → List&lt;String&gt; roleName map.
      *
-     * <p>StaffRoleMapping is the <em>authoritative</em> source for staff roles.
-     * Staff roles exist independently of a portal login account, so this map
-     * is correct even when {@code loginStatus = NOT_CREATED}.</p>
+     * <p><strong>Authoritative source: {@link StaffRoleMapping}</strong> — staff roles
+     * exist independently of a portal login account.</p>
      *
-     * <p>Legacy fallback: if a staff member has no entries in StaffRoleMapping
-     * (pre-migration record), their roles are read from the linked User entity
-     * to preserve backward compatibility.</p>
+     * <p>Fallback chain for migration/backward-compat (only used when no StaffRoleMapping
+     * entry exists for a staff member):</p>
+     * <ol>
+     *   <li>Deprecated {@code staffRolesJson} column on {@link Staff} (old interim approach).</li>
+     *   <li>Linked {@link User#getRoles()} — pre-migration records that only stored roles
+     *       on the login account.</li>
+     * </ol>
+     * <p>The {@link com.myhaimi.sms.service.impl.StaffRoleBackfillService} runs at startup
+     * and migrates all fallback-only records into StaffRoleMapping so that after one boot
+     * the fallback paths become unreachable.</p>
+     *
+     * @param schoolId   tenant school
+     * @param staffHints the staff entities already loaded by the caller — used only to
+     *                   read {@code staffRolesJson} for the fallback; never re-queried from DB
      */
-    private Map<Integer, List<String>> buildRolesMap(Integer schoolId) {
-        // Primary source: StaffRoleMapping
+    private Map<Integer, List<String>> buildRolesMap(Integer schoolId, List<Staff> staffHints) {
+        // ── 1. Primary: StaffRoleMapping ──────────────────────────────────────
         Map<Integer, List<String>> map = new HashMap<>();
         for (StaffRoleMapping m : staffRoleMappingRepository.findByStaff_School_Id(schoolId)) {
             if (m.getStaff() == null || m.getRole() == null) continue;
@@ -128,15 +140,34 @@ public class StaffService {
         }
         map.values().forEach(list -> list.sort(String::compareToIgnoreCase));
 
-        // Backward-compat fallback: populate from User.roles for stale records
-        for (User u : userRepo.findBySchool_IdWithProfilesOrderByEmailAsc(schoolId)) {
-            if (u.getLinkedStaff() == null) continue;
-            int sid = u.getLinkedStaff().getId();
-            if (!map.containsKey(sid)) {
-                // Only add from User.roles if StaffRoleMapping has nothing for this staff
-                List<String> fromUser = u.getRoles().stream()
-                        .map(r -> r.getName()).sorted().toList();
-                if (!fromUser.isEmpty()) map.put(sid, new ArrayList<>(fromUser));
+        // Check if any of the caller's staff are still unmapped
+        boolean anyUnmapped = staffHints.stream().anyMatch(s -> !map.containsKey(s.getId()));
+        if (!anyUnmapped) return map;
+
+        // ── 2. Fallback: staffRolesJson (deprecated column) ───────────────────
+        // Only used for stale records that pre-date StaffRoleMapping.
+        for (Staff s : staffHints) {
+            if (map.containsKey(s.getId())) continue;
+            List<String> fromJson = parseStringList(s.getStaffRolesJson());
+            if (!fromJson.isEmpty()) {
+                List<String> sorted = new ArrayList<>(fromJson);
+                sorted.sort(String::compareToIgnoreCase);
+                map.put(s.getId(), sorted);
+            }
+        }
+
+        // ── 3. Fallback: User.roles (pre-migration records with login only) ───
+        // Only queries users if there are still unmapped staff after the JSON fallback.
+        boolean stillUnmapped = staffHints.stream().anyMatch(s -> !map.containsKey(s.getId()));
+        if (stillUnmapped) {
+            for (User u : userRepo.findBySchool_IdWithProfilesOrderByEmailAsc(schoolId)) {
+                if (u.getLinkedStaff() == null) continue;
+                int sid = u.getLinkedStaff().getId();
+                if (!map.containsKey(sid)) {
+                    List<String> fromUser = u.getRoles().stream()
+                            .map(r -> r.getName()).sorted().toList();
+                    if (!fromUser.isEmpty()) map.put(sid, new ArrayList<>(fromUser));
+                }
             }
         }
         return map;
@@ -171,6 +202,12 @@ public class StaffService {
     private List<Integer> parseIntListJson(String json) {
         if (json == null || json.isBlank()) return List.of();
         try { return objectMapper.readValue(json, INT_LIST); } catch (Exception e) { return List.of(); }
+    }
+
+    /** Parse the deprecated {@code staffRolesJson} column into a list of role names. */
+    private List<String> parseStringList(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try { return objectMapper.readValue(json, STRING_LIST); } catch (Exception e) { return List.of(); }
     }
 
     /** Populate the summary fields shared between Summary and Profile DTOs. */

@@ -192,11 +192,13 @@ public class Staff {
      * Example: {@code ["TEACHER","HOD"]}
      * <p>
      * This field is the authoritative source for staff roles and is populated
-     * during onboarding. It exists independently of the linked login account so
-     * that timetable eligibility and role-based logic work even before a portal
-     * login is created. When a login is provisioned, {@code User.roles} is
-     * synchronised from this field.
+     * @deprecated Superseded by {@link com.myhaimi.sms.entity.StaffRoleMapping}.
+     *             {@code StaffRoleMapping} is the authoritative source for staff roles.
+     *             This column is kept for backward-compatibility (migration fallback only)
+     *             and will be removed once all records have been backfilled into
+     *             {@code staff_role_mapping}.  No new code should write to this field.
      */
+    @Deprecated
     @Column(name = "staff_roles_json", columnDefinition = "json")
     private String staffRolesJson;
 
