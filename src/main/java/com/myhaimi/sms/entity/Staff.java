@@ -188,15 +188,11 @@ public class Staff {
     private String unavailablePeriodsJson;
 
     /**
-     * First-class staff role assignment stored as a JSON array of role name strings.
-     * Example: {@code ["TEACHER","HOD"]}
-     * <p>
-     * This field is the authoritative source for staff roles and is populated
-     * @deprecated Superseded by {@link com.myhaimi.sms.entity.StaffRoleMapping}.
-     *             {@code StaffRoleMapping} is the authoritative source for staff roles.
-     *             This column is kept for backward-compatibility (migration fallback only)
-     *             and will be removed once all records have been backfilled into
-     *             {@code staff_role_mapping}.  No new code should write to this field.
+     * @deprecated Legacy field kept solely as a migration fallback.
+     *             {@link com.myhaimi.sms.entity.StaffRoleMapping} is the authoritative
+     *             source for staff roles.  No new code should write to this field.
+     *             It can be removed via a cleanup migration once all existing records
+     *             have been backfilled into {@code staff_role_mapping}.
      */
     @Deprecated
     @Column(name = "staff_roles_json", columnDefinition = "json")

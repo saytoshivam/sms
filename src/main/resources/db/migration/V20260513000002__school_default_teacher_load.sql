@@ -16,8 +16,7 @@ BEGIN
     ) THEN
         ALTER TABLE schools
             ADD COLUMN default_teacher_weekly_load INT NULL
-                COMMENT 'School-wide default max weekly lecture load for teaching staff. '
-                        'Applied when staff.max_weekly_lecture_load is NULL.';
+                COMMENT 'School-wide default max weekly lecture load for teaching staff. Applied when staff.max_weekly_lecture_load is NULL.';
     END IF;
 END;
 CALL _mig_school_default_load();
