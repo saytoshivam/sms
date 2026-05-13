@@ -31,6 +31,14 @@ public class User {
     @Column(name = "last_invite_sent_at")
     private Instant lastInviteSentAt;
 
+    /**
+     * True when an invite has been recorded via the send-invite action and the
+     * account has not yet been explicitly activated or disabled.
+     * Drives the INVITED login-status state in {@code StaffAccessService}.
+     */
+    @Column(name = "invite_pending", nullable = false)
+    private boolean invitePending = false;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "school_id")
     private School school;

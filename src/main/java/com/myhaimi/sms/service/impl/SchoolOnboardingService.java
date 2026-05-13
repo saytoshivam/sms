@@ -1367,6 +1367,11 @@ public class SchoolOnboardingService {
         if (qual != null) applyQualification(staff, qual);
         if (pay  != null) applyPayroll(staff, pay);
 
+        // ── 6.5. Save staff roles as first-class JSON (independent of login) ──
+        try {
+            staff.setStaffRolesJson(objectMapper.writeValueAsString(requestedRoles));
+        } catch (Exception ignored) { /* should never happen with a List<String> */ }
+
         staff.setUpdatedBy(actor);
         staff = staffRepo.save(staff);
 
@@ -1470,8 +1475,6 @@ public class SchoolOnboardingService {
         if (con  != null) applyContact(staff, con);
         if (qual != null) applyQualification(staff, qual);
         if (pay  != null) applyPayroll(staff, pay);
-        staff.setUpdatedBy(actorEmailOrSystem());
-        staff = staffRepo.save(staff);
 
         // Roles and teachable subjects
         List<String> requestedRoles = rac.getRoles() == null ? List.of() : rac.getRoles();
@@ -1484,6 +1487,14 @@ public class SchoolOnboardingService {
             roleEntities.add(roleRepo.findByName(name).stream().findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("Unknown role: " + name)));
         }
+
+        // Save roles as first-class JSON on Staff (independent of login account)
+        try {
+            staff.setStaffRolesJson(objectMapper.writeValueAsString(requestedRoles));
+        } catch (Exception ignored) {}
+
+        staff.setUpdatedBy(actorEmailOrSystem());
+        staff = staffRepo.save(staff);
 
         List<String> warnings      = new ArrayList<>();
         boolean isTeaching         = emp.getStaffType() == StaffType.TEACHING;

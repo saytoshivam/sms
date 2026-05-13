@@ -41,7 +41,7 @@ interface StaffProfile {
   restrictedClassGroupIds: number[];
   specialization: string | null;
   yearsOfExperience: number | null;
-  loginStatus: string | null;     // NOT_CREATED | ACTIVE | DISABLED
+  loginStatus: string | null;     // NOT_CREATED | INVITED | ACTIVE | DISABLED
   username: string | null;
   userId: number | null;
   lastInviteSentAt: string | null;
@@ -216,7 +216,7 @@ type TabId = typeof TABS[number]['id'];
 
 // ─── More menu ────────────────────────────────────────────────────────────────
 
-function MoreMenu({ staffId, profile, onResetLogin, onDeactivate, onMarkExited, onRefresh }: {
+function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMarkExited, onRefresh: _onRefresh }: {
   staffId: number;
   profile: StaffProfile;
   onResetLogin: () => void;
@@ -344,7 +344,7 @@ function TabOverview({ profile }: { profile: StaffProfile }) {
           <div>
             <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534' }}>✓ Timetable Eligible</span>
             <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', marginTop: 8 }}>
-              This teacher has an active TEACHER role and at least one teachable subject, and can be assigned in the timetable.
+              This teacher has an active TEACHER role, at least one teachable subject, and a configured load capacity. They can be assigned in the timetable.
             </div>
             {profile.teachableSubjectCodes.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
@@ -358,9 +358,10 @@ function TabOverview({ profile }: { profile: StaffProfile }) {
           <div>
             <span style={{ ...B, background: 'rgba(15,23,42,0.07)', color: '#475569' }}>Not Eligible</span>
             <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', marginTop: 8 }}>
-              Requires: TEACHER role + at least one teachable subject.
-              {!profile.roles.includes('TEACHER') && <span style={{ color: '#b91c1c', display: 'block', marginTop: 4 }}>Missing: TEACHER role.</span>}
-              {profile.teachableSubjectCodes.length === 0 && <span style={{ color: '#b91c1c', display: 'block', marginTop: 4 }}>Missing: Teachable subjects.</span>}
+              Requires: ACTIVE status + TEACHER role + at least one teachable subject + max weekly load set.
+              {(profile.timetableEligibilityReasons ?? []).map((r, i) => (
+                <span key={i} style={{ color: '#b91c1c', display: 'block', marginTop: 4 }}>• {r}</span>
+              ))}
             </div>
           </div>
         )}
@@ -469,9 +470,14 @@ function TabAcademics({ profile, subjects, structure, classGroups }: {
       </SectionCard>
 
       <SectionCard title="Workload Capacity">
+        {profile.roles.includes('TEACHER') && profile.maxWeeklyLectureLoad == null && (
+          <div style={{ fontSize: 12, color: '#92400e', fontWeight: 600, marginBottom: 10, padding: '6px 10px', background: 'rgba(234,179,8,0.08)', borderRadius: 7, border: '1px solid rgba(234,179,8,0.18)' }}>
+            ⚠ Max weekly lecture load is not set. A school default is required when this is absent — without either, this teacher is not timetable eligible.
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
           {[
-            { label: 'Max Weekly Periods', value: profile.maxWeeklyLectureLoad != null ? String(profile.maxWeeklyLectureLoad) : 'School default' },
+            { label: 'Max Weekly Periods', value: profile.maxWeeklyLectureLoad != null ? String(profile.maxWeeklyLectureLoad) : 'Not set (school default applies)' },
             { label: 'Max Daily Periods',  value: profile.maxDailyLectureLoad != null ? String(profile.maxDailyLectureLoad) : 'No daily cap' },
             { label: 'Assigned (Academic Structure)', value: totalAssigned > 0 ? `${totalAssigned} p/wk` : 'None' },
           ].map(({ label, value }) => (
@@ -568,24 +574,20 @@ function TabAcademics({ profile, subjects, structure, classGroups }: {
           <div>
             <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534', marginBottom: 8, display: 'inline-block' }}>✓ Eligible</span>
             <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', marginTop: 6 }}>
-              This teacher has an active TEACHER role and at least one teachable subject assigned.
+              This teacher has an active TEACHER role, at least one teachable subject, and a configured load capacity.
             </div>
           </div>
         ) : (
           <div>
             <span style={{ ...B, background: 'rgba(220,38,38,0.09)', color: '#b91c1c', marginBottom: 8, display: 'inline-block' }}>✗ Not Eligible</span>
-            {((profile.timetableEligibilityReasons ?? []).length > 0) ? (
-              <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-                {(profile.timetableEligibilityReasons ?? []).map((r, i) => (
-                  <li key={i} style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600, marginBottom: 3 }}>{r}</li>
-                ))}
-              </ul>
-            ) : (
-              <div style={{ marginTop: 6, fontSize: 12, color: '#b91c1c', fontWeight: 600 }}>
-                {!profile.roles.includes('TEACHER') && <div>Missing: TEACHER role.</div>}
-                {profile.teachableSubjectCodes.length === 0 && <div>Missing: at least one teachable subject.</div>}
-              </div>
-            )}
+            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+              {((profile.timetableEligibilityReasons ?? []).length > 0)
+                ? (profile.timetableEligibilityReasons ?? []).map((r, i) => (
+                    <li key={i} style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600, marginBottom: 3 }}>{r}</li>
+                  ))
+                : <li style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600 }}>Eligibility check pending — save profile to refresh.</li>
+              }
+            </ul>
           </div>
         )}
       </SectionCard>
@@ -1065,6 +1067,7 @@ interface AccessResult {
 function LoginStatusBadge({ status }: { status: string | null }) {
   const map: Record<string, { label: string; bg: string; color: string; icon: string }> = {
     ACTIVE:      { label: 'Active',       bg: 'rgba(22,163,74,0.1)',  color: '#166534', icon: '🔓' },
+    INVITED:     { label: 'Invited',      bg: 'rgba(37,99,235,0.1)',  color: '#1e40af', icon: '📨' },
     DISABLED:    { label: 'Disabled',     bg: 'rgba(220,38,38,0.1)', color: '#b91c1c', icon: '🚫' },
     NOT_CREATED: { label: 'Not Created',  bg: 'rgba(15,23,42,0.07)', color: '#475569', icon: '🔒' },
   };
@@ -1195,10 +1198,11 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
   const hasLogin     = loginStatus !== 'NOT_CREATED';
   const isActive     = loginStatus === 'ACTIVE';
   const isDisabled   = loginStatus === 'DISABLED';
+  const isInvited    = loginStatus === 'INVITED';
 
   const hasTeacherRole = profile.roles.includes('TEACHER') || profile.roles.includes('CLASS_TEACHER');
   const teacherNoLogin = hasTeacherRole && !hasLogin;
-  const teacherDisabled = hasTeacherRole && isDisabled;
+  const teacherDisabled = hasTeacherRole && (isDisabled || isInvited);
 
   function refresh() { qc.invalidateQueries({ queryKey: ['staff-profile', staffId] }); onRefresh(); }
 
@@ -1309,10 +1313,12 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
               <Btn label="Disable" busy={busy} onClick={() => setConfirm('disable')} variant="danger" />
             </ActionRow>
           )}
-          {hasLogin && isDisabled && (
+          {hasLogin && (isDisabled || isInvited) && (
             <ActionRow
               title="Enable Login"
-              desc="Restore portal access for this staff member."
+              desc={isInvited
+                ? "Activate this account — clears the pending invite flag and grants portal access."
+                : "Restore portal access for this staff member."}
             >
               <Btn label="Enable" busy={busy} onClick={() => setConfirm('enable')} variant="primary" />
             </ActionRow>
@@ -1434,7 +1440,7 @@ export function StaffProfilePage() {
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab: TabId = (searchParams.get('tab') as TabId | null) ?? 'overview';
-  const [moreOpen] = useState(false);
+  const [_moreOpen] = useState(false);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 

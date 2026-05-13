@@ -60,10 +60,17 @@ public class StaffSummaryDTO {
     private String loginStatus;
 
     /**
-     * True when: staffType = TEACHING + roles includes TEACHER + ≥1 teachable subject.
+     * True when: staffType = TEACHING + roles includes TEACHER + ≥1 teachable subject
+     *            + maxWeeklyLectureLoad is set or a school default exists.
      * Tells the UI whether this staff member can be assigned in the timetable.
      */
     private boolean timetableEligible;
+
+    /**
+     * When {@code timetableEligible} is false, this list explains why.
+     * Empty when the staff is eligible.
+     */
+    private List<String> timetableEligibilityReasons;
 
     /**
      * Human-readable list of things still missing before the profile is production-ready.

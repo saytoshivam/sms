@@ -1,5 +1,7 @@
 package com.myhaimi.sms.service.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myhaimi.sms.DTO.staff.StaffAccessResultDTO;
 import com.myhaimi.sms.DTO.staff.StaffCreateLoginDTO;
 import com.myhaimi.sms.DTO.staff.StaffLinkUserDTO;
@@ -20,7 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Manages the full login access lifecycle for a staff member:
@@ -36,12 +37,14 @@ public class StaffAccessService {
 
     private static final String CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
     private static final SecureRandom RNG = new SecureRandom();
+    private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
 
     private final StaffRepo      staffRepo;
     private final UserRepo       userRepo;
     private final RoleRepo       roleRepo;
     private final SchoolRepo     schoolRepo;
     private final PasswordEncoder passwordEncoder;
+    private final ObjectMapper   objectMapper;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -89,8 +92,24 @@ public class StaffAccessService {
         return set;
     }
 
+    /**
+     * Resolves roles from the staff's first-class {@code staffRolesJson} field.
+     * Falls back to an empty set if the field is not populated.
+     */
+    private Set<Role> resolveStaffOwnRoles(Staff staff) {
+        if (staff.getStaffRolesJson() == null || staff.getStaffRolesJson().isBlank())
+            return Set.of();
+        try {
+            List<String> names = objectMapper.readValue(staff.getStaffRolesJson(), STRING_LIST);
+            return resolveRoles(names);
+        } catch (Exception e) {
+            return Set.of();
+        }
+    }
+
     private String computeLoginStatus(User user) {
-        if (user == null) return "NOT_CREATED";
+        if (user == null)             return "NOT_CREATED";
+        if (user.isInvitePending())   return "INVITED";
         return user.isEnabled() ? "ACTIVE" : "DISABLED";
     }
 
@@ -136,6 +155,8 @@ public class StaffAccessService {
      * Creates a new portal login for this staff member.
      * If a user with the same email already exists, it is linked instead of creating a duplicate.
      * If a login already exists for this staff, updates roles only (no duplicate).
+     *
+     * User.roles are provisioned from Staff.staffRolesJson if the caller did not specify roles.
      */
     @Transactional
     public StaffAccessResultDTO createLogin(Integer staffId, StaffCreateLoginDTO dto) {
@@ -146,28 +167,46 @@ public class StaffAccessService {
         if (email == null || email.isBlank())
             throw new IllegalArgumentException("Staff email is required to create a login account.");
 
+        // Resolve roles: prefer caller-provided list; fall back to staff's own roles
         Set<Role> roles = resolveRoles(dto.getRoles());
-        // If caller didn't specify roles, carry over the existing login's roles (or empty)
+        if (roles.isEmpty()) {
+            roles = resolveStaffOwnRoles(staff);
+        }
+
         User existingLink = userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staffId).orElse(null);
 
         if (existingLink != null) {
-            // Login already exists — just update roles if provided
-            if (!roles.isEmpty()) {
-                existingLink.setRoles(roles);
-                existingLink.setEnabled(true);
-                userRepo.save(existingLink);
-            }
+            // Login already exists — update roles and ensure enabled
+            existingLink.setRoles(roles);
+            existingLink.setEnabled(true);
+            existingLink.setInvitePending(false);
+            userRepo.save(existingLink);
             return toResult(existingLink, staff, null, "Login already exists. Roles updated.");
         }
 
         // Check for an existing user with the same email
         User byEmail = userRepo.findFirstByEmailIgnoreCase(email).orElse(null);
         if (byEmail != null) {
+            // Safety: do not link users that belong to students, guardians, or other schools
+            if (byEmail.getLinkedStudent() != null)
+                throw new IllegalArgumentException(
+                        "User " + email + " is linked to a student and cannot be linked to staff.");
+            if (byEmail.getLinkedGuardian() != null)
+                throw new IllegalArgumentException(
+                        "User " + email + " is linked to a guardian and cannot be linked to staff.");
+            boolean hasForbiddenRole = byEmail.getRoles().stream()
+                    .anyMatch(r -> RoleNames.STUDENT.equalsIgnoreCase(r.getName())
+                               || RoleNames.PARENT.equalsIgnoreCase(r.getName()));
+            if (hasForbiddenRole)
+                throw new IllegalArgumentException(
+                        "User " + email + " has a STUDENT or PARENT role and cannot be linked to staff.");
+
             // Link the existing user to this staff — no duplicate
             byEmail.setLinkedStaff(staff);
             byEmail.setLinkedStudent(null);
             byEmail.setSchool(schoolRepo.findById(schoolId).orElseThrow());
             byEmail.setEnabled(true);
+            byEmail.setInvitePending(false);
             if (!roles.isEmpty()) byEmail.setRoles(roles);
             userRepo.save(byEmail);
             return toResult(byEmail, staff, null,
@@ -185,6 +224,7 @@ public class StaffAccessService {
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(tempPwd));
         user.setEnabled(true);
+        user.setInvitePending(false);
         user.setSchool(schoolRepo.findById(schoolId).orElseThrow());
         user.setLinkedStaff(staff);
         user.setRoles(roles);
@@ -197,7 +237,8 @@ public class StaffAccessService {
      * POST /api/staff/{staffId}/send-invite
      *
      * Records that an invite was requested. Email delivery is not yet active.
-     * Updates lastInviteSentAt for audit purposes.
+     * Sets invitePending=true and updates lastInviteSentAt for audit purposes.
+     * loginStatus will show as INVITED until the login is explicitly enabled/disabled.
      */
     @Transactional
     public StaffAccessResultDTO sendInvite(Integer staffId) {
@@ -207,10 +248,11 @@ public class StaffAccessService {
                 .orElseThrow(() -> new IllegalArgumentException("No login account exists for this staff member. Create a login first."));
 
         user.setLastInviteSentAt(Instant.now());
+        user.setInvitePending(true);
         userRepo.save(user);
 
         return toResult(user, staff, null,
-                "Invite recorded (email delivery not yet active). lastInviteSentAt updated for audit.");
+                "Invite recorded (email delivery not yet active). Use Enable Login to activate the account.");
     }
 
     /**
@@ -248,10 +290,11 @@ public class StaffAccessService {
         User user = userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staffId)
                 .orElseThrow(() -> new IllegalArgumentException("No login account found for this staff member."));
 
-        if (!user.isEnabled()) {
+        if (!user.isEnabled() && !user.isInvitePending()) {
             return toResult(user, staff, null, "Login is already disabled.");
         }
         user.setEnabled(false);
+        user.setInvitePending(false);
         userRepo.save(user);
         return toResult(user, staff, null, "Login disabled. The staff member can no longer authenticate.");
     }
@@ -259,7 +302,7 @@ public class StaffAccessService {
     /**
      * POST /api/staff/{staffId}/enable-login
      *
-     * Re-enables a previously disabled account.
+     * Re-enables a previously disabled or pending-invite account.
      */
     @Transactional
     public StaffAccessResultDTO enableLogin(Integer staffId) {
@@ -268,10 +311,11 @@ public class StaffAccessService {
         User user = userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staffId)
                 .orElseThrow(() -> new IllegalArgumentException("No login account found for this staff member."));
 
-        if (user.isEnabled()) {
+        if (user.isEnabled() && !user.isInvitePending()) {
             return toResult(user, staff, null, "Login is already enabled.");
         }
         user.setEnabled(true);
+        user.setInvitePending(false);
         userRepo.save(user);
         return toResult(user, staff, null, "Login enabled. The staff member can now authenticate.");
     }
@@ -281,6 +325,13 @@ public class StaffAccessService {
      *
      * Links an existing system user (by email) to this staff member.
      * Prevents duplicate account creation when HR imports staff who already have logins.
+     *
+     * Protections:
+     * - User must belong to the same school.
+     * - User must not be linked to a student or guardian.
+     * - User must not have STUDENT or PARENT roles.
+     * - User must not already be linked to a different staff.
+     * - Staff must not already have a linked user.
      */
     @Transactional
     public StaffAccessResultDTO linkUser(Integer staffId, StaffLinkUserDTO dto) {
@@ -294,6 +345,23 @@ public class StaffAccessService {
         // Tenant guard
         if (user.getSchool() == null || !user.getSchool().getId().equals(schoolId))
             throw new IllegalArgumentException("User belongs to a different school and cannot be linked here.");
+
+        // Reject linking users that already belong to a student or guardian profile
+        if (user.getLinkedStudent() != null)
+            throw new IllegalArgumentException(
+                    "User " + email + " is linked to a student (id=" + user.getLinkedStudent().getId()
+                    + "). Cannot link to staff. Use a separate account.");
+        if (user.getLinkedGuardian() != null)
+            throw new IllegalArgumentException(
+                    "User " + email + " is linked to a guardian profile. Cannot link to staff. Use a separate account.");
+
+        // Reject users with student or parent roles
+        boolean hasForbiddenRole = user.getRoles().stream()
+                .anyMatch(r -> RoleNames.STUDENT.equalsIgnoreCase(r.getName())
+                           || RoleNames.PARENT.equalsIgnoreCase(r.getName()));
+        if (hasForbiddenRole)
+            throw new IllegalArgumentException(
+                    "User " + email + " has a STUDENT or PARENT role and cannot be linked to a staff profile.");
 
         // Prevent linking a user already linked to a different staff in this school
         if (user.getLinkedStaff() != null && !user.getLinkedStaff().getId().equals(staffId)) {
@@ -310,9 +378,13 @@ public class StaffAccessService {
                             + "). Disable or unlink the existing account first.");
         }
 
+        // Provision staff roles to the user
+        Set<Role> staffRoles = resolveStaffOwnRoles(staff);
         user.setLinkedStaff(staff);
         user.setLinkedStudent(null);
         user.setEnabled(true);
+        user.setInvitePending(false);
+        if (!staffRoles.isEmpty()) user.setRoles(staffRoles);
         userRepo.save(user);
 
         return toResult(user, staff, null, "User " + email + " linked to this staff profile.");

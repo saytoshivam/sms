@@ -187,6 +187,19 @@ public class Staff {
     @Column(name = "unavailable_periods_json", columnDefinition = "json")
     private String unavailablePeriodsJson;
 
+    /**
+     * First-class staff role assignment stored as a JSON array of role name strings.
+     * Example: {@code ["TEACHER","HOD"]}
+     * <p>
+     * This field is the authoritative source for staff roles and is populated
+     * during onboarding. It exists independently of the linked login account so
+     * that timetable eligibility and role-based logic work even before a portal
+     * login is created. When a login is provisioned, {@code User.roles} is
+     * synchronised from this field.
+     */
+    @Column(name = "staff_roles_json", columnDefinition = "json")
+    private String staffRolesJson;
+
     // ── Audit ──────────────────────────────────────────────────────────────────
 
     @Column(name = "created_at", nullable = false, updatable = false)

@@ -33,7 +33,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class StaffService {
 
-    private static final TypeReference<List<Integer>> INT_LIST = new TypeReference<>() {};
+    private static final TypeReference<List<Integer>> INT_LIST    = new TypeReference<>() {};
+    private static final TypeReference<List<String>>  STRING_LIST = new TypeReference<>() {};
 
     private final StaffRepo                     staffRepo;
     private final SchoolRepo                    schoolRepo;
@@ -59,9 +60,10 @@ public class StaffService {
         Map<Integer, List<String>> rolesByStaff    = buildRolesMap(schoolId);
         Map<Integer, List<String>> subjectsByStaff = buildSubjectsMap(schoolId);
         Map<Integer, User>         loginByStaff    = buildLoginMap(schoolId);
+        Integer schoolDefaultLoad = schoolDefaultWeeklyLoad(schoolId);
 
         List<StaffSummaryDTO> dtos = page.getContent().stream()
-                .map(s -> toSummaryDTO(s, rolesByStaff, subjectsByStaff, loginByStaff))
+                .map(s -> toSummaryDTO(s, rolesByStaff, subjectsByStaff, loginByStaff, schoolDefaultLoad))
                 .toList();
 
         return new PageImpl<>(dtos, pageable, page.getTotalElements());
@@ -78,14 +80,20 @@ public class StaffService {
         Map<Integer, List<String>> rolesByStaff    = buildRolesMap(schoolId);
         Map<Integer, List<String>> subjectsByStaff = buildSubjectsMap(schoolId);
         Map<Integer, User>         loginByStaff    = buildLoginMap(schoolId);
+        Integer schoolDefaultLoad = schoolDefaultWeeklyLoad(schoolId);
 
-        return toProfileDTO(staff, rolesByStaff, subjectsByStaff, loginByStaff);
+        return toProfileDTO(staff, rolesByStaff, subjectsByStaff, loginByStaff, schoolDefaultLoad);
     }
 
-    // ── Create (legacy — kept for backward compat with StaffController) ────────
+    // ── Create (legacy — internal only; controller POST is disabled / returns 410) ──
 
+    /**
+     * @deprecated Internal use only — no controller exposes this method any longer.
+     *             Use {@code SchoolOnboardingService#onboardStaff} instead.
+     */
+    @Deprecated
     @Transactional
-    public StaffSummaryDTO create(Staff staff) {
+    StaffSummaryDTO create(Staff staff) {
         Integer schoolId = requireSchoolId();
         School school = schoolRepo.findById(schoolId).orElseThrow();
         staff.setId(null);
@@ -93,11 +101,16 @@ public class StaffService {
         if (staff.getStaffType() == null) staff.setStaffType(StaffType.TEACHING);
         if (staff.getStatus() == null)    staff.setStatus(StaffStatus.DRAFT);
         Staff saved = staffRepo.save(staff);
-        return toSummaryDTO(saved, Map.of(), Map.of(), Map.of());
+        return toSummaryDTO(saved, Map.of(), Map.of(), Map.of(), null);
     }
 
     // ── Mapping helpers ────────────────────────────────────────────────────────
 
+    /**
+     * Builds a staffId → List&lt;String&gt; roleName map from linked User records.
+     * Used as a <em>fallback</em> when {@code Staff.staffRolesJson} is not yet populated
+     * (backward-compatibility for records created before the staff role migration).
+     */
     private Map<Integer, List<String>> buildRolesMap(Integer schoolId) {
         Map<Integer, List<String>> map = new HashMap<>();
         for (User u : userRepo.findBySchool_IdWithProfilesOrderByEmailAsc(schoolId)) {
@@ -128,16 +141,28 @@ public class StaffService {
         return map;
     }
 
+    private Integer schoolDefaultWeeklyLoad(Integer schoolId) {
+        return schoolRepo.findById(schoolId)
+                .map(School::getDefaultTeacherWeeklyLoad)
+                .orElse(null);
+    }
+
     private List<Integer> parseIntListJson(String json) {
         if (json == null || json.isBlank()) return List.of();
         try { return objectMapper.readValue(json, INT_LIST); } catch (Exception e) { return List.of(); }
+    }
+
+    private List<String> parseStringListJson(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try { return objectMapper.readValue(json, STRING_LIST); } catch (Exception e) { return List.of(); }
     }
 
     /** Populate the summary fields shared between Summary and Profile DTOs. */
     private void fillSummary(StaffSummaryDTO dto, Staff s,
                              Map<Integer, List<String>> rolesMap,
                              Map<Integer, List<String>> subjectsMap,
-                             Map<Integer, User> loginMap) {
+                             Map<Integer, User> loginMap,
+                             Integer schoolDefaultWeeklyLoad) {
         dto.setId(s.getId());
         dto.setEmployeeNo(s.getEmployeeNo());
         dto.setFullName(s.getFullName());
@@ -159,7 +184,13 @@ public class StaffService {
         dto.setPreferredClassGroupIds(parseIntListJson(s.getPreferredClassGroupIdsJson()));
         dto.setRestrictedClassGroupIds(parseIntListJson(s.getRestrictedClassGroupIdsJson()));
 
-        List<String> roles    = rolesMap.getOrDefault(s.getId(), List.of());
+        // ── Roles: staffRolesJson is the authoritative source; fall back to User.roles
+        //    for records that pre-date the migration.
+        List<String> staffOwnRoles = parseStringListJson(s.getStaffRolesJson());
+        List<String> roles = staffOwnRoles.isEmpty()
+                ? rolesMap.getOrDefault(s.getId(), List.of())
+                : staffOwnRoles;
+
         List<String> subjects = subjectsMap.getOrDefault(s.getId(), List.of());
         User         user     = loginMap.get(s.getId());
 
@@ -170,21 +201,28 @@ public class StaffService {
         dto.setUsername(user != null ? user.getUsername() : null);
         dto.setLastInviteSentAt(user != null ? user.getLastInviteSentAt() : null);
 
-        // loginStatus: NOT_CREATED → ACTIVE / DISABLED
+        // loginStatus: NOT_CREATED → INVITED → ACTIVE / DISABLED
         if (user == null) {
             dto.setLoginStatus("NOT_CREATED");
+        } else if (user.isInvitePending()) {
+            dto.setLoginStatus("INVITED");
         } else {
             dto.setLoginStatus(user.isEnabled() ? "ACTIVE" : "DISABLED");
         }
 
-        // timetableEligible: ACTIVE + TEACHING + TEACHER role + ≥1 teachable subject
-        boolean isActive = s.getStatus() == StaffStatus.ACTIVE;
-        boolean isTeaching = s.getStaffType() == StaffType.TEACHING;
-        boolean hasTeacherRole = roles.stream()
-                .anyMatch(r -> RoleNames.TEACHER.equalsIgnoreCase(r));
-        dto.setTimetableEligible(isActive && isTeaching && hasTeacherRole && !subjects.isEmpty());
+        // ── Timetable eligibility ──────────────────────────────────────────────
+        boolean isActive       = s.getStatus() == StaffStatus.ACTIVE;
+        boolean isTeaching     = s.getStaffType() == StaffType.TEACHING;
+        boolean hasTeacherRole = roles.stream().anyMatch(r -> RoleNames.TEACHER.equalsIgnoreCase(r));
+        boolean hasSubjects    = !subjects.isEmpty();
+        boolean hasLoadCap     = s.getMaxWeeklyLectureLoad() != null || schoolDefaultWeeklyLoad != null;
 
-        dto.setMissingRequiredItems(computeMissingItems(s, roles, subjects));
+        List<String> ineligReasons = computeIneligibilityReasons(
+                isActive, isTeaching, hasTeacherRole, hasSubjects, hasLoadCap);
+        dto.setTimetableEligible(ineligReasons.isEmpty());
+        dto.setTimetableEligibilityReasons(ineligReasons);
+
+        dto.setMissingRequiredItems(computeMissingItems(s, roles, subjects, schoolDefaultWeeklyLoad));
         dto.setCreatedAt(s.getCreatedAt());
         dto.setUpdatedAt(s.getUpdatedAt());
     }
@@ -192,25 +230,33 @@ public class StaffService {
     // ── Computed helpers ───────────────────────────────────────────────────────
 
     /**
-     * Short, UI-friendly reasons why a staff member is not timetable eligible.
-     * Returns an empty list when the staff is eligible.
-     *
-     * @param isActive     whether status == ACTIVE
-     * @param isTeaching   whether staffType == TEACHING
-     * @param hasTeacherRole whether the TEACHER role is assigned
-     * @param hasSubjects  whether ≥1 teachable subject exists
+     * Returns human-readable reasons why a staff member is not timetable eligible.
+     * An empty list means the staff IS eligible.
      */
     public static List<String> computeIneligibilityReasons(
-            boolean isActive, boolean isTeaching, boolean hasTeacherRole, boolean hasSubjects) {
+            boolean isActive, boolean isTeaching, boolean hasTeacherRole,
+            boolean hasSubjects, boolean hasLoadCapacity) {
         List<String> r = new ArrayList<>();
-        if (!isActive)      r.add("Staff not ACTIVE");
-        if (!isTeaching)    r.add("Not TEACHING staff type");
-        if (!hasTeacherRole)r.add("No TEACHER role");
-        if (!hasSubjects)   r.add("No teachable subjects");
+        if (!isActive)       r.add("Staff not ACTIVE");
+        if (!isTeaching)     r.add("Not TEACHING staff type");
+        if (!hasTeacherRole) r.add("No TEACHER role");
+        if (!hasSubjects)    r.add("No teachable subjects");
+        if (!hasLoadCapacity)r.add("No max weekly lecture load (set on staff or school default)");
         return r;
     }
 
-    private List<String> computeMissingItems(Staff s, List<String> roles, List<String> subjects) {
+    /**
+     * Backward-compatible overload that omits the load-capacity check.
+     * @deprecated Use {@link #computeIneligibilityReasons(boolean, boolean, boolean, boolean, boolean)}.
+     */
+    @Deprecated
+    public static List<String> computeIneligibilityReasons(
+            boolean isActive, boolean isTeaching, boolean hasTeacherRole, boolean hasSubjects) {
+        return computeIneligibilityReasons(isActive, isTeaching, hasTeacherRole, hasSubjects, true);
+    }
+
+    private List<String> computeMissingItems(Staff s, List<String> roles, List<String> subjects,
+                                              Integer schoolDefaultWeeklyLoad) {
         List<String> missing = new ArrayList<>();
         if (s.getDesignation() == null || s.getDesignation().isBlank())
             missing.add("Designation is required.");
@@ -222,10 +268,14 @@ public class StaffService {
             missing.add("Joining date is required before staff can be activated.");
         if (s.getStaffType() == StaffType.TEACHING) {
             boolean hasTeacherRole = roles.stream().anyMatch(r -> RoleNames.TEACHER.equalsIgnoreCase(r));
-            if (!hasTeacherRole)
+            if (!hasTeacherRole) {
                 missing.add("TEACHER role is recommended for TEACHING staff to enable timetable assignment.");
-            else if (subjects.isEmpty())
-                missing.add("At least one teachable subject is required for timetable eligibility.");
+            } else {
+                if (subjects.isEmpty())
+                    missing.add("At least one teachable subject is required for timetable eligibility.");
+                if (s.getMaxWeeklyLectureLoad() == null && schoolDefaultWeeklyLoad == null)
+                    missing.add("Max weekly lecture load is required for timetable eligibility (set here or configure a school default).");
+            }
         }
         if (s.getEmail() == null || s.getEmail().isBlank())
             missing.add("Email is required to enable login account.");
@@ -233,7 +283,6 @@ public class StaffService {
     }
 
     private StaffProfileDTO.ProfileCompleteness computeProfileCompleteness(Staff s) {
-        // Track the 6 optional profile sections
         record Section(String name, boolean filled) {}
         List<Section> sections = List.of(
                 new Section("Contact & Address",
@@ -264,18 +313,20 @@ public class StaffService {
     public StaffSummaryDTO toSummaryDTO(Staff s,
                                         Map<Integer, List<String>> rolesMap,
                                         Map<Integer, List<String>> subjectsMap,
-                                        Map<Integer, User> loginMap) {
+                                        Map<Integer, User> loginMap,
+                                        Integer schoolDefaultWeeklyLoad) {
         StaffSummaryDTO dto = new StaffSummaryDTO();
-        fillSummary(dto, s, rolesMap, subjectsMap, loginMap);
+        fillSummary(dto, s, rolesMap, subjectsMap, loginMap, schoolDefaultWeeklyLoad);
         return dto;
     }
 
     public StaffProfileDTO toProfileDTO(Staff s,
                                         Map<Integer, List<String>> rolesMap,
                                         Map<Integer, List<String>> subjectsMap,
-                                        Map<Integer, User> loginMap) {
+                                        Map<Integer, User> loginMap,
+                                        Integer schoolDefaultWeeklyLoad) {
         StaffProfileDTO dto = new StaffProfileDTO();
-        fillSummary(dto, s, rolesMap, subjectsMap, loginMap);
+        fillSummary(dto, s, rolesMap, subjectsMap, loginMap, schoolDefaultWeeklyLoad);
 
         dto.setGender(s.getGender());
         dto.setDateOfBirth(s.getDateOfBirth());

@@ -9,6 +9,8 @@ import com.myhaimi.sms.entity.enums.StaffType;
 import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,11 +31,21 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class StaffReadinessService {
 
+    private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
+
     private final StaffRepo                        staffRepo;
     private final StaffTeachableSubjectRepository  teachableSubjectRepo;
     private final UserRepo                         userRepo;
     private final SubjectAllocationRepo            allocationRepo;
     private final StaffDocumentRepo                documentRepo;
+    private final SchoolRepo                       schoolRepo;
+    private final ObjectMapper                     objectMapper;
+
+    /** Parse a JSON string-list stored on Staff (e.g. staffRolesJson). */
+    private List<String> parseStringList(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try { return objectMapper.readValue(json, STRING_LIST); } catch (Exception e) { return List.of(); }
+    }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -75,6 +87,11 @@ public class StaffReadinessService {
             }
         }
 
+        // ── 5b. School default weekly load (used when staff has no individual cap) ─
+        Integer schoolDefaultLoad = schoolRepo.findById(schoolId)
+                .map(s -> s.getDefaultTeacherWeeklyLoad())
+                .orElse(null);
+
         // ── 6. Build queues and summary counters ──────────────────────────────
         List<StaffReadinessIssueDTO> missingSubjects      = new ArrayList<>();
         List<StaffReadinessIssueDTO> missingLogin         = new ArrayList<>();
@@ -100,14 +117,23 @@ public class StaffReadinessService {
 
             User    user         = userByStaffId.get(staffId);
             boolean hasLogin     = user != null;
-            boolean hasTeacherRole = hasLogin && user.getRoles() != null &&
-                    user.getRoles().stream().anyMatch(r -> "TEACHER".equals(r.getName()));
+
+            // Roles come from staffRolesJson first (first-class assignment); fall back to User.roles
+            List<String> staffOwnRoles = parseStringList(staff.getStaffRolesJson());
+            List<String> effectiveRoles = staffOwnRoles.isEmpty()
+                    ? (hasLogin && user.getRoles() != null
+                        ? user.getRoles().stream().map(r -> r.getName()).collect(Collectors.toList())
+                        : List.of())
+                    : staffOwnRoles;
+            boolean hasTeacherRole = effectiveRoles.stream().anyMatch(r -> "TEACHER".equalsIgnoreCase(r));
 
             boolean hasSubjects        = staffIdsWithSubjects.contains(staffId);
-            boolean isTimetableReady   = isTeaching && hasTeacherRole && hasSubjects;
+            boolean hasLoadCap         = staff.getMaxWeeklyLectureLoad() != null || schoolDefaultLoad != null;
+            boolean isTimetableReady   = isActive && isTeaching && hasTeacherRole && hasSubjects && hasLoadCap;
 
             int     assignedLoad = loadByStaffId.getOrDefault(staffId, 0);
-            int     maxLoad      = staff.getMaxWeeklyLectureLoad() != null ? staff.getMaxWeeklyLectureLoad() : 0;
+            int     maxLoad      = staff.getMaxWeeklyLectureLoad() != null ? staff.getMaxWeeklyLectureLoad()
+                                 : (schoolDefaultLoad != null ? schoolDefaultLoad : 0);
             boolean isOverloaded = maxLoad > 0 && assignedLoad > maxLoad;
 
             long    pendingDocs  = pendingDocCountByStaffId.getOrDefault(staffId, 0L);
@@ -153,7 +179,7 @@ public class StaffReadinessService {
                         List.of("OPEN_PROFILE")));
             }
 
-            // ── Queue: over capacity ─────────────────────────────────────────
+            // ── Queue: over capacity ───────────────────────────────────────���─
             if (isOverloaded) {
                 overCapacity.add(issue(staffId, staffName, employeeNo,
                         "Load " + assignedLoad + "/" + maxLoad + " periods — overloaded",
@@ -163,9 +189,16 @@ public class StaffReadinessService {
 
             // ── Queue: not timetable eligible ────────────────────────────────
             if (isTeaching && !isTimetableReady) {
-                String reason = !hasTeacherRole
-                        ? (!hasLogin ? "No login / TEACHER role" : "Missing TEACHER role")
-                        : "No teachable subjects";
+                String reason;
+                if (!isActive) {
+                    reason = "Staff not ACTIVE";
+                } else if (!hasTeacherRole) {
+                    reason = "Missing TEACHER role";
+                } else if (!hasSubjects) {
+                    reason = "No teachable subjects";
+                } else {
+                    reason = "No max weekly lecture load configured";
+                }
                 notTimetableEligible.add(issue(staffId, staffName, employeeNo,
                         reason,
                         "Cannot be placed on timetable — schedule will have gaps",

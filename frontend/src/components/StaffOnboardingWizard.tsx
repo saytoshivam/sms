@@ -146,10 +146,6 @@ function canSaveDraft(d: WizardDraft) {
   return !!d.fullName.trim() && !!d.phone.trim() && !!d.staffType && !!d.designation.trim() && d.roles.length > 0;
 }
 
-function canActivate(d: WizardDraft) {
-  return canSaveDraft(d) && !!d.joiningDate;
-}
-
 function missingForDraft(d: WizardDraft): string[] {
   const m: string[] = [];
   if (!d.fullName.trim())    m.push('Full name');
@@ -167,7 +163,56 @@ function missingForActivate(d: WizardDraft): string[] {
 }
 
 function isTimetableEligible(d: WizardDraft): boolean {
-  return d.roles.includes('TEACHER') && d.teachableSubjectIds.length > 0;
+  return d.roles.includes('TEACHER')
+    && d.teachableSubjectIds.length > 0
+    && d.maxWeeklyLectureLoad !== '';
+}
+
+/** Returns per-item operational readiness for the review step. */
+function operationalReadiness(d: WizardDraft): Array<{ label: string; ready: boolean; reason?: string }> {
+  const hasTeacher = d.roles.includes('TEACHER');
+  const hasSubjects = d.teachableSubjectIds.length > 0;
+  const hasLoad = d.maxWeeklyLectureLoad !== '';
+  const hasLogin = d.createLoginAccount && !!d.email.trim();
+  return [
+    {
+      label: 'Staff Directory',
+      ready: !!d.fullName.trim() && !!d.designation.trim() && d.roles.length > 0,
+      reason: !d.fullName.trim() ? 'Full name required'
+            : !d.designation.trim() ? 'Designation required'
+            : d.roles.length === 0 ? 'At least one role required'
+            : undefined,
+    },
+    {
+      label: 'Portal Login',
+      ready: hasLogin,
+      reason: hasLogin ? undefined
+            : !d.email.trim() ? 'Email required — enter it in Step 5'
+            : 'Enable "Create login account" in Step 3',
+    },
+    {
+      label: 'Smart Assignment (Timetable)',
+      ready: isTimetableEligible(d),
+      reason: !hasTeacher ? 'TEACHER role required'
+            : !hasSubjects ? 'Assign at least one teachable subject (Step 4)'
+            : !hasLoad ? 'Set max weekly lecture load (Step 4)'
+            : undefined,
+    },
+    {
+      label: 'Class Teacher Assignment',
+      ready: hasTeacher && d.canBeClassTeacher,
+      reason: !hasTeacher ? 'TEACHER role required'
+            : !d.canBeClassTeacher ? 'Disabled in Step 4 — enable "Can be class teacher"'
+            : undefined,
+    },
+    {
+      label: 'Substitution Coverage',
+      ready: hasTeacher && d.canTakeSubstitution,
+      reason: !hasTeacher ? 'TEACHER role required'
+            : !d.canTakeSubstitution ? 'Disabled in Step 4 — enable "Can take substitution"'
+            : undefined,
+    },
+  ];
 }
 
 // ─── Shared sub-components ────────────────────────────────────────────────────
@@ -638,7 +683,7 @@ function StepPayroll({ d, set }: { d: WizardDraft; set: (p: Partial<WizardDraft>
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.45)', padding: '8px 12px', background: 'rgba(234,179,8,0.08)', borderRadius: 8, border: '1px solid rgba(234,179,8,0.2)' }}>
-        ℹ️ Payroll data is stored locally for your reference. Full payroll module with processing will be available in a future release.
+        ℹ️ Payroll details are captured and stored securely. Salary processing is not enabled for this school.
       </div>
       <Row>
         <Field label="Bank Name">
@@ -678,6 +723,7 @@ function StepReview({ d, subjects, onSaveDraft, onActivate, busy }: {
   const draftMissing    = missingForDraft(d);
   const activateMissing = missingForActivate(d);
   const subjectNames = subjects.filter(s => d.teachableSubjectIds.includes(s.id)).map(s => s.code).join(', ');
+  const readiness = operationalReadiness(d);
 
   return (
     <div style={{ display: 'grid', gap: 18 }}>
@@ -700,6 +746,27 @@ function StepReview({ d, subjects, onSaveDraft, onActivate, busy }: {
         <ReviewRow label="Login Account"   value={d.createLoginAccount ? 'Yes' : 'No'} />
         <ReviewRow label="Teachable Subj." value={subjectNames || undefined} />
         <ReviewRow label="Max Period Load" value={d.maxWeeklyLectureLoad !== '' ? String(d.maxWeeklyLectureLoad) + ' per week' : undefined} />
+      </div>
+
+      {/* Operational Readiness */}
+      <div style={{ padding: '14px 16px', background: 'rgba(15,23,42,0.02)', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)' }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: 'rgba(15,23,42,0.7)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Operational Readiness</div>
+        {readiness.map(item => (
+          <div key={item.label} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '7px 0', borderBottom: '1px solid rgba(15,23,42,0.05)' }}>
+            <span style={{ fontSize: 14, marginTop: 1, flexShrink: 0 }}>{item.ready ? '✅' : '⚠️'}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: item.ready ? '#166534' : 'rgba(15,23,42,0.7)' }}>{item.label}</div>
+              {!item.ready && item.reason && (
+                <div style={{ fontSize: 11, color: '#92400e', marginTop: 1 }}>{item.reason}</div>
+              )}
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
+              background: item.ready ? 'rgba(22,163,74,0.1)' : 'rgba(234,179,8,0.1)',
+              color: item.ready ? '#166534' : '#92400e', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {item.ready ? 'Ready' : 'Not ready'}
+            </span>
+          </div>
+        ))}
       </div>
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
@@ -729,7 +796,7 @@ function StepReview({ d, subjects, onSaveDraft, onActivate, busy }: {
 
 // ─── Right panel – Live Preview ────────────────────────────────────────────────
 
-function LivePreview({ d, subjects }: { d: WizardDraft; subjects: WizardSubject[] }) {
+function LivePreview({ d }: { d: WizardDraft }) {
   const name   = d.fullName.trim() || 'New Staff Member';
   const type   = d.staffType || 'TEACHING';
   const bg     = avatarColor(name);
@@ -1124,7 +1191,7 @@ export function StaffOnboardingWizard({ onClose, onSuccess }: StaffOnboardingWiz
           {/* Right – Live preview */}
           <div className="sow-preview-col" style={{ overflowY: 'auto', padding: '20px 16px', background: 'rgba(248,250,252,0.9)', borderLeft: '1px solid rgba(15,23,42,0.08)' }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.4)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>Live Preview</div>
-            <LivePreview d={draft} subjects={subjects} />
+            <LivePreview d={draft} />
           </div>
         </div>
       </div>

@@ -112,6 +112,15 @@ public class School {
     @Column(name = "onboarding_academic_assignment_meta", columnDefinition = "json")
     private String onboardingAcademicAssignmentMetaJson;
 
+    /**
+     * School-wide default maximum weekly lecture load for teaching staff.
+     * Used by the timetable eligibility check when a staff member has no
+     * individual {@code maxWeeklyLectureLoad} configured.
+     * Null = no school default (staff must set their own limit to be eligible).
+     */
+    @Column(name = "default_teacher_weekly_load")
+    private Integer defaultTeacherWeeklyLoad;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
