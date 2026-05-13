@@ -5,7 +5,7 @@
  * Features: summary tiles, multi-filter, desktop table, mobile cards,
  *           kebab menu with real/stub actions clearly distinguished.
  */
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
@@ -302,10 +302,53 @@ function EditModal({ staffId, initial, subjects, busy, onSave, onClose }: { staf
   );
 }
 
+// ─── CSV export helper ───────────────────────────────────────────────────────
+
+function downloadStaffCsv(rows: StaffRow[]) {
+  const headers = [
+    'staffId', 'fullName', 'email', 'phone', 'employeeNo', 'designation',
+    'staffType', 'status', 'department', 'employmentType', 'roles', 'subjects',
+    'hasLoginAccount', 'maxWeeklyLectureLoad',
+  ];
+  const esc = (v: unknown) => {
+    const s = v == null ? '' : String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [
+    headers.join(','),
+    ...rows.map(r => [
+      r.staffId,
+      r.fullName,
+      r.email ?? '',
+      r.phone ?? '',
+      r.employeeNo ?? '',
+      r.designation ?? '',
+      effectiveStaffType(r),
+      effectiveStatus(r),
+      r.department ?? '',
+      (r as StaffRow & { employmentType?: string | null }).employmentType ?? '',
+      r.roles.join('|'),
+      r.subjectCodes.join('|'),
+      r.hasLoginAccount ? 'true' : 'false',
+      r.maxWeeklyLectureLoad ?? '',
+    ].map(esc).join(',')),
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `staff-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function TeachersModulePage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canEdit = !isWorkspaceReadOnly(searchParams);
   const invalidate = useApiTags();
   const navigate = useNavigate();
@@ -385,7 +428,7 @@ export function TeachersModulePage() {
 
   const [editTarget, setEditTarget] = useState<{ staffId: number; draft: EditDraft } | null>(null);
 
-  const openEdit = (row: StaffRow) => setEditTarget({
+  const openEdit = useCallback((row: StaffRow) => setEditTarget({
     staffId: row.staffId,
     draft: {
       fullName: row.fullName, email: row.email ?? '', phone: row.phone ?? '',
@@ -395,7 +438,21 @@ export function TeachersModulePage() {
       createLoginAccount: row.hasLoginAccount,
       maxWeeklyLectureLoad: row.maxWeeklyLectureLoad ?? '',
     },
-  });
+  }), [subjects]);
+
+  // ── Open edit modal when ?edit=<staffId> is in the URL ──────────────────────
+  // Used by the "Edit Profile" button on StaffProfilePage which navigates to
+  // /app/teachers?edit=<id> to open the edit form for a specific staff member.
+  const editIdParam = searchParams.get('edit');
+  useEffect(() => {
+    if (!editIdParam || staffQ.isLoading || !staffQ.data || !subjectsQ.data) return;
+    const id = parseInt(editIdParam, 10);
+    if (isNaN(id)) return;
+    const row = staffQ.data.find((s: StaffRow) => s.staffId === id);
+    if (!row) return;
+    openEdit(row);
+    setSearchParams(params => { params.delete('edit'); return params; }, { replace: true });
+  }, [editIdParam, staffQ.isLoading, staffQ.data, subjectsQ.data, openEdit, setSearchParams]);
 
   const updateMut = useMutation({
     mutationFn: async ({ id, body }: { id: number; body: object }) => { await api.put(`/api/v1/onboarding/staff/${id}/onboard`, body); },
@@ -431,9 +488,13 @@ export function TeachersModulePage() {
             </button>
           )}
           <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '7px 14px' }}
-            title="CSV export not yet implemented"
-            onClick={() => toast.info('Export coming soon', 'Staff CSV export will be available in a future release.')}>
-            ↓ Export
+            title={`Export ${filtered.length} staff member(s) to CSV`}
+            onClick={() => {
+              if (filtered.length === 0) { toast.info('Nothing to export', 'No staff match the current filters.'); return; }
+              downloadStaffCsv(filtered);
+              toast.success('Exported', `${filtered.length} staff member(s) downloaded.`);
+            }}>
+            ↓ Export CSV ({filtered.length})
           </button>
         </div>
       </div>

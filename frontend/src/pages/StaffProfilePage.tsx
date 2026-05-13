@@ -452,6 +452,17 @@ function TabAcademics({ profile, subjects, structure, classGroups }: {
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+      {/* Edit shortcut banner */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: 'rgba(37,99,235,0.05)', border: '1px solid rgba(37,99,235,0.15)', borderRadius: 10, gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', fontWeight: 600 }}>
+          📚 This view is read-only. To assign subjects, set workload, or change timetable flags, use <strong>Edit Profile</strong>.
+        </div>
+        <button type="button" onClick={onEditProfile}
+          style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          ✏ Edit Academic Capabilities
+        </button>
+      </div>
+
       <SectionCard title="Teachable Subjects">
         {profile.teachableSubjectCodes.length === 0 ? (
           <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.4)' }}>
@@ -1653,6 +1664,7 @@ export function StaffProfilePage() {
             subjects={subjectsQ.data ?? []}
             structure={structureQ.data ?? null}
             classGroups={classGroupsQ.data ?? []}
+            onEditProfile={() => navigate(`/app/teachers?edit=${id}`)}
           />
         )}
         {activeTab === 'timetable'  && <TabTimetable  profile={profile} />}

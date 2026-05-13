@@ -84,11 +84,31 @@ type StaffDraft = {
   phone?: string | null;
   employeeNo?: string | null;
   designation?: string | null;
+  staffType?: string | null;       // TEACHING | NON_TEACHING | ADMIN | SUPPORT
+  department?: string | null;
+  joiningDate?: string | null;     // ISO date YYYY-MM-DD
+  employmentType?: string | null;  // FULL_TIME | PART_TIME | CONTRACT | VISITING
   roles: string[];
   teachableSubjectIds?: number[];
   createLoginAccount?: boolean;
   maxWeeklyLectureLoad?: number | null;
+  maxDailyLectureLoad?: number | null;
+  canBeClassTeacher?: boolean;
+  canTakeSubstitution?: boolean;
   preferredClassGroupIds?: number[];
+  // Contact & emergency
+  address?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  emergencyContactRelation?: string | null;
+  // Qualifications
+  highestQualification?: string | null;
+  previousInstitution?: string | null;
+  // Payroll
+  bankName?: string | null;
+  bankAccount?: string | null;
+  ifscCode?: string | null;
+  panNumber?: string | null;
 };
 
 type StaffManualField = 'fullName' | 'email' | 'phone' | 'employeeNo' | 'designation' | 'roles' | 'subjects';
@@ -457,11 +477,31 @@ export function SchoolOnboardingWizardPage() {
   const [staffPhone, setStaffPhone] = useState('');
   const [staffEmployeeNo, setStaffEmployeeNo] = useState('');
   const [staffDesignation, setStaffDesignation] = useState('');
+  const [staffStaffType, setStaffStaffType] = useState<string>('TEACHING');
+  const [staffDepartment, setStaffDepartment] = useState<string>('');
+  const [staffJoiningDate, setStaffJoiningDate] = useState<string>('');
+  const [staffEmploymentType, setStaffEmploymentType] = useState<string>('');
   const [staffRoles, setStaffRoles] = useState<string[]>(['TEACHER']);
   const [staffTeachablePicks, setStaffTeachablePicks] = useState<string[]>([]);
   const [staffCreateLogin, setStaffCreateLogin] = useState(true);
   const [staffMaxWeeklyLoad, setStaffMaxWeeklyLoad] = useState<string>('');
+  const [staffMaxDailyLoad, setStaffMaxDailyLoad] = useState<string>('');
+  const [staffCanBeClassTeacher, setStaffCanBeClassTeacher] = useState(true);
+  const [staffCanTakeSubstitution, setStaffCanTakeSubstitution] = useState(true);
   const [staffPreferredClassGroupIds, setStaffPreferredClassGroupIds] = useState<string[]>([]);
+  // Contact & emergency
+  const [staffAddress, setStaffAddress] = useState('');
+  const [staffEmergencyContactName, setStaffEmergencyContactName] = useState('');
+  const [staffEmergencyContactPhone, setStaffEmergencyContactPhone] = useState('');
+  const [staffEmergencyContactRelation, setStaffEmergencyContactRelation] = useState('');
+  // Qualifications
+  const [staffHighestQualification, setStaffHighestQualification] = useState('');
+  const [staffPreviousInstitution, setStaffPreviousInstitution] = useState('');
+  // Payroll
+  const [staffBankName, setStaffBankName] = useState('');
+  const [staffBankAccount, setStaffBankAccount] = useState('');
+  const [staffIfscCode, setStaffIfscCode] = useState('');
+  const [staffPanNumber, setStaffPanNumber] = useState('');
   const [staffTouched, setStaffTouched] = useState<Record<StaffManualField, boolean>>({
     fullName: false,
     email: false,
@@ -1547,26 +1587,75 @@ export function SchoolOnboardingWizardPage() {
   const saveStaff = useMutation({
     mutationFn: async () => {
       if (staffRows.length === 0) throw new Error('Add at least one staff row.');
-      const body = staffRows.map((r) => ({
-        fullName: r.fullName,
-        email: r.email,
-        phone: r.phone,
-        employeeNo: r.employeeNo,
-        designation: r.designation,
-        roles: r.roles,
-        teachableSubjectIds: r.teachableSubjectIds ?? [],
-        createLoginAccount: r.createLoginAccount ?? true,
-        maxWeeklyLectureLoad: r.maxWeeklyLectureLoad ?? null,
-        preferredClassGroupIds: r.preferredClassGroupIds ?? [],
-      }));
-      return (
-        await api.post<{
-          staffCreated: number;
-          usersCreated: number;
-          skippedExistingCount: number;
-          credentials: { email: string; username: string; temporaryPassword: string; roles: string[] }[];
-        }>('/api/v1/onboarding/staff', body)
-      ).data;
+      let staffCreated = 0;
+      let usersCreated = 0;
+      let skippedExistingCount = 0;
+      const credentials: { email: string; username: string; temporaryPassword: string; roles: string[] }[] = [];
+      for (const r of staffRows) {
+        const isTeacher = r.roles.includes('TEACHER');
+        const body = {
+          identity: {
+            fullName: r.fullName,
+            email: r.email || null,
+            phone: r.phone || null,
+            employeeNo: r.employeeNo || null,
+          },
+          employment: {
+            staffType: r.staffType ?? 'TEACHING',
+            designation: r.designation ?? '',
+            department: r.department ?? null,
+            joiningDate: r.joiningDate ?? null,
+            employmentType: r.employmentType ?? null,
+            status: 'ACTIVE',
+          },
+          rolesAndAccess: {
+            roles: r.roles,
+            createLoginAccount: r.createLoginAccount ?? true,
+          },
+          academicCapabilities: isTeacher ? {
+            teachableSubjectIds: r.teachableSubjectIds ?? [],
+            maxWeeklyLectureLoad: r.maxWeeklyLectureLoad ?? null,
+            maxDailyLectureLoad: r.maxDailyLectureLoad ?? null,
+            canBeClassTeacher: r.canBeClassTeacher ?? true,
+            canTakeSubstitution: r.canTakeSubstitution ?? true,
+            preferredClassGroupIds: r.preferredClassGroupIds ?? [],
+            restrictedClassGroupIds: [],
+            unavailablePeriodsJson: null,
+          } : null,
+          contact: (r.address || r.emergencyContactName || r.emergencyContactPhone) ? {
+            currentAddressLine1: r.address ?? null,
+            emergencyContactName: r.emergencyContactName ?? null,
+            emergencyContactPhone: r.emergencyContactPhone ?? null,
+            emergencyContactRelation: r.emergencyContactRelation ?? null,
+          } : null,
+          qualification: (r.highestQualification || r.previousInstitution) ? {
+            highestQualification: r.highestQualification ?? null,
+            previousInstitution: r.previousInstitution ?? null,
+          } : null,
+          payrollSetup: (r.bankName || r.bankAccount || r.ifscCode || r.panNumber) ? {
+            bankName: r.bankName ?? null,
+            bankAccountNumber: r.bankAccount ?? null,
+            ifsc: r.ifscCode ?? null,
+            panNumber: r.panNumber ?? null,
+          } : null,
+        };
+        const res = await api.post<{
+          staffProfile?: { staffId?: number };
+          warnings?: string[];
+          credential?: { email: string; username: string; temporaryPassword: string; roles: string[] } | null;
+          skipped?: boolean;
+        }>('/api/v1/onboarding/staff/onboard', body);
+        if (res.data.skipped) {
+          skippedExistingCount += 1;
+        } else {
+          staffCreated += 1;
+        }
+        if (res.data.credential) {
+          usersCreated += 1;
+          credentials.push(res.data.credential);
+        }
+      }
+      return { staffCreated, usersCreated, skippedExistingCount, credentials };
     },
     onMutate: () => {
       setStaffResult(null);
@@ -2836,9 +2925,19 @@ export function SchoolOnboardingWizardPage() {
         <div className="workspace-placeholder">
           <strong>CSV format</strong>
           <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>
-            Header recommended. Columns: <code>fullName</code>, <code>email</code>, <code>phone</code>,{' '}
-              <code>employeeNo</code>, <code>designation</code>, <code>roles</code> (comma-separated role codes),{' '}
-              <code>subjects</code> (comma-separated subject codes, teachers only), <code>createLoginAccount</code> (true/false).
+            Header recommended. Required: <code>fullName</code>, <code>email</code>. Optional basics: <code>phone</code>,{' '}
+              <code>employeeNo</code>, <code>designation</code>,{' '}
+              <code>staffType</code> (TEACHING/NON_TEACHING/ADMIN/SUPPORT),{' '}
+              <code>department</code>, <code>employmentType</code> (FULL_TIME/PART_TIME/CONTRACT/VISITING),{' '}
+              <code>joiningDate</code> (YYYY-MM-DD),{' '}
+              <code>roles</code> (pipe-separated: TEACHER|HOD),{' '}
+              <code>subjects</code> (pipe-separated subject codes, teachers only),{' '}
+              <code>maxWeeklyLectureLoad</code>, <code>maxDailyLectureLoad</code>,{' '}
+              <code>canBeClassTeacher</code> (true/false), <code>canTakeSubstitution</code> (true/false).{' '}
+              Extended optional: <code>address</code>, <code>emergencyContactName</code>, <code>emergencyContactPhone</code>,{' '}
+              <code>emergencyContactRelation</code>, <code>highestQualification</code>, <code>previousInstitution</code>,{' '}
+              <code>bankName</code>, <code>bankAccount</code>, <code>ifscCode</code>, <code>panNumber</code>,{' '}
+              <code>createLoginAccount</code> (true/false).
           </p>
         </div>
 
@@ -2903,6 +3002,45 @@ export function SchoolOnboardingWizardPage() {
               {staffTouched.designation && staffManual.errors.designation ? staffManual.errors.designation : '\u00a0'}
             </div>
           </div>
+          <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
+            <label>Staff type</label>
+            <select value={staffStaffType} onChange={(e) => setStaffStaffType(e.target.value)}>
+              <option value="TEACHING">Teaching</option>
+              <option value="NON_TEACHING">Non-Teaching</option>
+              <option value="ADMIN">Admin</option>
+              <option value="SUPPORT">Support</option>
+            </select>
+            <div className="sms-form-field__error" aria-live="polite">&nbsp;</div>
+          </div>
+          <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
+            <label>Department (optional)</label>
+            <input
+              value={staffDepartment}
+              onChange={(e) => setStaffDepartment(e.target.value)}
+              placeholder="e.g. Science"
+            />
+            <div className="sms-form-field__error" aria-live="polite">&nbsp;</div>
+          </div>
+          <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
+            <label>Employment type (optional)</label>
+            <select value={staffEmploymentType} onChange={(e) => setStaffEmploymentType(e.target.value)}>
+              <option value="">— select —</option>
+              <option value="FULL_TIME">Full-time</option>
+              <option value="PART_TIME">Part-time</option>
+              <option value="CONTRACT">Contract</option>
+              <option value="VISITING">Visiting</option>
+            </select>
+            <div className="sms-form-field__error" aria-live="polite">&nbsp;</div>
+          </div>
+          <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
+            <label>Joining date (optional)</label>
+            <input
+              type="date"
+              value={staffJoiningDate}
+              onChange={(e) => setStaffJoiningDate(e.target.value)}
+            />
+            <div className="sms-form-field__error" aria-live="polite">&nbsp;</div>
+          </div>
           <div className="sms-form-field" style={{ flex: '2 1 320px' }}>
             <label>Roles</label>
             <MultiSelectKeeper
@@ -2966,6 +3104,31 @@ export function SchoolOnboardingWizardPage() {
                 placeholder="e.g. 30"
               />
             </div>
+            <div className="sms-form-field" style={{ minWidth: 160, flex: '0 0 auto' }}>
+              <label>Max daily teaching periods (optional)</label>
+              <input
+                type="number"
+                min={1}
+                max={12}
+                value={staffMaxDailyLoad}
+                onChange={(e) => setStaffMaxDailyLoad(e.target.value)}
+                placeholder="e.g. 6"
+              />
+            </div>
+            <div className="sms-form-field" style={{ minWidth: 180, flex: '0 0 auto' }}>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+                <input type="checkbox" checked={staffCanBeClassTeacher} onChange={(e) => setStaffCanBeClassTeacher(e.target.checked)} />
+                Can be class teacher
+              </label>
+              <div className="sms-form-field__error" aria-live="polite">&nbsp;</div>
+            </div>
+            <div className="sms-form-field" style={{ minWidth: 180, flex: '0 0 auto' }}>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+                <input type="checkbox" checked={staffCanTakeSubstitution} onChange={(e) => setStaffCanTakeSubstitution(e.target.checked)} />
+                Can take substitution
+              </label>
+              <div className="sms-form-field__error" aria-live="polite">&nbsp;</div>
+            </div>
             <div className="sms-form-field" style={{ minWidth: 280, flex: '1 1 280px' }}>
               <label>Preferred classes/sections (optional)</label>
               <MultiSelectKeeper
@@ -2983,6 +3146,73 @@ export function SchoolOnboardingWizardPage() {
             </div>
           </div>
         ) : null}
+
+        {/* ── Contact & Emergency (optional for all staff) ── */}
+        <details style={{ marginTop: 4 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13, color: 'rgba(15,23,42,0.6)', userSelect: 'none' }}>
+            + Contact &amp; Emergency details (optional)
+          </summary>
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start', marginTop: 10 }}>
+            <div className="sms-form-field" style={{ flex: '2 1 280px' }}>
+              <label>Current address (optional)</label>
+              <input value={staffAddress} onChange={(e) => setStaffAddress(e.target.value)} placeholder="e.g. 42 MG Road, Indore" />
+            </div>
+            <div className="sms-form-field" style={{ flex: '2 1 220px' }}>
+              <label>Emergency contact name (optional)</label>
+              <input value={staffEmergencyContactName} onChange={(e) => setStaffEmergencyContactName(e.target.value)} placeholder="e.g. Ramesh Verma" />
+            </div>
+            <div className="sms-form-field" style={{ flex: '1 1 160px' }}>
+              <label>Emergency contact phone (optional)</label>
+              <input value={staffEmergencyContactPhone} onChange={(e) => setStaffEmergencyContactPhone(e.target.value)} placeholder="9876543210" />
+            </div>
+            <div className="sms-form-field" style={{ flex: '1 1 160px' }}>
+              <label>Relation (optional)</label>
+              <input value={staffEmergencyContactRelation} onChange={(e) => setStaffEmergencyContactRelation(e.target.value)} placeholder="e.g. Spouse" />
+            </div>
+          </div>
+        </details>
+
+        {/* ── Qualifications (optional) ── */}
+        <details style={{ marginTop: 4 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13, color: 'rgba(15,23,42,0.6)', userSelect: 'none' }}>
+            + Qualifications &amp; Experience (optional)
+          </summary>
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start', marginTop: 10 }}>
+            <div className="sms-form-field" style={{ flex: '1 1 220px' }}>
+              <label>Highest qualification (optional)</label>
+              <input value={staffHighestQualification} onChange={(e) => setStaffHighestQualification(e.target.value)} placeholder="e.g. M.Sc. Physics" />
+            </div>
+            <div className="sms-form-field" style={{ flex: '1 1 220px' }}>
+              <label>Previous institution / experience (optional)</label>
+              <input value={staffPreviousInstitution} onChange={(e) => setStaffPreviousInstitution(e.target.value)} placeholder="e.g. Delhi Public School" />
+            </div>
+          </div>
+        </details>
+
+        {/* ── Payroll (optional) ── */}
+        <details style={{ marginTop: 4 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13, color: 'rgba(15,23,42,0.6)', userSelect: 'none' }}>
+            + Payroll &amp; Bank details (optional)
+          </summary>
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start', marginTop: 10 }}>
+            <div className="sms-form-field" style={{ flex: '1 1 180px' }}>
+              <label>Bank name (optional)</label>
+              <input value={staffBankName} onChange={(e) => setStaffBankName(e.target.value)} placeholder="e.g. SBI" />
+            </div>
+            <div className="sms-form-field" style={{ flex: '1 1 200px' }}>
+              <label>Bank account number (optional)</label>
+              <input value={staffBankAccount} onChange={(e) => setStaffBankAccount(e.target.value)} placeholder="e.g. 00112233445566" />
+            </div>
+            <div className="sms-form-field" style={{ flex: '1 1 160px' }}>
+              <label>IFSC code (optional)</label>
+              <input value={staffIfscCode} onChange={(e) => setStaffIfscCode(e.target.value)} placeholder="e.g. SBIN0001234" />
+            </div>
+            <div className="sms-form-field" style={{ flex: '1 1 160px' }}>
+              <label>PAN number (optional)</label>
+              <input value={staffPanNumber} onChange={(e) => setStaffPanNumber(e.target.value)} placeholder="e.g. ABCDE1234F" />
+            </div>
+          </div>
+        </details>
 
         <div
           className="row"
@@ -3003,6 +3233,9 @@ export function SchoolOnboardingWizardPage() {
               const ml = staffMaxWeeklyLoad.trim();
               const maxWeeklyLectureLoad =
                 ml && Number.isFinite(Number(ml)) && Number(ml) > 0 ? Math.floor(Number(ml)) : null;
+              const dl = staffMaxDailyLoad.trim();
+              const maxDailyLectureLoad =
+                dl && Number.isFinite(Number(dl)) && Number(dl) > 0 ? Math.floor(Number(dl)) : null;
               const preferredClassGroupIds = staffPreferredClassGroupIds
                 .map((x) => Number(x))
                 .filter((n) => Number.isFinite(n));
@@ -3012,11 +3245,28 @@ export function SchoolOnboardingWizardPage() {
                 phone: staffPhone.trim() || null,
                 employeeNo: staffEmployeeNo.trim() || null,
                 designation: staffDesignation.trim() || null,
+                staffType: staffStaffType || 'TEACHING',
+                department: staffDepartment.trim() || null,
+                joiningDate: staffJoiningDate || null,
+                employmentType: staffEmploymentType || null,
                 roles: roles.length ? roles : ['TEACHER'],
                 teachableSubjectIds: isTeacher && teachableSubjectIds.length ? teachableSubjectIds : undefined,
                 createLoginAccount: staffCreateLogin,
                 maxWeeklyLectureLoad: isTeacher ? maxWeeklyLectureLoad : null,
+                maxDailyLectureLoad: isTeacher ? maxDailyLectureLoad : null,
+                canBeClassTeacher: isTeacher ? staffCanBeClassTeacher : undefined,
+                canTakeSubstitution: isTeacher ? staffCanTakeSubstitution : undefined,
                 preferredClassGroupIds: isTeacher && preferredClassGroupIds.length ? preferredClassGroupIds : undefined,
+                address: staffAddress.trim() || null,
+                emergencyContactName: staffEmergencyContactName.trim() || null,
+                emergencyContactPhone: staffEmergencyContactPhone.trim() || null,
+                emergencyContactRelation: staffEmergencyContactRelation.trim() || null,
+                highestQualification: staffHighestQualification.trim() || null,
+                previousInstitution: staffPreviousInstitution.trim() || null,
+                bankName: staffBankName.trim() || null,
+                bankAccount: staffBankAccount.trim() || null,
+                ifscCode: staffIfscCode.trim() || null,
+                panNumber: staffPanNumber.trim() || null,
               };
               setStaffRows((p) => [...p, row]);
               setStaffFullName('');
@@ -3024,11 +3274,28 @@ export function SchoolOnboardingWizardPage() {
               setStaffPhone('');
               setStaffEmployeeNo('');
               setStaffDesignation('');
+              setStaffStaffType('TEACHING');
+              setStaffDepartment('');
+              setStaffJoiningDate('');
+              setStaffEmploymentType('');
               setStaffRoles(['TEACHER']);
               setStaffTeachablePicks([]);
               setStaffCreateLogin(true);
               setStaffMaxWeeklyLoad('');
+              setStaffMaxDailyLoad('');
+              setStaffCanBeClassTeacher(true);
+              setStaffCanTakeSubstitution(true);
               setStaffPreferredClassGroupIds([]);
+              setStaffAddress('');
+              setStaffEmergencyContactName('');
+              setStaffEmergencyContactPhone('');
+              setStaffEmergencyContactRelation('');
+              setStaffHighestQualification('');
+              setStaffPreviousInstitution('');
+              setStaffBankName('');
+              setStaffBankAccount('');
+              setStaffIfscCode('');
+              setStaffPanNumber('');
               setStaffResult(null);
               setStaffTouched({
                 fullName: false,
@@ -3061,53 +3328,106 @@ export function SchoolOnboardingWizardPage() {
                   const text = await file.text();
                   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
                   if (lines.length === 0) return;
-                  const header = lines[0].toLowerCase();
-                  const hasHeader = header.includes('email') && header.includes('fullname');
+                  const headerLine = lines[0].toLowerCase();
+                  const hasHeader = headerLine.includes('email') || headerLine.includes('fullname');
                   const start = hasHeader ? 1 : 0;
                   const parsed: StaffDraft[] = [];
                   const subjectsByCode = new Map<string, number>();
                   for (const s of pageContent(subjectsCatalog.data)) {
                     subjectsByCode.set(String(s.code ?? '').trim().toUpperCase(), Number(s.id));
                   }
+                  // Build column index map from header row
+                  const colMap = new Map<string, number>();
+                  if (hasHeader) {
+                    lines[0].split(',').forEach((c, i) => colMap.set(c.trim().toLowerCase(), i));
+                  }
+                  const col = (...names: string[]) => { for (const n of names) { const i = colMap.get(n); if (i !== undefined) return i; } return -1; };
+                  // Positional fallback (extended): fullName,email,phone,employeeNo,designation,staffType,department,employmentType,joiningDate,roles,subjects,maxWeeklyLectureLoad,maxDailyLectureLoad,canBeClassTeacher,canTakeSubstitution,address,emergencyContactName,emergencyContactPhone,emergencyContactRelation,highestQualification,previousInstitution,bankName,bankAccount,ifscCode,panNumber,createLoginAccount
+                  const POS = { fullName:0,email:1,phone:2,employeeNo:3,designation:4,staffType:5,department:6,employmentType:7,joiningDate:8,roles:9,subjects:10,maxWeekly:11,maxDaily:12,canClassTeacher:13,canSubstitution:14,address:15,emergencyName:16,emergencyPhone:17,emergencyRelation:18,qualification:19,institution:20,bankName:21,bankAccount:22,ifsc:23,pan:24,createLogin:25 };
+                  const get = (cols: string[], ...names: string[]): string => {
+                    if (hasHeader) { const i = col(...names); return i >= 0 ? (cols[i] ?? '') : ''; }
+                    const key = names[0] as keyof typeof POS;
+                    return cols[POS[key] ?? 0] ?? '';
+                  };
                   for (let i = start; i < lines.length; i++) {
                     const cols = lines[i].split(',').map((c) => c.trim());
                     if (cols.length < 2) continue;
-                    const [fullName, email, phone, employeeNo, designation, rolesRaw, subjectsRaw, createLoginRaw] = cols;
-                    const roles = (rolesRaw ?? '')
-                      .split('|')
-                      .join(',')
-                      .split(';')
-                      .join(',')
-                      .split(',')
-                      .map((r) => r.trim().toUpperCase())
-                      .filter(Boolean);
-                    const subjects = (subjectsRaw ?? '')
-                      .split('|')
-                      .join(',')
-                      .split(';')
-                      .join(',')
-                      .split(',')
-                      .map((s) => s.trim().toUpperCase())
-                      .filter(Boolean);
+                    const fullName = get(cols, 'fullname', 'full_name', 'name');
+                    const email    = get(cols, 'email');
+                    const phone    = get(cols, 'phone');
+                    const employeeNo = get(cols, 'employeeno', 'employee_no', 'emp_no', 'empno');
+                    const designation = get(cols, 'designation');
+                    const staffTypeRaw = get(cols, 'stafftype', 'staff_type');
+                    const department = get(cols, 'department', 'dept');
+                    const employmentTypeRaw = get(cols, 'employmenttype', 'employment_type');
+                    const joiningDateRaw = get(cols, 'joiningdate', 'joining_date', 'joindate');
+                    const rolesRaw = get(cols, 'roles', 'role');
+                    const subjectsRaw = get(cols, 'subjects', 'subject');
+                    const maxWeeklyRaw = get(cols, 'maxweeklylectureload', 'maxweeklyload', 'maxweekly', 'maxload');
+                    const maxDailyRaw = get(cols, 'maxdailylectureload', 'maxdailyload', 'maxdaily');
+                    const canClassTeacherRaw = get(cols, 'canbeclassteacher', 'canclassteacher', 'classteacher');
+                    const canSubstitutionRaw = get(cols, 'cantakesubstitution', 'cansubstitution', 'substitution');
+                    const address = get(cols, 'address', 'currentaddress', 'currentaddressline1');
+                    const emergencyContactName = get(cols, 'emergencycontactname', 'emergencyname', 'emergencycontact');
+                    const emergencyContactPhone = get(cols, 'emergencycontactphone', 'emergencyphone');
+                    const emergencyContactRelation = get(cols, 'emergencycontactrelation', 'emergencyrelation');
+                    const highestQualification = get(cols, 'highestqualification', 'qualification', 'degree');
+                    const previousInstitution = get(cols, 'previousinstitution', 'institution', 'experience');
+                    const bankName = get(cols, 'bankname', 'bank');
+                    const bankAccount = get(cols, 'bankaccount', 'accountnumber', 'bankaccountnumber');
+                    const ifscCode = get(cols, 'ifsccode', 'ifsc');
+                    const panNumber = get(cols, 'pannumber', 'pan');
+                    const createLoginRaw = get(cols, 'createloginaccount', 'createlogin', 'login');
+                    const roles = (rolesRaw)
+                      .split('|').join(',').split(';').join(',').split(',')
+                      .map((r) => r.trim().toUpperCase()).filter(Boolean);
+                    const subjects = (subjectsRaw)
+                      .split('|').join(',').split(';').join(',').split(',')
+                      .map((s) => s.trim().toUpperCase()).filter(Boolean);
                     const teachableSubjectIds = subjects
                       .map((c) => subjectsByCode.get(c))
                       .filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
                     const createLoginAccount =
-                      String(createLoginRaw ?? '')
-                        .trim()
-                        .toLowerCase() === 'false'
-                        ? false
-                        : true;
-                    if (!fullName || !email) continue;
+                      String(createLoginRaw).trim().toLowerCase() === 'false' ? false : true;
+                    const maxWeeklyLectureLoad =
+                      maxWeeklyRaw && Number.isFinite(Number(maxWeeklyRaw)) && Number(maxWeeklyRaw) > 0
+                        ? Math.floor(Number(maxWeeklyRaw)) : null;
+                    const maxDailyLectureLoad =
+                      maxDailyRaw && Number.isFinite(Number(maxDailyRaw)) && Number(maxDailyRaw) > 0
+                        ? Math.floor(Number(maxDailyRaw)) : null;
+                    const canBeClassTeacher = String(canClassTeacherRaw).trim().toLowerCase() === 'false' ? false : true;
+                    const canTakeSubstitution = String(canSubstitutionRaw).trim().toLowerCase() === 'false' ? false : true;
+                    const staffTypeNorm = staffTypeRaw.trim().toUpperCase();
+                    const employmentTypeNorm = employmentTypeRaw.trim().toUpperCase();
+                    if (!fullName || (!email && !phone)) continue;
+                    const isTeacher = roles.includes('TEACHER');
                     parsed.push({
                       fullName,
                       email,
                       phone: phone || null,
                       employeeNo: employeeNo || null,
                       designation: designation || null,
+                      staffType: staffTypeNorm || 'TEACHING',
+                      department: department || null,
+                      joiningDate: joiningDateRaw || null,
+                      employmentType: employmentTypeNorm || null,
                       roles: roles.length ? roles : ['TEACHER'],
-                      teachableSubjectIds: roles.includes('TEACHER') && teachableSubjectIds.length ? teachableSubjectIds : undefined,
+                      teachableSubjectIds: isTeacher && teachableSubjectIds.length ? teachableSubjectIds : undefined,
                       createLoginAccount,
+                      maxWeeklyLectureLoad: isTeacher ? maxWeeklyLectureLoad : null,
+                      maxDailyLectureLoad: isTeacher ? maxDailyLectureLoad : null,
+                      canBeClassTeacher: isTeacher ? canBeClassTeacher : undefined,
+                      canTakeSubstitution: isTeacher ? canTakeSubstitution : undefined,
+                      address: address || null,
+                      emergencyContactName: emergencyContactName || null,
+                      emergencyContactPhone: emergencyContactPhone || null,
+                      emergencyContactRelation: emergencyContactRelation || null,
+                      highestQualification: highestQualification || null,
+                      previousInstitution: previousInstitution || null,
+                      bankName: bankName || null,
+                      bankAccount: bankAccount || null,
+                      ifscCode: ifscCode || null,
+                      panNumber: panNumber || null,
                     });
                   }
                   if (parsed.length) {
@@ -3146,10 +3466,10 @@ export function SchoolOnboardingWizardPage() {
               downloadTemplate(
                 'staff-template.csv',
                 [
-                  'fullName,email,phone,employeeNo,designation,roles,subjects,createLoginAccount',
-                  'Rahul Verma,teacher1@school.com,9876543210,EMP001,Physics Teacher,TEACHER,PHY|MTH,true',
-                  'Asha Singh,hod1@school.com,9876543211,EMP002,HOD,HOD|TEACHER,PHY,true',
-                  'Suresh Kumar,accountant@school.com,9876543212,EMP003,Accountant,ACCOUNTANT,,false',
+                  'fullName,email,phone,employeeNo,designation,staffType,department,employmentType,joiningDate,roles,subjects,maxWeeklyLectureLoad,maxDailyLectureLoad,canBeClassTeacher,canTakeSubstitution,address,emergencyContactName,emergencyContactPhone,emergencyContactRelation,highestQualification,previousInstitution,bankName,bankAccount,ifscCode,panNumber,createLoginAccount',
+                  'Rahul Verma,teacher1@school.com,9876543210,EMP001,Physics Teacher,TEACHING,Science,FULL_TIME,2024-06-01,TEACHER,PHY|MTH,30,6,true,true,42 MG Road Indore,Priya Verma,9876543299,Spouse,M.Sc. Physics,Delhi Public School,SBI,00112233445566,SBIN0001234,ABCDE1234F,true',
+                  'Asha Singh,hod1@school.com,9876543211,EMP002,HOD - Science,TEACHING,Science,FULL_TIME,2024-06-01,HOD|TEACHER,PHY,25,5,true,true,,,,,M.Ed.,City School,,,,,,true',
+                  'Suresh Kumar,accountant@school.com,9876543212,EMP003,Accountant,NON_TEACHING,Accounts,FULL_TIME,2024-06-01,ACCOUNTANT,,,,,,,,,,,B.Com.,ABC College,HDFC,99887766554433,HDFC0001234,FGHIJ5678K,false',
                 ].join('\n') + '\n',
               )
             }
@@ -3173,7 +3493,10 @@ export function SchoolOnboardingWizardPage() {
                     {r.fullName} <span className="muted">({r.email})</span>
                   </div>
                   <div className="muted" style={{ fontSize: 12 }}>
-                    {r.designation ?? '—'} · {r.roles.join(', ')}
+                    {r.designation ?? '—'} · {r.staffType ?? 'TEACHING'} · {r.roles.join(', ')}
+                    {r.department ? ` · ${r.department}` : ''}
+                    {r.employmentType ? ` · ${r.employmentType.replace('_', ' ')}` : ''}
+                    {r.joiningDate ? ` · Joining: ${r.joiningDate}` : ''}
                   </div>
                 </div>
                 <button type="button" className="btn secondary" onClick={() => setStaffRows((p) => p.filter((_, i) => i !== idx))}>

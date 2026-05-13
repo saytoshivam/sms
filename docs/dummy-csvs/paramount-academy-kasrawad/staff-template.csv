@@ -1,73 +1,73 @@
-fullName,email,phone,employeeNo,designation,roles,subjects,createLoginAccount
-Aarav Patel,aarav.patel@paramountkasrawad.edu,9876500001,TCH0001,Teacher,TEACHER,ENG010,true
-Diya Patel,diya.patel@paramountkasrawad.edu,9876500002,TCH0002,Teacher,TEACHER,HIN010,true
-Rohan Patel,rohan.patel@paramountkasrawad.edu,9876500003,TCH0003,Teacher,TEACHER,SNK010,true
-Ananya Patel,ananya.patel@paramountkasrawad.edu,9876500004,TCH0004,Teacher,TEACHER,URD010,true
-Arjun Patel,arjun.patel@paramountkasrawad.edu,9876500005,TCH0005,Teacher,TEACHER,MTH010,true
-Meera Patel,meera.patel@paramountkasrawad.edu,9876500006,TCH0006,Teacher,TEACHER,BMT010,true
-Kabir Patel,kabir.patel@paramountkasrawad.edu,9876500007,TCH0007,Teacher,TEACHER,SCI010,true
-Simran Patel,simran.patel@paramountkasrawad.edu,9876500008,TCH0008,Teacher,TEACHER,SSC010,true
-Yash Patel,yash.patel@paramountkasrawad.edu,9876500009,TCH0009,Teacher,TEACHER,HIS010,true
-Riya Patel,riya.patel@paramountkasrawad.edu,9876500010,TCH0010,Teacher,TEACHER,GEO010,true
-Ishaan Patel,ishaan.patel@paramountkasrawad.edu,9876500011,TCH0011,Teacher,TEACHER,POL010,true
-Sara Patel,sara.patel@paramountkasrawad.edu,9876500012,TCH0012,Teacher,TEACHER,ECO010,true
-Vihaan Patel,vihaan.patel@paramountkasrawad.edu,9876500013,TCH0013,Teacher,TEACHER,CIV010,true
-Aditi Patel,aditi.patel@paramountkasrawad.edu,9876500014,TCH0014,Teacher,TEACHER,EVS005,true
-Kunal Patel,kunal.patel@paramountkasrawad.edu,9876500015,TCH0015,Teacher,TEACHER,GKE008,true
-Nisha Patel,nisha.patel@paramountkasrawad.edu,9876500016,TCH0016,Teacher,TEACHER,CAP008,true
-Rahul Patel,rahul.patel@paramountkasrawad.edu,9876500017,TCH0017,Teacher,TEACHER,AI0010,true
-Pooja Patel,pooja.patel@paramountkasrawad.edu,9876500018,TCH0018,Teacher,TEACHER,ITO010,true
-Imran Patel,imran.patel@paramountkasrawad.edu,9876500019,TCH0019,Teacher,TEACHER,CSC012,true
-Seema Patel,seema.patel@paramountkasrawad.edu,9876500020,TCH0020,Teacher,TEACHER,IPR012,true
-Neha Patel,neha.patel@paramountkasrawad.edu,9876500021,TCH0021,Teacher,TEACHER,PHY012,true
-Sanjay Patel,sanjay.patel@paramountkasrawad.edu,9876500022,TCH0022,Teacher,TEACHER,CHE012,true
-Priya Patel,priya.patel@paramountkasrawad.edu,9876500023,TCH0023,Teacher,TEACHER,BIO012,true
-Vikram Patel,vikram.patel@paramountkasrawad.edu,9876500024,TCH0024,Teacher,TEACHER,BTN012,true
-Sonia Patel,sonia.patel@paramountkasrawad.edu,9876500025,TCH0025,Teacher,TEACHER,ACT012,true
-Aarav Sharma,aarav.sharma@paramountkasrawad.edu,9876500026,TCH0026,Teacher,TEACHER,ACT011,true
-Diya Sharma,diya.sharma@paramountkasrawad.edu,9876500027,TCH0027,Teacher,TEACHER,BST012,true
-Rohan Sharma,rohan.sharma@paramountkasrawad.edu,9876500028,TCH0028,Teacher,TEACHER,ENT012,true
-Ananya Sharma,ananya.sharma@paramountkasrawad.edu,9876500029,TCH0029,Teacher,TEACHER,LST012,true
-Arjun Sharma,arjun.sharma@paramountkasrawad.edu,9876500030,TCH0030,Teacher,TEACHER,PSY012,true
-Meera Sharma,meera.sharma@paramountkasrawad.edu,9876500031,TCH0031,Teacher,TEACHER,SOC012,true
-Kabir Sharma,kabir.sharma@paramountkasrawad.edu,9876500032,TCH0032,Teacher,TEACHER,HSC012,true
-Simran Sharma,simran.sharma@paramountkasrawad.edu,9876500033,TCH0033,Teacher,TEACHER,PED012,true
-Yash Sharma,yash.sharma@paramountkasrawad.edu,9876500034,TCH0034,Teacher,TEACHER,HPE005,true
-Riya Sharma,riya.sharma@paramountkasrawad.edu,9876500035,TCH0035,Teacher,TEACHER,YOG010,true
-Ishaan Sharma,ishaan.sharma@paramountkasrawad.edu,9876500036,TCH0036,Teacher,TEACHER,FAR012,true
-Sara Sharma,sara.sharma@paramountkasrawad.edu,9876500037,TCH0037,Teacher,TEACHER,MUS012,true
-Vihaan Sharma,vihaan.sharma@paramountkasrawad.edu,9876500038,TCH0038,Teacher,TEACHER,DAN012,true
-Aditi Sharma,aditi.sharma@paramountkasrawad.edu,9876500039,TCH0039,Teacher,TEACHER,PNT012,true
-Kunal Sharma,kunal.sharma@paramountkasrawad.edu,9876500040,TCH0040,Teacher,TEACHER,WED010,true
-Nisha Sharma,nisha.sharma@paramountkasrawad.edu,9876500041,TCH0041,Teacher,TEACHER,VED010,true
-Rahul Sharma,rahul.sharma@paramountkasrawad.edu,9876500042,TCH0042,Teacher,TEACHER,FRE010,true
-Pooja Sharma,pooja.sharma@paramountkasrawad.edu,9876500043,TCH0043,Teacher,TEACHER,GER010,true
-Imran Sharma,imran.sharma@paramountkasrawad.edu,9876500044,TCH0044,Teacher,TEACHER,PNJ010,true
-Seema Sharma,seema.sharma@paramountkasrawad.edu,9876500045,TCH0045,Teacher,TEACHER,ENG008,true
-Neha Sharma,neha.sharma@paramountkasrawad.edu,9876500046,TCH0046,Teacher,TEACHER,HIN008,true
-Sanjay Sharma,sanjay.sharma@paramountkasrawad.edu,9876500047,TCH0047,Teacher,TEACHER,MTH008,true
-Priya Sharma,priya.sharma@paramountkasrawad.edu,9876500048,TCH0048,Teacher,TEACHER,SCI008,true
-Vikram Sharma,vikram.sharma@paramountkasrawad.edu,9876500049,TCH0049,Teacher,TEACHER,SSC008,true
-Sonia Sharma,sonia.sharma@paramountkasrawad.edu,9876500050,TCH0050,Teacher,TEACHER,PHY011,true
-Aarav Verma,aarav.verma@paramountkasrawad.edu,9876500051,TCH0051,Teacher,TEACHER,CHE011,true
-Diya Verma,diya.verma@paramountkasrawad.edu,9876500052,TCH0052,Teacher,TEACHER,BIO011,true
-Rohan Verma,rohan.verma@paramountkasrawad.edu,9876500053,TCH0053,Teacher,TEACHER,CSC011,true
-Ananya Verma,ananya.verma@paramountkasrawad.edu,9876500054,TCH0054,Teacher,TEACHER,EVS004,true
-Arjun Verma,arjun.verma@paramountkasrawad.edu,9876500055,TCH0055,Teacher,TEACHER,ENG004,true
-Meera Verma,meera.verma@paramountkasrawad.edu,9876500056,TCH0056,Teacher,TEACHER,HIN004,true
-Kabir Verma,kabir.verma@paramountkasrawad.edu,9876500057,TCH0057,Teacher,TEACHER,MTH004,true
-Simran Verma,simran.verma@paramountkasrawad.edu,9876500058,TCH0058,Teacher,TEACHER,EVS005,true
-Yash Verma,yash.verma@paramountkasrawad.edu,9876500059,TCH0059,Teacher,TEACHER,ENG006,true
-Riya Verma,riya.verma@paramountkasrawad.edu,9876500060,TCH0060,Teacher,TEACHER,MTH006,true
-Sara Singh,sara.singh@paramountkasrawad.edu,9876400061,EMP0061,Principal,PRINCIPAL,,true
-Vihaan Singh,vihaan.singh@paramountkasrawad.edu,9876400062,EMP0062,Vice principal,VICE_PRINCIPAL,,true
-Aditi Singh,aditi.singh@paramountkasrawad.edu,9876400063,EMP0063,School admin,SCHOOL_ADMIN,,true
-Kunal Singh,kunal.singh@paramountkasrawad.edu,9876400064,EMP0064,Accountant,ACCOUNTANT,,true
-Nisha Singh,nisha.singh@paramountkasrawad.edu,9876400065,EMP0065,HOD,HOD,,true
-Rahul Singh,rahul.singh@paramountkasrawad.edu,9876400066,EMP0066,Principal,PRINCIPAL,,true
-Pooja Singh,pooja.singh@paramountkasrawad.edu,9876400067,EMP0067,Vice principal,VICE_PRINCIPAL,,true
-Imran Singh,imran.singh@paramountkasrawad.edu,9876400068,EMP0068,School admin,SCHOOL_ADMIN,,true
-Seema Singh,seema.singh@paramountkasrawad.edu,9876400069,EMP0069,Accountant,ACCOUNTANT,,true
-Neha Singh,neha.singh@paramountkasrawad.edu,9876400070,EMP0070,HOD,HOD,,true
-Sanjay Singh,sanjay.singh@paramountkasrawad.edu,9876400071,EMP0071,Principal,PRINCIPAL,,true
-Priya Singh,priya.singh@paramountkasrawad.edu,9876400072,EMP0072,Vice principal,VICE_PRINCIPAL,,true
+﻿fullName,email,phone,employeeNo,designation,staffType,department,employmentType,joiningDate,roles,subjects,maxWeeklyLectureLoad,maxDailyLectureLoad,canBeClassTeacher,canTakeSubstitution,address,emergencyContactName,emergencyContactPhone,emergencyContactRelation,highestQualification,previousInstitution,bankName,bankAccount,ifscCode,panNumber,createLoginAccount
+Aarav Patel,aarav.patel@paramountkasrawad.edu,9876500001,TCH0001,Teacher,TEACHING,English,FULL_TIME,2024-06-01,TEACHER,ENG010,30,6,true,true,12 Gandhi Nagar Kasrawad,Priya Patel,9876500101,Spouse,M.A. English,Kendriya Vidyalaya Kasrawad,SBI,10001001001001,SBIN0030001,AABCP1234A,true
+Diya Patel,diya.patel@paramountkasrawad.edu,9876500002,TCH0002,Teacher,TEACHING,Hindi,FULL_TIME,2024-06-01,TEACHER,HIN010,30,6,true,true,14 Nehru Road Kasrawad,Ravi Patel,9876500102,Spouse,M.A. Hindi,Govt. HS Kasrawad,SBI,10001001001002,SBIN0030001,BBBCP1234B,true
+Rohan Patel,rohan.patel@paramountkasrawad.edu,9876500003,TCH0003,Teacher,TEACHING,Sanskrit,FULL_TIME,2024-06-01,TEACHER,SNK010,28,5,true,true,16 Tagore Colony Kasrawad,Meera Patel,9876500103,Spouse,M.A. Sanskrit,Saraswati Vidya Mandir,SBI,10001001001003,SBIN0030001,CCCCP1234C,true
+Ananya Patel,ananya.patel@paramountkasrawad.edu,9876500004,TCH0004,Teacher,TEACHING,Urdu,FULL_TIME,2024-06-01,TEACHER,URD010,28,5,true,true,18 Azad Nagar Kasrawad,Suresh Patel,9876500104,Father,M.A. Urdu,Madrasa Kasrawad,SBI,10001001001004,SBIN0030001,DDDCP1234D,true
+Arjun Patel,arjun.patel@paramountkasrawad.edu,9876500005,TCH0005,Teacher,TEACHING,Mathematics,FULL_TIME,2024-06-01,TEACHER,MTH010,35,7,true,true,20 Civil Lines Kasrawad,Sneha Patel,9876500105,Spouse,M.Sc. Mathematics,CBSE School Barwani,HDFC,20002002002001,HDFC0009999,EEECP1234E,true
+Meera Patel,meera.patel@paramountkasrawad.edu,9876500006,TCH0006,Teacher,TEACHING,Mathematics,FULL_TIME,2024-06-01,TEACHER,BMT010,30,6,true,true,22 Station Road Kasrawad,Anil Patel,9876500106,Spouse,M.Sc. Mathematics,Delhi Public School,HDFC,20002002002002,HDFC0009999,FFFCP1234F,true
+Kabir Patel,kabir.patel@paramountkasrawad.edu,9876500007,TCH0007,Teacher,TEACHING,Science,FULL_TIME,2024-06-01,TEACHER,SCI010,30,6,true,true,24 Indira Nagar Kasrawad,Rekha Patel,9876500107,Mother,M.Sc. Biology,Govt. School Badwani,SBI,10001001001007,SBIN0030001,GGGCP1234G,true
+Simran Patel,simran.patel@paramountkasrawad.edu,9876500008,TCH0008,Teacher,TEACHING,Social Science,FULL_TIME,2024-06-01,TEACHER,SSC010,28,5,true,true,26 Rajendra Nagar Kasrawad,Deepak Patel,9876500108,Spouse,M.A. History,Navodaya Vidyalaya,SBI,10001001001008,SBIN0030001,HHHCP1234H,true
+Yash Patel,yash.patel@paramountkasrawad.edu,9876500009,TCH0009,Teacher,TEACHING,History,FULL_TIME,2024-06-01,TEACHER,HIS010,28,5,true,true,28 MG Road Kasrawad,Kavya Patel,9876500109,Spouse,M.A. History,Eklavya Model School,SBI,10001001001009,SBIN0030001,IIICP1234I,true
+Riya Patel,riya.patel@paramountkasrawad.edu,9876500010,TCH0010,Teacher,TEACHING,Geography,FULL_TIME,2024-06-01,TEACHER,GEO010,28,5,true,true,30 Laxmi Nagar Kasrawad,Naresh Patel,9876500110,Father,M.Sc. Geography,Govt. School Khargone,HDFC,20002002002010,HDFC0009999,JJJCP1234J,true
+Ishaan Patel,ishaan.patel@paramountkasrawad.edu,9876500011,TCH0011,Teacher,TEACHING,Political Science,FULL_TIME,2024-06-01,TEACHER,POL010,28,5,true,true,32 Shanti Nagar Kasrawad,Anjali Patel,9876500111,Spouse,M.A. Political Science,Govt. PG College Kasrawad,SBI,10001001001011,SBIN0030001,KKKCP1234K,true
+Sara Patel,sara.patel@paramountkasrawad.edu,9876500012,TCH0012,Teacher,TEACHING,Economics,FULL_TIME,2024-06-01,TEACHER,ECO010,28,5,true,true,34 Suraj Nagar Kasrawad,Vikash Patel,9876500112,Spouse,M.A. Economics,Commerce College Barwani,SBI,10001001001012,SBIN0030001,LLLCP1234L,true
+Vihaan Patel,vihaan.patel@paramountkasrawad.edu,9876500013,TCH0013,Teacher,TEACHING,Civics,FULL_TIME,2024-06-01,TEACHER,CIV010,28,5,true,false,36 Ashok Nagar Kasrawad,Pooja Patel,9876500113,Spouse,M.A. Political Science,Secondary School Sendhwa,SBI,10001001001013,SBIN0030001,MMMCP1234M,true
+Aditi Patel,aditi.patel@paramountkasrawad.edu,9876500014,TCH0014,Teacher,TEACHING,EVS,FULL_TIME,2024-06-01,TEACHER,EVS005,24,5,true,true,38 Ram Nagar Kasrawad,Dinesh Patel,9876500114,Father,B.Sc. Environmental Science,Primary School Kasrawad,SBI,10001001001014,SBIN0030001,NNNCP1234N,true
+Kunal Patel,kunal.patel@paramountkasrawad.edu,9876500015,TCH0015,Teacher,TEACHING,GK,FULL_TIME,2024-06-01,TEACHER,GKE008,20,4,true,true,40 Krishna Nagar Kasrawad,Sunita Patel,9876500115,Spouse,B.A.,Bal Vidya Mandir,SBI,10001001001015,SBIN0030001,OOOCP1234O,true
+Nisha Patel,nisha.patel@paramountkasrawad.edu,9876500016,TCH0016,Teacher,TEACHING,Computer,FULL_TIME,2024-06-01,TEACHER,CAP008,20,4,true,true,42 Shivaji Nagar Kasrawad,Ramesh Patel,9876500116,Father,BCA,IT Institute Indore,SBI,10001001001016,SBIN0030001,PPPCP1234P,true
+Rahul Patel,rahul.patel@paramountkasrawad.edu,9876500017,TCH0017,Teacher,TEACHING,AI,FULL_TIME,2024-06-01,TEACHER,AI0010,20,4,true,true,44 Vivekanand Nagar Kasrawad,Geeta Patel,9876500117,Mother,B.Tech. CS,Coding Bootcamp Indore,HDFC,20002002002017,HDFC0009999,QQQCP1234Q,true
+Pooja Patel,pooja.patel@paramountkasrawad.edu,9876500018,TCH0018,Teacher,TEACHING,IT,FULL_TIME,2024-06-01,TEACHER,ITO010,20,4,true,true,46 Ambedkar Nagar Kasrawad,Sanjay Patel,9876500118,Spouse,MCA,NIIT Bhopal,SBI,10001001001018,SBIN0030001,RRRCP1234R,true
+Imran Patel,imran.patel@paramountkasrawad.edu,9876500019,TCH0019,Teacher,TEACHING,Computer Science,FULL_TIME,2024-06-01,TEACHER,CSC012,25,5,true,true,48 Sai Nagar Kasrawad,Faiza Patel,9876500119,Spouse,M.Sc. CS,Computer School Barwani,SBI,10001001001019,SBIN0030001,SSSCP1234S,true
+Seema Patel,seema.patel@paramountkasrawad.edu,9876500020,TCH0020,Teacher,TEACHING,IP And CS,FULL_TIME,2024-06-01,TEACHER,IPR012,25,5,true,true,50 Saraswati Vihar Kasrawad,Ajay Patel,9876500120,Spouse,M.Sc. IT,Symbiosis Institute,SBI,10001001001020,SBIN0030001,TTTCP1234T,true
+Neha Patel,neha.patel@paramountkasrawad.edu,9876500021,TCH0021,Teacher,TEACHING,Physics,FULL_TIME,2024-06-01,TEACHER,PHY012,30,6,true,true,52 Mahadev Nagar Kasrawad,Rakesh Patel,9876500121,Spouse,M.Sc. Physics,Science College Barwani,HDFC,20002002002021,HDFC0009999,UUUCP1234U,true
+Sanjay Patel,sanjay.patel@paramountkasrawad.edu,9876500022,TCH0022,Teacher,TEACHING,Chemistry,FULL_TIME,2024-06-01,TEACHER,CHE012,30,6,true,true,54 Tilak Nagar Kasrawad,Kavita Patel,9876500122,Spouse,M.Sc. Chemistry,Science College Indore,SBI,10001001001022,SBIN0030001,VVVCP1234V,true
+Priya Patel,priya.patel@paramountkasrawad.edu,9876500023,TCH0023,Teacher,TEACHING,Biology,FULL_TIME,2024-06-01,TEACHER,BIO012,30,6,true,true,56 Subhash Nagar Kasrawad,Hemant Patel,9876500123,Spouse,M.Sc. Botany,Bio Lab Institute,SBI,10001001001023,SBIN0030001,WWWCP1234W,true
+Vikram Patel,vikram.patel@paramountkasrawad.edu,9876500024,TCH0024,Teacher,TEACHING,Botany,FULL_TIME,2024-06-01,TEACHER,BTN012,28,5,true,false,58 Sadar Road Kasrawad,Asha Patel,9876500124,Spouse,M.Sc. Botany,Agriculture College Barwani,SBI,10001001001024,SBIN0030001,XXXCP1234X,true
+Sonia Patel,sonia.patel@paramountkasrawad.edu,9876500025,TCH0025,Teacher,TEACHING,Accountancy,FULL_TIME,2024-06-01,TEACHER,ACT012,28,5,true,true,60 Sitaram Nagar Kasrawad,Nitin Patel,9876500125,Spouse,M.Com.,Commerce College Barwani,SBI,10001001001025,SBIN0030001,YYYCP1234Y,true
+Aarav Sharma,aarav.sharma@paramountkasrawad.edu,9876500026,TCH0026,Teacher,TEACHING,Accountancy,FULL_TIME,2024-06-01,TEACHER,ACT011,28,5,true,true,62 Patel Colony Kasrawad,Renu Sharma,9876500126,Spouse,M.Com.,Commerce Inst. Indore,SBI,10001001001026,SBIN0030001,ZZZCP1234Z,true
+Diya Sharma,diya.sharma@paramountkasrawad.edu,9876500027,TCH0027,Teacher,TEACHING,Business Studies,FULL_TIME,2024-06-01,TEACHER,BST012,28,5,true,true,64 Sharma Nagar Kasrawad,Vivek Sharma,9876500127,Spouse,M.B.A.,Business School Jabalpur,HDFC,20002002002027,HDFC0009999,AAACS1234A,true
+Rohan Sharma,rohan.sharma@paramountkasrawad.edu,9876500028,TCH0028,Teacher,TEACHING,Entrepreneurship,FULL_TIME,2024-06-01,TEACHER,ENT012,25,5,true,true,66 Blue Bird Colony Kasrawad,Deepika Sharma,9876500128,Spouse,M.B.A.,Entrepreneurship Cell IIT Indore,SBI,10001001001028,SBIN0030001,BBBCS1234B,true
+Ananya Sharma,ananya.sharma@paramountkasrawad.edu,9876500029,TCH0029,Teacher,TEACHING,Legal Studies,FULL_TIME,2024-06-01,TEACHER,LST012,25,5,true,true,68 Rose Garden Kasrawad,Tarun Sharma,9876500129,Spouse,LLB,Law College Indore,SBI,10001001001029,SBIN0030001,CCCCS1234C,true
+Arjun Sharma,arjun.sharma@paramountkasrawad.edu,9876500030,TCH0030,Teacher,TEACHING,Psychology,FULL_TIME,2024-06-01,TEACHER,PSY012,25,5,true,true,70 Moon Colony Kasrawad,Isha Sharma,9876500130,Spouse,M.A. Psychology,Clinical Psych. Inst.,SBI,10001001001030,SBIN0030001,DDDCS1234D,true
+Meera Sharma,meera.sharma@paramountkasrawad.edu,9876500031,TCH0031,Teacher,TEACHING,Sociology,FULL_TIME,2024-06-01,TEACHER,SOC012,25,5,true,true,72 Sun Colony Kasrawad,Rahul Sharma,9876500131,Spouse,M.A. Sociology,Soc. Inst. Bhopal,SBI,10001001001031,SBIN0030001,EEECS1234E,true
+Kabir Sharma,kabir.sharma@paramountkasrawad.edu,9876500032,TCH0032,Teacher,TEACHING,Home Science,FULL_TIME,2024-06-01,TEACHER,HSC012,25,5,true,true,74 Star Colony Kasrawad,Prachi Sharma,9876500132,Spouse,M.Sc. Home Science,Home Ec. College,SBI,10001001001032,SBIN0030001,FFFCS1234F,true
+Simran Sharma,simran.sharma@paramountkasrawad.edu,9876500033,TCH0033,Teacher,TEACHING,Physical Education,FULL_TIME,2024-06-01,TEACHER,PED012,25,5,false,true,76 Garden View Kasrawad,Manish Sharma,9876500133,Spouse,M.P.Ed.,NIS Patiala Camp,SBI,10001001001033,SBIN0030001,GGGCS1234G,true
+Yash Sharma,yash.sharma@paramountkasrawad.edu,9876500034,TCH0034,Teacher,TEACHING,HP And Ed.,FULL_TIME,2024-06-01,TEACHER,HPE005,20,4,false,true,78 Lake View Kasrawad,Divya Sharma,9876500134,Spouse,M.P.Ed.,Sports College Gwalior,SBI,10001001001034,SBIN0030001,HHHCS1234H,true
+Riya Sharma,riya.sharma@paramountkasrawad.edu,9876500035,TCH0035,Teacher,TEACHING,Yoga,FULL_TIME,2024-06-01,TEACHER,YOG010,20,4,true,true,80 Park Road Kasrawad,Nikhil Sharma,9876500135,Spouse,B.A. Yoga,Yoga Inst. Rishikesh,SBI,10001001001035,SBIN0030001,IIICS1234I,true
+Ishaan Sharma,ishaan.sharma@paramountkasrawad.edu,9876500036,TCH0036,Teacher,TEACHING,Arts And Crafts,FULL_TIME,2024-06-01,TEACHER,FAR012,20,4,true,true,82 Farm Road Kasrawad,Nandini Sharma,9876500136,Mother,B.Sc. Agriculture,Agriculture Inst.,SBI,10001001001036,SBIN0030001,JJJCS1234J,true
+Sara Sharma,sara.sharma@paramountkasrawad.edu,9876500037,TCH0037,Teacher,TEACHING,Music,FULL_TIME,2024-06-01,TEACHER,MUS012,20,4,true,true,84 Music Colony Kasrawad,Alok Sharma,9876500137,Father,B.Mus.,Music Academy Indore,SBI,10001001001037,SBIN0030001,KKKCS1234K,true
+Vihaan Sharma,vihaan.sharma@paramountkasrawad.edu,9876500038,TCH0038,Teacher,TEACHING,Dance,FULL_TIME,2024-06-01,TEACHER,DAN012,20,4,true,true,86 Arts Colony Kasrawad,Pooja Sharma,9876500138,Spouse,B.A. Dance,Kathak Kendra Delhi,SBI,10001001001038,SBIN0030001,LLLCS1234L,true
+Aditi Sharma,aditi.sharma@paramountkasrawad.edu,9876500039,TCH0039,Teacher,TEACHING,Fine Arts,FULL_TIME,2024-06-01,TEACHER,PNT012,20,4,true,true,88 Painting Nagar Kasrawad,Sunil Sharma,9876500139,Father,B.F.A.,Art College Baroda,HDFC,20002002002039,HDFC0009999,MMMCS1234M,true
+Kunal Sharma,kunal.sharma@paramountkasrawad.edu,9876500040,TCH0040,Teacher,TEACHING,Work Education,FULL_TIME,2024-06-01,TEACHER,WED010,18,3,true,true,90 Craft Colony Kasrawad,Sunita Sharma,9876500140,Spouse,B.Voc.,Vocational Inst. Kasrawad,SBI,10001001001040,SBIN0030001,NNNCS1234N,true
+Nisha Sharma,nisha.sharma@paramountkasrawad.edu,9876500041,TCH0041,Teacher,TEACHING,Value Education,FULL_TIME,2024-06-01,TEACHER,VED010,18,3,true,true,92 Moral Lane Kasrawad,Ravi Sharma,9876500141,Spouse,B.A.,Dharmic Inst. Ujjain,SBI,10001001001041,SBIN0030001,OOOKS1234O,true
+Rahul Sharma,rahul.sharma@paramountkasrawad.edu,9876500042,TCH0042,Teacher,TEACHING,French,FULL_TIME,2024-06-01,TEACHER,FRE010,25,5,true,true,94 French Colony Kasrawad,Anita Sharma,9876500142,Spouse,M.A. French,Alliance Francaise Bhopal,SBI,10001001001042,SBIN0030001,PPPS1234P,true
+Pooja Sharma,pooja.sharma@paramountkasrawad.edu,9876500043,TCH0043,Teacher,TEACHING,German,FULL_TIME,2024-06-01,TEACHER,GER010,25,5,true,true,96 German Colony Kasrawad,Manoj Sharma,9876500143,Spouse,M.A. German,Goethe Institut Indore,SBI,10001001001043,SBIN0030001,QQQS1234Q,true
+Imran Sharma,imran.sharma@paramountkasrawad.edu,9876500044,TCH0044,Teacher,TEACHING,Punjabi,FULL_TIME,2024-06-01,TEACHER,PNJ010,25,5,true,true,98 Punjabi Bagh Kasrawad,Gurpreet Kaur,9876500144,Spouse,M.A. Punjabi,Punjabi Univ. Patiala,SBI,10001001001044,SBIN0030001,RRRS1234R,true
+Seema Sharma,seema.sharma@paramountkasrawad.edu,9876500045,TCH0045,Teacher,TEACHING,English,FULL_TIME,2024-06-01,TEACHER,ENG008,28,5,true,true,100 New Colony Kasrawad,Rohit Sharma,9876500145,Spouse,M.A. English,English Medium School Barwani,SBI,10001001001045,SBIN0030001,SSSS1234S,true
+Neha Sharma,neha.sharma@paramountkasrawad.edu,9876500046,TCH0046,Teacher,TEACHING,Hindi,FULL_TIME,2024-06-01,TEACHER,HIN008,28,5,true,true,102 Model Colony Kasrawad,Arvind Sharma,9876500146,Spouse,M.A. Hindi,Govt. School Badwani,SBI,10001001001046,SBIN0030001,TTTS1234T,true
+Sanjay Sharma,sanjay.sharma@paramountkasrawad.edu,9876500047,TCH0047,Teacher,TEACHING,Mathematics,FULL_TIME,2024-06-01,TEACHER,MTH008,32,6,true,true,104 Civil Lines Kasrawad,Bhavna Sharma,9876500147,Spouse,M.Sc. Maths,Maths Inst. Bhopal,HDFC,20002002002047,HDFC0009999,UUUS1234U,true
+Priya Sharma,priya.sharma@paramountkasrawad.edu,9876500048,TCH0048,Teacher,TEACHING,Science,FULL_TIME,2024-06-01,TEACHER,SCI008,30,6,true,true,106 Green Park Kasrawad,Ashish Sharma,9876500148,Spouse,M.Sc. Science,Science School Barwani,SBI,10001001001048,SBIN0030001,VVVS1234V,true
+Vikram Sharma,vikram.sharma@paramountkasrawad.edu,9876500049,TCH0049,Teacher,TEACHING,Social Science,FULL_TIME,2024-06-01,TEACHER,SSC008,28,5,true,true,108 Blue Bell Colony Kasrawad,Kiran Sharma,9876500149,Spouse,M.A. SST,Govt. HS Barwani,SBI,10001001001049,SBIN0030001,WWWS1234W,true
+Sonia Sharma,sonia.sharma@paramountkasrawad.edu,9876500050,TCH0050,Teacher,TEACHING,Physics,FULL_TIME,2024-06-01,TEACHER,PHY011,30,6,true,true,110 Rainbow Colony Kasrawad,Dhruv Sharma,9876500150,Spouse,M.Sc. Physics,Physics Lab Institute,SBI,10001001001050,SBIN0030001,XXXS1234X,true
+Aarav Verma,aarav.verma@paramountkasrawad.edu,9876500051,TCH0051,Teacher,TEACHING,Chemistry,FULL_TIME,2024-06-01,TEACHER,CHE011,30,6,true,true,112 Verma Colony Kasrawad,Reena Verma,9876500151,Spouse,M.Sc. Chemistry,Chem. College Barwani,SBI,10001001001051,SBIN0030001,YYYV1234Y,true
+Diya Verma,diya.verma@paramountkasrawad.edu,9876500052,TCH0052,Teacher,TEACHING,Biology,FULL_TIME,2024-06-01,TEACHER,BIO011,30,6,true,true,114 Verma Nagar Kasrawad,Atul Verma,9876500152,Spouse,M.Sc. Zoology,Zoology Inst. Jabalpur,SBI,10001001001052,SBIN0030001,ZZZV1234Z,true
+Rohan Verma,rohan.verma@paramountkasrawad.edu,9876500053,TCH0053,Teacher,TEACHING,Computer Science,FULL_TIME,2024-06-01,TEACHER,CSC011,25,5,true,true,116 Tech Nagar Kasrawad,Ritu Verma,9876500153,Spouse,M.Sc. CS,NIT Bhopal,HDFC,20002002002053,HDFC0009999,AAAV1234A,true
+Ananya Verma,ananya.verma@paramountkasrawad.edu,9876500054,TCH0054,Teacher,TEACHING,EVS,FULL_TIME,2024-06-01,TEACHER,EVS004,20,4,true,true,118 Flower Colony Kasrawad,Sachin Verma,9876500154,Spouse,B.Sc. Environmental Science,Eco Institute Kasrawad,SBI,10001001001054,SBIN0030001,BBBV1234B,true
+Arjun Verma,arjun.verma@paramountkasrawad.edu,9876500055,TCH0055,Teacher,TEACHING,English,FULL_TIME,2024-06-01,TEACHER,ENG004,20,4,true,true,120 Green Lane Kasrawad,Monika Verma,9876500155,Spouse,B.A. English,Primary School Kasrawad,SBI,10001001001055,SBIN0030001,CCCV1234C,true
+Meera Verma,meera.verma@paramountkasrawad.edu,9876500056,TCH0056,Teacher,TEACHING,Hindi,FULL_TIME,2024-06-01,TEACHER,HIN004,20,4,true,true,122 Gulmohar Colony Kasrawad,Suresh Verma,9876500156,Father,B.A. Hindi,Hindi School Badwani,SBI,10001001001056,SBIN0030001,DDDV1234D,true
+Kabir Verma,kabir.verma@paramountkasrawad.edu,9876500057,TCH0057,Teacher,TEACHING,Mathematics,FULL_TIME,2024-06-01,TEACHER,MTH004,20,4,true,true,124 Jasmine Colony Kasrawad,Nita Verma,9876500157,Spouse,B.Sc. Maths,Maths Coaching Kasrawad,SBI,10001001001057,SBIN0030001,EEEEV1234E,true
+Simran Verma,simran.verma@paramountkasrawad.edu,9876500058,TCH0058,Teacher,TEACHING,EVS,FULL_TIME,2024-06-01,TEACHER,EVS005,22,4,true,true,126 Orchid Colony Kasrawad,Kamlesh Verma,9876500158,Spouse,B.Sc. Environmental Science,Govt. Primary School,SBI,10001001001058,SBIN0030001,FFFV1234F,true
+Yash Verma,yash.verma@paramountkasrawad.edu,9876500059,TCH0059,Teacher,TEACHING,English,FULL_TIME,2024-06-01,TEACHER,ENG006,22,4,true,true,128 Tulip Colony Kasrawad,Leela Verma,9876500159,Mother,B.A. English,Convent School Barwani,SBI,10001001001059,SBIN0030001,GGGV1234G,true
+Riya Verma,riya.verma@paramountkasrawad.edu,9876500060,TCH0060,Teacher,TEACHING,Mathematics,FULL_TIME,2024-06-01,TEACHER,MTH006,22,4,true,true,130 Lily Colony Kasrawad,Rajesh Verma,9876500160,Spouse,B.Sc. Maths,Maths School Barwani,SBI,10001001001060,SBIN0030001,HHHV1234H,true
+Sara Singh,sara.singh@paramountkasrawad.edu,9876400061,EMP0061,Principal,ADMIN,Administration,FULL_TIME,2024-06-01,PRINCIPAL,,,,,,132 Singh Nagar Kasrawad,Pradeep Singh,9876400161,Spouse,M.Ed. Administration,State Education Dept.,SBI,10001001001061,SBIN0030001,IIIS1234I,true
+Vihaan Singh,vihaan.singh@paramountkasrawad.edu,9876400062,EMP0062,Vice Principal,ADMIN,Administration,FULL_TIME,2024-06-01,VICE_PRINCIPAL,,,,,,134 Singh Colony Kasrawad,Meena Singh,9876400162,Spouse,M.Ed.,Govt. School Barwani,SBI,10001001001062,SBIN0030001,JJJS1234J,true
+Aditi Singh,aditi.singh@paramountkasrawad.edu,9876400063,EMP0063,School Admin,ADMIN,Administration,FULL_TIME,2024-06-01,SCHOOL_ADMIN,,,,,,136 Admin Nagar Kasrawad,Lalit Singh,9876400163,Spouse,B.Com.,Commerce College Barwani,SBI,10001001001063,SBIN0030001,KKKS1234K,true
+Kunal Singh,kunal.singh@paramountkasrawad.edu,9876400064,EMP0064,Accountant,NON_TEACHING,Accounts,FULL_TIME,2024-06-01,ACCOUNTANT,,,,,,138 Accounts Colony Kasrawad,Anita Singh,9876400164,Spouse,B.Com. Accounts,CA Firm Kasrawad,SBI,10001001001064,SBIN0030001,LLLS1234K,true
+Nisha Singh,nisha.singh@paramountkasrawad.edu,9876400065,EMP0065,Head of Department,TEACHING,Science,FULL_TIME,2024-06-01,HOD,,,,,,140 HOD Colony Kasrawad,Rajiv Singh,9876400165,Spouse,M.Sc.,Science College Barwani,SBI,10001001001065,SBIN0030001,MMMS1234M,true
+Rahul Singh,rahul.singh@paramountkasrawad.edu,9876400066,EMP0066,Principal,ADMIN,Administration,FULL_TIME,2024-06-01,PRINCIPAL,,,,,,142 Green Colony Kasrawad,Bharti Singh,9876400166,Spouse,M.Ed.,Govt. HS Kasrawad,SBI,10001001001066,SBIN0030001,NNNS1234N,true
+Pooja Singh,pooja.singh@paramountkasrawad.edu,9876400067,EMP0067,Vice Principal,ADMIN,Administration,FULL_TIME,2024-06-01,VICE_PRINCIPAL,,,,,,144 Blue Colony Kasrawad,Vikas Singh,9876400167,Spouse,M.Ed.,Navodaya School,SBI,10001001001067,SBIN0030001,OOOS1234O,true
+Imran Singh,imran.singh@paramountkasrawad.edu,9876400068,EMP0068,School Admin,ADMIN,Administration,FULL_TIME,2024-06-01,SCHOOL_ADMIN,,,,,,146 Red Colony Kasrawad,Fatima Singh,9876400168,Spouse,B.A.,Govt. College Kasrawad,SBI,10001001001068,SBIN0030001,PPPSK1234P,true
+Seema Singh,seema.singh@paramountkasrawad.edu,9876400069,EMP0069,Accountant,NON_TEACHING,Accounts,FULL_TIME,2024-06-01,ACCOUNTANT,,,,,,148 White Colony Kasrawad,Deepak Singh,9876400169,Spouse,M.Com.,Commerce Institute Indore,SBI,10001001001069,SBIN0030001,QQQSK1234Q,true
+Neha Singh,neha.singh@paramountkasrawad.edu,9876400070,EMP0070,Head of Department,TEACHING,Mathematics,FULL_TIME,2024-06-01,HOD,,,,,,150 Grey Colony Kasrawad,Sunil Singh,9876400170,Spouse,M.Sc. Maths,Maths Institute Bhopal,SBI,10001001001070,SBIN0030001,RRRSK1234R,true
+Sanjay Singh,sanjay.singh@paramountkasrawad.edu,9876400071,EMP0071,Principal,ADMIN,Administration,FULL_TIME,2024-06-01,PRINCIPAL,,,,,,152 Royal Colony Kasrawad,Pushpa Singh,9876400171,Spouse,Ph.D. Education,State University Bhopal,SBI,10001001001071,SBIN0030001,SSSSK1234S,true
+Priya Singh,priya.singh@paramountkasrawad.edu,9876400072,EMP0072,Vice Principal,ADMIN,Administration,FULL_TIME,2024-06-01,VICE_PRINCIPAL,,,,,,154 Imperial Colony Kasrawad,Mukesh Singh,9876400172,Spouse,M.Ed.,Central School Kasrawad,SBI,10001001001072,SBIN0030001,TTTSK1234T,true
