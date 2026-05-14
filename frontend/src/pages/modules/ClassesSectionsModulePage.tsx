@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ModulePage, type StatusLevel } from '../../components/module/ModulePage';
 import { SavedClassesSectionsCatalogPanel } from '../../components/catalog/SavedClassesSectionsCatalogPanel';
 import { api } from '../../lib/api';
@@ -36,15 +36,27 @@ const INITIAL_ROWS: GradeSectionsRow[] = [{ gradeLevel: '', sectionsText: '' }];
 
 export function ClassesSectionsModulePage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabFromUrl = (searchParams.get('tab') ?? 'browse') as 'browse' | 'add';
-  const [tab, setTab] = useState<'browse' | 'add'>(tabFromUrl);
+  const tabFromUrl = (searchParams.get('tab') ?? 'browse') as 'browse' | 'add' | 'generate';
+  const [tab, setTab] = useState<'browse' | 'add' | 'generate'>(tabFromUrl);
   useEffect(() => setTab(tabFromUrl), [tabFromUrl]);
 
   const [gradeRows, setGradeRows] = useState<GradeSectionsRow[]>(() => INITIAL_ROWS.map((r) => ({ ...r })));
   const [defaultCapacity, setDefaultCapacity] = useState<number | ''>('');
 
+  // Bulk generator state (fromGrade / toGrade / same sections or per-grade)
+  const [fromGrade, setFromGrade] = useState(1);
+  const [toGrade, setToGrade] = useState(12);
+  const [sectionsText, setSectionsText] = useState('A,B');
+  const [usePerGradeSections, setUsePerGradeSections] = useState(false);
+  const [perGradeRows, setPerGradeRows] = useState<{ gradeLevel: number; sectionsText: string }[]>([
+    { gradeLevel: 1, sectionsText: 'A,B' },
+  ]);
+  const [bulkDefaultCapacity, setBulkDefaultCapacity] = useState<number | ''>('');
+  const [bulkResult, setBulkResult] = useState<{ createdCount: number; skippedExistingCount: number } | null>(null);
+
   const invalidate = useApiTags();
   const recordChange = useImpactStore((s) => s.recordChange);
+  const qc = useQueryClient();
 
   const cg = useQuery({
     queryKey: ['class-groups'],
@@ -129,7 +141,53 @@ export function ClassesSectionsModulePage() {
     onError: (e) => toast.error('Could not create sections', formatApiError(e)),
   });
 
-  const setTabUrl = (next: 'browse' | 'add') => {
+  const generateClassesBulk = useMutation({
+    mutationFn: async () => {
+      const sections = sectionsText
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const gradeSections = usePerGradeSections
+        ? perGradeRows
+            .map((r) => ({
+              gradeLevel: Number(r.gradeLevel),
+              sections: r.sectionsText
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            }))
+            .filter((r) => Number.isFinite(r.gradeLevel) && r.sections.length > 0)
+        : null;
+      return (
+        await api.post<{ createdCount: number; createdCodes: string[]; skippedExistingCount: number }>(
+          '/api/v1/onboarding/classes/generate',
+          {
+            fromGrade,
+            toGrade,
+            sections,
+            gradeSections,
+            defaultCapacity: bulkDefaultCapacity === '' ? null : bulkDefaultCapacity,
+          },
+        )
+      ).data;
+    },
+    onSuccess: async (data) => {
+      setBulkResult({ createdCount: data.createdCount, skippedExistingCount: data.skippedExistingCount });
+      toast.success(
+        'Classes generated',
+        `Created ${data.createdCount} · Skipped ${data.skippedExistingCount} existing`,
+      );
+      await qc.invalidateQueries({ queryKey: ['class-groups'] });
+      await qc.invalidateQueries({ queryKey: ['class-groups-catalog'] });
+      await invalidate(['classes']);
+    },
+    onError: (e) => {
+      setBulkResult(null);
+      toast.error('Generate failed', formatApiError(e));
+    },
+  });
+
+  const setTabUrl = (next: 'browse' | 'add' | 'generate') => {
     const sp = new URLSearchParams(searchParams);
     if (next === 'browse') sp.delete('tab');
     else sp.set('tab', next);
@@ -144,6 +202,9 @@ export function ClassesSectionsModulePage() {
       <Link to="/app/classes-sections/bulk-import" className="btn secondary">
         Bulk import
       </Link>
+      <button type="button" className="btn secondary" onClick={() => setTabUrl('generate')}>
+        🔢 Bulk generate
+      </button>
       <button type="button" className="btn" onClick={() => setTabUrl('add')}>
         + Add class
       </button>
@@ -153,12 +214,13 @@ export function ClassesSectionsModulePage() {
   return (
     <ModulePage
       title="Classes & sections"
-      subtitle="Browse and edit saved sections below. Use Add new for the grade + sections flow, or Bulk import to upload a CSV."
+      subtitle="Browse and edit saved sections below. Use Add new for the grade + sections flow, Bulk generate for quick range creation, or Bulk import to upload a CSV."
       status={status}
       headerActions={headerActions}
       tabs={[
         { id: 'browse', label: 'Browse', badge: list.length || null },
         { id: 'add', label: 'Add new' },
+        { id: 'generate', label: 'Bulk generate' },
       ]}
       activeTabId={tab}
       tabHrefBase="/app/classes-sections"
@@ -171,6 +233,28 @@ export function ClassesSectionsModulePage() {
           setDefaultCapacity={setDefaultCapacity}
           onGenerate={() => createSections.mutate()}
           busy={createSections.isPending}
+        />
+      ) : null}
+
+      {tab === 'generate' ? (
+        <BulkGenerateClassesCard
+          fromGrade={fromGrade}
+          setFromGrade={setFromGrade}
+          toGrade={toGrade}
+          setToGrade={setToGrade}
+          sectionsText={sectionsText}
+          setSectionsText={setSectionsText}
+          usePerGradeSections={usePerGradeSections}
+          setUsePerGradeSections={setUsePerGradeSections}
+          perGradeRows={perGradeRows}
+          setPerGradeRows={setPerGradeRows}
+          defaultCapacity={bulkDefaultCapacity}
+          setDefaultCapacity={setBulkDefaultCapacity}
+          onGenerate={() => generateClassesBulk.mutate()}
+          busy={generateClassesBulk.isPending}
+          result={bulkResult}
+          isError={generateClassesBulk.isError}
+          error={generateClassesBulk.error}
         />
       ) : null}
 
@@ -210,7 +294,7 @@ function AddGradesSectionsCard({
     <div className="card stack" style={{ gap: 12, padding: 12, border: '1px solid rgba(15,23,42,0.10)', borderRadius: 12 }}>
       <div style={{ fontWeight: 950, fontSize: 14 }}>Add grades & sections</div>
       <p className="muted" style={{ fontSize: 13, margin: 0 }}>
-        Same grid as the setup wizard — only{' '}
+        Add individual grade rows with their sections.{' '}
         <strong style={{ fontWeight: 850, color: 'var(--color-text)' }}>Grade</strong> and{' '}
         <strong style={{ fontWeight: 850, color: 'var(--color-text)' }}>Sections (comma-separated)</strong> matter per row.
         Empty grades or rows without sections are skipped. Codes become <code>{"{grade}-{section}"}</code>.
@@ -302,3 +386,201 @@ function AddGradesSectionsCard({
     </div>
   );
 }
+
+function BulkGenerateClassesCard({
+  fromGrade,
+  setFromGrade,
+  toGrade,
+  setToGrade,
+  sectionsText,
+  setSectionsText,
+  usePerGradeSections,
+  setUsePerGradeSections,
+  perGradeRows,
+  setPerGradeRows,
+  defaultCapacity,
+  setDefaultCapacity,
+  onGenerate,
+  busy,
+  result,
+  isError,
+  error,
+}: {
+  fromGrade: number;
+  setFromGrade: (v: number) => void;
+  toGrade: number;
+  setToGrade: (v: number) => void;
+  sectionsText: string;
+  setSectionsText: (v: string) => void;
+  usePerGradeSections: boolean;
+  setUsePerGradeSections: (v: boolean) => void;
+  perGradeRows: { gradeLevel: number; sectionsText: string }[];
+  setPerGradeRows: (fn: (p: { gradeLevel: number; sectionsText: string }[]) => { gradeLevel: number; sectionsText: string }[]) => void;
+  defaultCapacity: number | '';
+  setDefaultCapacity: (v: number | '') => void;
+  onGenerate: () => void;
+  busy: boolean;
+  result: { createdCount: number; skippedExistingCount: number } | null;
+  isError: boolean;
+  error: unknown;
+}) {
+  return (
+    <div className="card stack" style={{ gap: 14, padding: 12, border: '1px solid rgba(15,23,42,0.10)', borderRadius: 12 }}>
+      <div style={{ fontWeight: 950, fontSize: 14 }}>Bulk generate classes by grade range</div>
+      <p className="muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.55 }}>
+        Generate section groups like <strong>10-A</strong>, <strong>10-B</strong>… across a grade range. This is
+        idempotent — existing class groups are skipped.
+      </p>
+
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <div className="stack" style={{ flex: '1 1 180px' }}>
+          <label className="muted" style={{ fontSize: 12, fontWeight: 800 }}>From grade</label>
+          <input
+            type="number"
+            min={1}
+            max={12}
+            value={fromGrade}
+            onChange={(e) => setFromGrade(Number(e.target.value))}
+          />
+        </div>
+        <div className="stack" style={{ flex: '1 1 180px' }}>
+          <label className="muted" style={{ fontSize: 12, fontWeight: 800 }}>To grade</label>
+          <input
+            type="number"
+            min={1}
+            max={12}
+            value={toGrade}
+            onChange={(e) => setToGrade(Number(e.target.value))}
+          />
+        </div>
+        <div className="stack" style={{ flex: '1 1 200px' }}>
+          <label className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Default capacity (optional)</label>
+          <input
+            type="number"
+            min={1}
+            value={defaultCapacity}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDefaultCapacity(v === '' ? '' : Number(v));
+            }}
+            placeholder="40"
+          />
+        </div>
+      </div>
+
+      <div className="stack" style={{ flex: '2 1 260px', gap: 8 }}>
+        <span className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Sections mode</span>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className={!usePerGradeSections ? 'btn' : 'btn secondary'}
+            onClick={() => setUsePerGradeSections(false)}
+          >
+            Same for all grades
+          </button>
+          <button
+            type="button"
+            className={usePerGradeSections ? 'btn' : 'btn secondary'}
+            onClick={() => setUsePerGradeSections(true)}
+          >
+            Different per grade
+          </button>
+        </div>
+        <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+          Use "Different per grade" when Grade 11 has A–D but Grade 1 only has A–B.
+        </p>
+      </div>
+
+      {!usePerGradeSections ? (
+        <div className="stack" style={{ gap: 8 }}>
+          <label className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Sections (comma-separated)</label>
+          <input value={sectionsText} onChange={(e) => setSectionsText(e.target.value)} placeholder="A,B,C" />
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>Applies to all grades in the selected range.</p>
+        </div>
+      ) : (
+        <div className="stack" style={{ gap: 10 }}>
+          <div style={{ fontWeight: 800, fontSize: 13 }}>Per-grade sections</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Add only the grades you run. Grades without rows will be skipped.
+          </div>
+          <div className="stack" style={{ gap: 8 }}>
+            {perGradeRows.map((r, idx) => (
+              <div key={idx} className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div className="stack" style={{ flex: '0 0 140px', gap: 6 }}>
+                  <label className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Grade</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    value={r.gradeLevel}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setPerGradeRows((p) => p.map((x, j) => (j === idx ? { ...x, gradeLevel: v } : x)));
+                    }}
+                  />
+                </div>
+                <div className="stack" style={{ flex: '2 1 260px', gap: 6 }}>
+                  <label className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Sections (comma-separated)</label>
+                  <input
+                    value={r.sectionsText}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setPerGradeRows((p) => p.map((x, j) => (j === idx ? { ...x, sectionsText: v } : x)));
+                    }}
+                    placeholder="A,B,C"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => setPerGradeRows((p) => p.filter((_, j) => j !== idx))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => setPerGradeRows((p) => [...p, { gradeLevel: fromGrade, sectionsText: 'A' }])}
+            >
+              Add grade row
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <button
+          type="button"
+          className="btn"
+          disabled={busy || !Number.isFinite(fromGrade) || !Number.isFinite(toGrade)}
+          onClick={onGenerate}
+        >
+          {busy ? 'Generating…' : 'Generate classes'}
+        </button>
+        {result && !isError ? (
+          <div className="sms-alert sms-alert--success" style={{ flex: '1 1 280px' }}>
+            <div>
+              <div className="sms-alert__title">Classes generated</div>
+              <div className="sms-alert__msg">
+                Created {result.createdCount} · Skipped {result.skippedExistingCount} existing
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {isError ? (
+          <div className="sms-alert sms-alert--error" style={{ flex: '1 1 280px' }}>
+            <div>
+              <div className="sms-alert__title">Generate failed</div>
+              <div className="sms-alert__msg">{formatApiError(error)}</div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+

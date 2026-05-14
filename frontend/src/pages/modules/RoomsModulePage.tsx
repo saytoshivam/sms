@@ -10,6 +10,7 @@ import { useApiTags } from '../../lib/apiTags';
 import { useImpactStore } from '../../lib/impactStore';
 import { SavedRoomsCatalogPanel } from '../../components/catalog/SavedRoomsCatalogPanel';
 import { ROOM_TYPES, ROOM_TYPE_LABELS, type RoomVenueType } from '../../lib/roomVenueCompatibility';
+import { pageContent } from '../../lib/springPageContent';
 
 type LabType = 'PHYSICS' | 'CHEMISTRY' | 'COMPUTER' | 'OTHER';
 
@@ -52,13 +53,40 @@ const EMPTY_CREATE: CreateDraft = {
   floorName: '',
 };
 
+type BulkGenDraft = {
+  building: string;
+  floorNumber: number | '';
+  floorName: string;
+  type: RoomVenueType;
+  labType: LabType | null;
+  capacity: number | '';
+  bulkStart: number | '';
+  bulkEnd: number | '';
+};
+
+const EMPTY_BULK_GEN: BulkGenDraft = {
+  building: '',
+  floorNumber: '',
+  floorName: '',
+  type: 'STANDARD_CLASSROOM',
+  labType: null,
+  capacity: '',
+  bulkStart: 101,
+  bulkEnd: 110,
+};
+
+function isSchedulableLabType(t: RoomVenueType): boolean {
+  return t === 'SCIENCE_LAB' || t === 'COMPUTER_LAB';
+}
+
 export function RoomsModulePage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabFromUrl = (searchParams.get('tab') ?? 'browse') as 'browse' | 'add';
-  const [tab, setTab] = useState<'browse' | 'add'>(tabFromUrl);
+  const tabFromUrl = (searchParams.get('tab') ?? 'browse') as 'browse' | 'add' | 'generate';
+  const [tab, setTab] = useState<'browse' | 'add' | 'generate'>(tabFromUrl);
   useEffect(() => setTab(tabFromUrl), [tabFromUrl]);
 
   const [createDraft, setCreateDraft] = useState<CreateDraft>(EMPTY_CREATE);
+  const [bulkGenDraft, setBulkGenDraft] = useState<BulkGenDraft>(EMPTY_BULK_GEN);
 
   const invalidate = useApiTags();
   const recordChange = useImpactStore((s) => s.recordChange);
@@ -66,6 +94,11 @@ export function RoomsModulePage() {
   const rooms = useQuery({
     queryKey: ['rooms'],
     queryFn: async () => (await api.get<Page<Room>>('/api/rooms?size=1000&sort=building,asc')).data,
+  });
+
+  const roomsSaved = useQuery({
+    queryKey: ['rooms-saved'],
+    queryFn: async () => (await api.get<Page<Room>>('/api/rooms?page=0&size=500&sort=id,desc')).data,
   });
 
   const list: Room[] = useMemo(() => rooms.data?.content ?? [], [rooms.data]);
@@ -109,7 +142,74 @@ export function RoomsModulePage() {
     onError: (e) => toast.error('Could not add room', formatApiError(e)),
   });
 
-  const setTabUrl = (next: 'browse' | 'add') => {
+  const generateRooms = useMutation({
+    mutationFn: async (d: BulkGenDraft) => {
+      if (!d.building.trim()) throw new Error('Building is required.');
+      const start = Number(d.bulkStart);
+      const end = Number(d.bulkEnd);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) throw new Error('Start and end room numbers are required.');
+      const lo = Math.min(start, end);
+      const hi = Math.max(start, end);
+      if (hi - lo > 199) throw new Error('Range too large. Keep the range to 200 rooms or fewer at once.');
+
+      const savedList = pageContent(roomsSaved.data ?? null) as Room[];
+      const savedKeys = new Set(
+        savedList.map((r) => `${String(r.buildingName ?? r.building ?? '').trim().toLowerCase()}||${String(r.roomNumber ?? '').trim().toLowerCase()}`),
+      );
+
+      const building = d.building.trim();
+      const floorNumber = d.floorNumber === '' ? null : Math.trunc(Number(d.floorNumber));
+      const floorName = d.floorName.trim() || null;
+      const floor = [floorNumber != null ? String(floorNumber) : '', floorName ?? ''].filter(Boolean).join(' / ') || null;
+      const type = d.type;
+      const labType = isSchedulableLabType(type) ? (d.labType ?? 'OTHER') : null;
+      const capacity = d.capacity === '' ? null : Math.max(0, Math.trunc(Number(d.capacity)));
+
+      let created = 0;
+      let skipped = 0;
+      const newIds: number[] = [];
+
+      for (let n = lo; n <= hi; n++) {
+        const roomNumber = String(n);
+        const dupKey = `${building.toLowerCase()}||${roomNumber.toLowerCase()}`;
+        if (savedKeys.has(dupKey)) {
+          skipped++;
+          continue;
+        }
+        const body = { building, roomNumber, type, labType, capacity, floorNumber, floorName, floor };
+        try {
+          const res = await api.post<Room>('/api/rooms', body);
+          newIds.push(res.data.id);
+          created++;
+          savedKeys.add(dupKey);
+        } catch {
+          skipped++;
+        }
+      }
+
+      return { created, skipped, newIds };
+    },
+    onSuccess: async ({ created, skipped, newIds }) => {
+      if (created === 0 && skipped > 0) {
+        toast.info('No new rooms', `All ${skipped} room(s) already exist.`);
+      } else {
+        toast.success('Rooms generated', `${created} created · ${skipped > 0 ? `${skipped} skipped` : 'none skipped'}`);
+      }
+      if (newIds.length) {
+        recordChange({
+          id: `rooms:bulk-gen:${newIds[0]}-${newIds.length}`,
+          scope: 'rooms',
+          severity: 'soft',
+          message: `Bulk generated ${newIds.length} room(s)`,
+          refs: { roomIds: newIds },
+        });
+      }
+      await invalidate(['rooms']);
+    },
+    onError: (e) => toast.error('Could not generate rooms', formatApiError(e)),
+  });
+
+  const setTabUrl = (next: 'browse' | 'add' | 'generate') => {
     const sp = new URLSearchParams(searchParams);
     if (next === 'browse') sp.delete('tab');
     else sp.set('tab', next);
@@ -124,6 +224,9 @@ export function RoomsModulePage() {
       <Link to="/app/rooms/bulk-import" className="btn secondary">
         Bulk import
       </Link>
+      <button type="button" className="btn secondary" onClick={() => setTabUrl('generate')}>
+        🔢 Bulk generate
+      </button>
       <button type="button" className="btn" onClick={() => setTabUrl('add')}>
         + Add room
       </button>
@@ -139,6 +242,7 @@ export function RoomsModulePage() {
       tabs={[
         { id: 'browse', label: 'Browse', badge: list.length || null },
         { id: 'add', label: 'Add new' },
+        { id: 'generate', label: 'Bulk generate' },
       ]}
       activeTabId={tab}
       tabHrefBase="/app/rooms"
@@ -149,6 +253,15 @@ export function RoomsModulePage() {
           setDraft={setCreateDraft}
           busy={createOne.isPending}
           onSave={() => createOne.mutate(createDraft)}
+        />
+      ) : null}
+
+      {tab === 'generate' ? (
+        <BulkGenerateRoomsCard
+          draft={bulkGenDraft}
+          setDraft={setBulkGenDraft}
+          busy={generateRooms.isPending}
+          onGenerate={() => generateRooms.mutate(bulkGenDraft)}
         />
       ) : null}
 
@@ -250,3 +363,131 @@ function Field({ label, flex, children }: { label: string; flex?: string; childr
     </label>
   );
 }
+
+function BulkGenerateRoomsCard({
+  draft,
+  setDraft,
+  busy,
+  onGenerate,
+}: {
+  draft: BulkGenDraft;
+  setDraft: (d: BulkGenDraft) => void;
+  busy: boolean;
+  onGenerate: () => void;
+}) {
+  const canGenerate =
+    draft.building.trim() !== '' &&
+    Number.isFinite(Number(draft.bulkStart)) &&
+    Number.isFinite(Number(draft.bulkEnd));
+
+  return (
+    <div className="card stack" style={{ gap: 12, padding: 12, border: '1px solid rgba(15,23,42,0.10)', borderRadius: 12 }}>
+      <div style={{ fontWeight: 950, fontSize: 14 }}>Bulk generate rooms by number range</div>
+      <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+        Set the building, floor, type, and capacity — then specify a <strong>Start #</strong> and <strong>End #</strong>{' '}
+        to generate a numbered sequence (e.g. 101–110). Already-existing rooms with the same building + number are skipped.
+      </p>
+
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <Field label="Building *" flex="2 1 200px">
+          <input
+            value={draft.building}
+            onChange={(e) => setDraft({ ...draft, building: e.target.value })}
+            placeholder="Block A"
+          />
+        </Field>
+        <Field label="Floor #" flex="0 0 110px">
+          <input
+            type="number"
+            value={draft.floorNumber === '' ? '' : draft.floorNumber}
+            onChange={(e) =>
+              setDraft({ ...draft, floorNumber: e.target.value === '' ? '' : Math.trunc(Number(e.target.value)) })
+            }
+            placeholder="1"
+          />
+        </Field>
+        <Field label="Floor name" flex="1 1 160px">
+          <input
+            value={draft.floorName}
+            onChange={(e) => setDraft({ ...draft, floorName: e.target.value })}
+            placeholder="Ground"
+          />
+        </Field>
+      </div>
+
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <Field label="Type" flex="1 1 200px">
+          <SmartSelect
+            value={draft.type}
+            onChange={(v) =>
+              setDraft({
+                ...draft,
+                type: v as RoomVenueType,
+                labType:
+                  v === 'SCIENCE_LAB' || v === 'COMPUTER_LAB' ? (draft.labType ?? 'OTHER') : null,
+              })
+            }
+            options={ROOM_TYPES.map((t) => ({ value: t, label: ROOM_TYPE_LABELS[t] }))}
+          />
+        </Field>
+        {draft.type === 'SCIENCE_LAB' || draft.type === 'COMPUTER_LAB' ? (
+          <Field label="Lab type" flex="1 1 160px">
+            <SmartSelect
+              value={draft.labType ?? 'OTHER'}
+              onChange={(v) => setDraft({ ...draft, labType: v as LabType })}
+              options={LAB_TYPES.map((t) => ({ value: t, label: t }))}
+            />
+          </Field>
+        ) : null}
+        <Field label="Capacity" flex="0 0 130px">
+          <input
+            type="number"
+            min={0}
+            max={500}
+            value={draft.capacity === '' ? '' : draft.capacity}
+            onChange={(e) =>
+              setDraft({ ...draft, capacity: e.target.value === '' ? '' : Math.max(0, Math.trunc(Number(e.target.value))) })
+            }
+            placeholder="40"
+          />
+        </Field>
+      </div>
+
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="Start # *" flex="0 0 140px">
+          <input
+            type="number"
+            value={draft.bulkStart === '' ? '' : draft.bulkStart}
+            onChange={(e) => setDraft({ ...draft, bulkStart: e.target.value === '' ? '' : Number(e.target.value) })}
+            placeholder="101"
+          />
+        </Field>
+        <Field label="End # *" flex="0 0 140px">
+          <input
+            type="number"
+            value={draft.bulkEnd === '' ? '' : draft.bulkEnd}
+            onChange={(e) => setDraft({ ...draft, bulkEnd: e.target.value === '' ? '' : Number(e.target.value) })}
+            placeholder="110"
+          />
+        </Field>
+        {Number.isFinite(Number(draft.bulkStart)) && Number.isFinite(Number(draft.bulkEnd)) ? (
+          <div className="muted" style={{ fontSize: 12, fontWeight: 800, alignSelf: 'flex-end', paddingBottom: 6 }}>
+            {Math.abs(Number(draft.bulkEnd) - Number(draft.bulkStart)) + 1} room(s) in range
+          </div>
+        ) : null}
+      </div>
+
+      <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          className="btn"
+          onClick={onGenerate}
+          disabled={busy || !canGenerate}
+        >
+          {busy ? 'Generating…' : 'Generate rooms'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
