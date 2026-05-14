@@ -727,8 +727,14 @@ function DocStatusBadge({ status }: { status: string }) {
 }
 
 function DocMoreMenu({
-  doc, staffId, onAction,
-}: { doc: StaffDoc; staffId: number; onAction: () => void }) {
+  doc, staffId, onAction, onUpload, onReject, onEditRemark,
+}: {
+  doc: StaffDoc; staffId: number;
+  onAction: (path: string, body?: unknown) => void;
+  onUpload: () => void;
+  onReject: () => void;
+  onEditRemark: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -741,75 +747,59 @@ function DocMoreMenu({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  async function doAction(path: string, body?: unknown) {
-    try {
-      await api.post(path, body ?? {});
-      onAction();
-      setOpen(false);
-    } catch (e) {
-      toast.error('Action failed', formatApiError(e));
-      setOpen(false);
-    }
-  }
+  const coll      = doc.collectionStatus;
+  const up        = doc.uploadStatus;
+  const ver       = doc.verificationStatus;
+  const hasFile   = !!doc.fileId;
+  const isPending = coll === 'PENDING_COLLECTION';
+  const isCollected = coll === 'COLLECTED_PHYSICAL';
+  const isNotReq  = coll === 'NOT_REQUIRED';
+  const isVerified = ver === 'VERIFIED';
+  const isRejected = ver === 'REJECTED';
+  const isUploaded = up === 'UPLOADED';
+  const canV      = !isNotReq && ver === 'NOT_VERIFIED' && (isCollected || isUploaded);
 
-  const isPending    = doc.collectionStatus === 'PENDING_COLLECTION';
-  const isCollected  = doc.collectionStatus === 'COLLECTED_PHYSICAL';
-  const isNotReq     = doc.collectionStatus === 'NOT_REQUIRED';
-  const isVerified   = doc.verificationStatus === 'VERIFIED';
-  const isRejected   = doc.verificationStatus === 'REJECTED';
+  // Mirror student primary-type to avoid duplicating the primary action in this menu
+  const primaryType: 'collect' | 'verifyPhysical' | 'verifyUploaded' | 'replace' | 'none' =
+    isNotReq                                                        ? 'none'
+    : isPending                                                     ? 'collect'
+    : isCollected && !isUploaded && ver === 'NOT_VERIFIED'          ? 'verifyPhysical'
+    : isUploaded  && ver === 'NOT_VERIFIED'                         ? 'verifyUploaded'
+    : isRejected                                                    ? 'replace'
+    : 'none';
 
-  const items = [
-    !isCollected && !isNotReq && {
-      label: '📥 Mark Collected',
-      action: () => doAction(`/api/staff/${staffId}/documents/${doc.id}/collect`),
-    },
-    (isCollected || isNotReq) && !isPending && {
-      label: '↩ Mark Pending',
-      action: () => doAction(`/api/staff/${staffId}/documents/${doc.id}/collect`, { collectionStatus: 'PENDING_COLLECTION' }),
-      // Actually use PATCH
-      patchAction: true,
-    },
-    !isNotReq && {
-      label: '— Mark Not Required',
-      action: () => doAction(`/api/staff/${staffId}/documents/${doc.id}/mark-not-required`),
-    },
-    isNotReq && {
-      label: '↩ Restore as Pending',
-      action: async () => {
-        try {
-          await api.patch(`/api/staff/${staffId}/documents/${doc.id}`, { collectionStatus: 'PENDING_COLLECTION', uploadStatus: 'NOT_UPLOADED', verificationStatus: 'NOT_VERIFIED' });
-          onAction();
-          setOpen(false);
-        } catch (e) { toast.error('Action failed', formatApiError(e)); setOpen(false); }
-      },
-    },
-    (isVerified || isRejected) && {
-      label: '↩ Reset Verification',
-      action: async () => {
-        try {
-          await api.patch(`/api/staff/${staffId}/documents/${doc.id}`, { verificationStatus: 'NOT_VERIFIED' });
-          onAction();
-          setOpen(false);
-        } catch (e) { toast.error('Action failed', formatApiError(e)); setOpen(false); }
-      },
-    },
-  ].filter(Boolean) as { label: string; action: () => void }[];
+  const close = () => setOpen(false);
+
+  const items = ([
+    { label: 'View / Open',          onClick: () => { close(); if (doc.fileId) window.open(`/api/files/${doc.fileId}/content`, '_blank'); }, show: hasFile },
+    { label: 'Download',             onClick: async () => { close(); if (!doc.fileId) return; try { const r = await api.get(`/api/files/${doc.fileId}/content`, { responseType: 'blob', params: { download: true } }); const url = URL.createObjectURL(new Blob([r.data])); const a = document.createElement('a'); a.href = url; a.download = doc.originalFilename ?? 'document'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); } catch { toast.error('Download failed'); } }, show: hasFile },
+    { label: 'Upload file',          onClick: () => { close(); onUpload(); }, show: !isNotReq && !isUploaded && !isRejected },
+    { label: 'Replace file',         onClick: () => { close(); onUpload(); }, show: hasFile && !isNotReq && primaryType !== 'replace' },
+    { label: 'Verify from original', onClick: () => { close(); onAction(`/api/staff/${staffId}/documents/${doc.id}/verify`, { verificationSource: 'PHYSICAL_ORIGINAL' }); }, show: canV && isCollected && primaryType !== 'verifyPhysical' },
+    { label: 'Verify from upload',   onClick: () => { close(); onAction(`/api/staff/${staffId}/documents/${doc.id}/verify`, { verificationSource: 'UPLOADED_COPY' }); }, show: canV && isUploaded && primaryType !== 'verifyUploaded' },
+    { label: 'Reject',               onClick: () => { close(); onReject(); }, show: canV, danger: true },
+    { label: 'Mark Pending',         onClick: () => { close(); onAction(`/api/staff/${staffId}/documents/${doc.id}`, { collectionStatus: 'PENDING_COLLECTION', uploadStatus: 'NOT_UPLOADED', verificationStatus: 'NOT_VERIFIED' }, true); }, show: (isCollected || isNotReq) },
+    { label: 'Mark Not Required',    onClick: () => { close(); onAction(`/api/staff/${staffId}/documents/${doc.id}/mark-not-required`); }, show: !isNotReq },
+    { label: (isVerified || isRejected) ? 'Reset Verification' : undefined, onClick: () => { close(); onAction(`/api/staff/${staffId}/documents/${doc.id}`, { verificationStatus: 'NOT_VERIFIED' }, true); }, show: isVerified || isRejected },
+    { label: doc.remarks ? 'Edit Remark' : 'Add Remark', onClick: () => { close(); onEditRemark(); }, show: true },
+  ] as { label?: string; onClick: () => void; show: boolean; danger?: boolean }[])
+    .filter(i => i.show && i.label);
 
   if (items.length === 0) return null;
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
       <button type="button" onClick={() => setOpen(o => !o)}
-        style={{ padding: '5px 10px', borderRadius: 7, border: '1px solid rgba(15,23,42,0.13)', background: '#fff', cursor: 'pointer', fontSize: 13, color: 'rgba(15,23,42,0.5)' }}>
-        ···
-      </button>
+        style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid rgba(15,23,42,0.13)', background: 'none', cursor: 'pointer', color: 'rgba(15,23,42,0.5)', fontSize: 18, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+        title="More actions">⋯</button>
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 200, background: '#fff', borderRadius: 10, border: '1px solid rgba(15,23,42,0.1)', boxShadow: '0 8px 32px rgba(15,23,42,0.12)', minWidth: 190, padding: '6px 0' }}>
+        <div style={{ position: 'absolute', right: 0, bottom: '100%', marginBottom: 4, zIndex: 9999, background: '#fff', border: '1px solid rgba(15,23,42,0.11)', borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.18)', minWidth: 190, padding: '4px 0' }}>
           {items.map((item, i) => (
-            <button key={i} type="button" onClick={item.action}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, color: 'rgba(15,23,42,0.75)', fontWeight: 600 }}>
-              {item.label}
-            </button>
+            <button key={i} type="button" onClick={item.onClick}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', color: item.danger ? '#991b1b' : 'rgba(15,23,42,0.8)' }}
+              onMouseEnter={e => (e.currentTarget.style.background = item.danger ? 'rgba(220,38,38,0.06)' : 'rgba(15,23,42,0.04)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+            >{item.label}</button>
           ))}
         </div>
       )}
@@ -863,162 +853,237 @@ function RejectDialog({ staffId, docId, onDone, onCancel }: { staffId: number; d
 }
 
 function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId: number; onRefresh: () => void; isMobile: boolean }) {
-  const [rejectOpen, setRejectOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [rejectOpen, setRejectOpen]       = useState(false);
+  const [editRemarkOpen, setEditRemarkOpen] = useState(false);
+  const [editRemarkValue, setEditRemarkValue] = useState('');
+  const [busy, setBusy]     = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const label = doc.documentTypeName || docDisplayLabel(doc.documentType);
-  const isPending    = doc.collectionStatus === 'PENDING_COLLECTION';
-  const isCollected  = doc.collectionStatus === 'COLLECTED_PHYSICAL';
-  const isNotReq     = doc.collectionStatus === 'NOT_REQUIRED';
-  const isVerified   = doc.verificationStatus === 'VERIFIED';
-  const isUploaded   = doc.uploadStatus === 'UPLOADED';
+  const label    = doc.documentTypeName || docDisplayLabel(doc.documentType);
+  const coll     = doc.collectionStatus;
+  const up       = doc.uploadStatus;
+  const ver      = doc.verificationStatus;
+  const isPending    = coll === 'PENDING_COLLECTION';
+  const isCollected  = coll === 'COLLECTED_PHYSICAL';
+  const isNotReq     = coll === 'NOT_REQUIRED';
+  const isVerified   = ver === 'VERIFIED';
+  const isRejected   = ver === 'REJECTED';
+  const isUploaded   = up  === 'UPLOADED';
+  const hasFile      = !!doc.fileId;
 
-  // Upload handler
+  async function callAction(path: string, body?: unknown, isPatch = false) {
+    setBusy(true); setRowError(null);
+    try {
+      if (isPatch) await api.patch(path, body ?? {});
+      else         await api.post(path, body ?? {});
+      onRefresh();
+    } catch (e: any) {
+      setRowError(e?.response?.data?.error ?? e?.message ?? 'Action failed.');
+    } finally { setBusy(false); }
+  }
+
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploading(true);
+    if (file.size > 10 * 1024 * 1024) { setRowError('File must be < 10 MB.'); if (fileInputRef.current) fileInputRef.current.value = ''; return; }
+    if (!['application/pdf','image/jpeg','image/png'].includes(file.type)) { setRowError('Only PDF, JPG, PNG allowed.'); if (fileInputRef.current) fileInputRef.current.value = ''; return; }
+    setUploading(true); setRowError(null);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      await api.post(`/api/staff/${staffId}/documents/${doc.id}/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      onRefresh();
-      toast.success('Uploaded', `${file.name} uploaded successfully.`);
-    } catch (err) {
-      toast.error('Upload failed', formatApiError(err));
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+      const form = new FormData(); form.append('file', file);
+      await api.post(`/api/staff/${staffId}/documents/${doc.id}/upload`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      onRefresh(); toast.success('Uploaded', `${file.name} uploaded successfully.`);
+    } catch (e: any) { setRowError(e?.response?.data?.error ?? e?.message ?? 'Upload failed.'); }
+    finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   }
 
-  // Next best action
-  let primaryLabel = '';
-  let primaryAction: (() => void) | null = null;
+  async function handleDownload() {
+    if (!doc.fileId) return;
+    try {
+      const resp = await api.get(`/api/files/${doc.fileId}/content`, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([resp.data], { type: resp.headers['content-type'] || 'application/octet-stream' }));
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch { setRowError('Could not load file.'); }
+  }
 
+  async function submitEditRemark() {
+    setBusy(true); setRowError(null);
+    try {
+      await api.patch(`/api/staff/${staffId}/documents/${doc.id}`, { remarks: editRemarkValue.trim() || null });
+      setEditRemarkOpen(false); setEditRemarkValue(''); onRefresh();
+    } catch (e: any) { setRowError(e?.response?.data?.error ?? e?.message ?? 'Update failed.'); }
+    finally { setBusy(false); }
+  }
+
+  // ── Primary action priority (mirrors student documents) ────────────────────
+  // 1. PENDING_COLLECTION                            → Mark Collected
+  // 2. COLLECTED_PHYSICAL + NOT_UPLOADED + NOT_VERIFIED → Verify Physical
+  // 3. UPLOADED + NOT_VERIFIED                       → Verify (uploaded copy)
+  // 4. REJECTED                                      → Replace File
+  type PA = { label: string; isPrimary?: boolean; onClick: () => void } | null;
+  let pa: PA = null;
   if (!isNotReq) {
-    if (isPending) {
-      primaryLabel = 'Mark Collected';
-      primaryAction = async () => {
-        setBusy(true);
-        try { await api.post(`/api/staff/${staffId}/documents/${doc.id}/collect`); onRefresh(); }
-        catch (e) { toast.error('Action failed', formatApiError(e)); }
-        finally { setBusy(false); }
-      };
-    } else if (isCollected && !isVerified) {
-      primaryLabel = 'Verify';
-      primaryAction = async () => {
-        setBusy(true);
-        try { await api.post(`/api/staff/${staffId}/documents/${doc.id}/verify`); onRefresh(); }
-        catch (e) { toast.error('Action failed', formatApiError(e)); }
-        finally { setBusy(false); }
-      };
-    }
+    if (isPending)
+      pa = { label: busy ? '…' : 'Mark Collected', isPrimary: true, onClick: () => callAction(`/api/staff/${staffId}/documents/${doc.id}/collect`) };
+    else if (isCollected && !isUploaded && ver === 'NOT_VERIFIED')
+      pa = { label: busy ? '…' : 'Verify Physical', isPrimary: true, onClick: () => callAction(`/api/staff/${staffId}/documents/${doc.id}/verify`, { verificationSource: 'PHYSICAL_ORIGINAL' }) };
+    else if (isUploaded && ver === 'NOT_VERIFIED')
+      pa = { label: busy ? '…' : 'Verify', isPrimary: true, onClick: () => callAction(`/api/staff/${staffId}/documents/${doc.id}/verify`, { verificationSource: 'UPLOADED_COPY' }) };
+    else if (isRejected)
+      pa = { label: uploading ? 'Uploading…' : '↑ Replace File', isPrimary: false, onClick: () => fileInputRef.current?.click() };
   }
 
-  // Reject action (secondary, only when collected and not already verified/rejected)
-  const showReject = isCollected && !isVerified && doc.verificationStatus !== 'REJECTED';
-  // Show upload button for all non-waived docs
-  const showUpload = !isNotReq && !isVerified;
+  // Upload shown when doc can receive a file (not rejected = already replace, not verified if they can re-upload)
+  const showUpload = !isNotReq && !isRejected && !(ver === 'VERIFIED' && isUploaded);
 
   if (isMobile) {
     return (
       <>
-        {/* Hidden file input */}
         <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={handleFileChange} />
         <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.09)', padding: '14px 16px', display: 'grid', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: 'rgba(15,23,42,0.85)' }}>{label}</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: isNotReq ? 'rgba(15,23,42,0.38)' : 'rgba(15,23,42,0.85)' }}>{label}</div>
             <DocStatusBadge status={doc.displayStatus} />
           </div>
-          {doc.originalFilename && (
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span>📎</span> <span style={{ fontStyle: 'italic' }}>{doc.originalFilename}</span>
-            </div>
+
+          {hasFile && (
+            <button type="button" onClick={handleDownload}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 6, background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.18)', color: '#1d4ed8', fontSize: 12, fontWeight: 600, cursor: 'pointer', width: 'fit-content' }}>
+              {doc.originalFilename ?? 'View file'}
+              {doc.fileSize && <span style={{ opacity: 0.6 }}>· {(doc.fileSize / 1024).toFixed(0)} KB</span>}
+            </button>
           )}
-          {doc.remarks && (
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', fontStyle: 'italic' }}>"{doc.remarks}"</div>
-          )}
+
           {doc.verificationSource && (
             <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-              Source: {doc.verificationSource === 'PHYSICAL_ORIGINAL' ? 'Physical Original' : 'Uploaded Copy'}
+              {doc.verificationSource === 'PHYSICAL_ORIGINAL' ? '📋 Physical original' : '📎 Uploaded copy'} verified
+              {doc.verifiedAt && <span style={{ marginLeft: 5 }}>{new Date(doc.verifiedAt).toLocaleDateString()}</span>}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {primaryAction && (
-              <button type="button" disabled={busy} onClick={primaryAction}
-                style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-                {busy ? '…' : primaryLabel}
-              </button>
-            )}
-            {showUpload && (
-              <button type="button" disabled={uploading} onClick={() => fileInputRef.current?.click()}
-                style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(15,23,42,0.15)', background: uploading ? 'rgba(15,23,42,0.04)' : '#fff', fontWeight: 700, fontSize: 12, cursor: uploading ? 'not-allowed' : 'pointer', color: isUploaded ? '#166534' : 'rgba(15,23,42,0.65)' }}>
-                {uploading ? 'Uploading…' : isUploaded ? '↑ Re-upload' : '↑ Upload'}
-              </button>
-            )}
-            {showReject && (
-              <button type="button" disabled={busy} onClick={() => setRejectOpen(true)}
-                style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(220,38,38,0.3)', background: 'rgba(220,38,38,0.05)', color: '#b91c1c', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-                Reject
-              </button>
-            )}
-            <DocMoreMenu doc={doc} staffId={staffId} onAction={onRefresh} />
-          </div>
+          {doc.remarks && <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', fontStyle: 'italic' }}>"{doc.remarks}"</div>}
+
+          {editRemarkOpen ? (
+            <div style={{ display: 'grid', gap: 6 }}>
+              <textarea autoFocus value={editRemarkValue} onChange={e => setEditRemarkValue(e.target.value)} rows={2}
+                style={{ fontSize: 13, padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.18)', resize: 'vertical', width: '100%' }} placeholder="Enter remark…" />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button type="button" className="btn" disabled={busy} style={{ fontSize: 12, padding: '5px 12px' }} onClick={submitEditRemark}>{busy ? '…' : 'Save'}</button>
+                <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => { setEditRemarkOpen(false); setEditRemarkValue(''); }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {pa && (
+                <button type="button" className={pa.isPrimary ? 'btn' : 'btn secondary'} disabled={busy || uploading} onClick={pa.onClick}
+                  style={{ fontSize: 12, padding: '5px 14px' }}>{pa.label}</button>
+              )}
+              {showUpload && (
+                <button type="button" className="btn secondary" disabled={uploading} onClick={() => fileInputRef.current?.click()}
+                  style={{ fontSize: 12, padding: '5px 12px' }}>
+                  {uploading ? 'Uploading…' : isUploaded ? '↑ Re-upload' : '↑ Upload'}
+                </button>
+              )}
+              {!pa && isVerified && <span style={{ fontSize: 12, color: '#166534', fontWeight: 700 }}>✓ Verified</span>}
+              {!pa && isNotReq   && <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Not required</span>}
+              <DocMoreMenu doc={doc} staffId={staffId}
+                onAction={(path, body, isPatch) => callAction(path, body, isPatch)}
+                onUpload={() => fileInputRef.current?.click()}
+                onReject={() => setRejectOpen(true)}
+                onEditRemark={() => { setEditRemarkOpen(true); setEditRemarkValue(doc.remarks ?? ''); }}
+              />
+            </div>
+          )}
+          {rowError && <div style={{ fontSize: 12, color: '#b91c1c' }}>⚠ {rowError}</div>}
         </div>
         {rejectOpen && <RejectDialog staffId={staffId} docId={doc.id} onDone={() => { setRejectOpen(false); onRefresh(); }} onCancel={() => setRejectOpen(false)} />}
       </>
     );
   }
 
-  // Desktop row
+  // ── Desktop row ────────────────────────────────────────────────────────────
   return (
     <>
-      {/* Hidden file input */}
       <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={handleFileChange} />
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid rgba(15,23,42,0.05)' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(15,23,42,0.82)' }}>{label}</div>
-          {doc.originalFilename && (
-            <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.45)', marginTop: 2 }}>
-              📎 {doc.originalFilename}
-            </div>
-          )}
-          {doc.remarks && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.41)', marginTop: 2, fontStyle: 'italic' }}>"{doc.remarks}"</div>}
+      <tr style={{ borderBottom: rowError ? 'none' : '1px solid rgba(15,23,42,0.06)', background: isNotReq ? 'rgba(15,23,42,0.013)' : undefined }}>
+        {/* Document name */}
+        <td style={{ padding: '10px 12px', verticalAlign: 'middle', fontWeight: 600, fontSize: 13, color: isNotReq ? 'rgba(15,23,42,0.38)' : 'rgba(15,23,42,0.85)' }}>
+          {label}
+          {doc.remarks && <span title={doc.remarks} style={{ marginLeft: 5, fontSize: 11, color: 'rgba(15,23,42,0.35)' }}>💬</span>}
           {doc.verificationSource && (
-            <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', marginTop: 1, fontWeight: 600 }}>
-              {doc.verificationSource === 'PHYSICAL_ORIGINAL' ? 'Physical original' : 'Uploaded copy'} verified
+            <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', marginTop: 2, fontWeight: 500 }}>
+              {doc.verificationSource === 'PHYSICAL_ORIGINAL' ? '📋 Physical original' : '📎 Uploaded copy'} verified
             </div>
           )}
-        </div>
-        <DocStatusBadge status={doc.displayStatus} />
-        <div style={{ display: 'flex', gap: 6 }}>
-          {primaryAction && (
-            <button type="button" disabled={busy} onClick={primaryAction}
-              style={{ padding: '6px 13px', borderRadius: 7, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              {busy ? '…' : primaryLabel}
-            </button>
+        </td>
+
+        {/* Status */}
+        <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+          <DocStatusBadge status={doc.displayStatus} />
+          {isVerified && doc.verifiedAt && (
+            <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.38)', marginTop: 2 }}>{new Date(doc.verifiedAt).toLocaleDateString()}</div>
           )}
-          {showUpload && (
-            <button type="button" disabled={uploading} onClick={() => fileInputRef.current?.click()}
-              title={isUploaded ? 'Replace uploaded file' : 'Upload document file (PDF, JPG, PNG — max 10 MB)'}
-              style={{ padding: '6px 13px', borderRadius: 7, border: '1px solid rgba(15,23,42,0.15)', background: uploading ? 'rgba(15,23,42,0.04)' : '#fff', fontWeight: 700, fontSize: 12, cursor: uploading ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', color: isUploaded ? '#166534' : 'rgba(15,23,42,0.65)' }}>
-              {uploading ? 'Uploading…' : isUploaded ? '↑ Re-upload' : '↑ Upload'}
+        </td>
+
+        {/* File chip */}
+        <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+          {hasFile ? (
+            <button type="button" onClick={handleDownload}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.18)', color: '#1d4ed8', fontSize: 11, fontWeight: 600, cursor: 'pointer', maxWidth: 160, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{doc.originalFilename ?? 'View file'}</span>
+              {doc.fileSize && <span style={{ flexShrink: 0, opacity: 0.6 }}>· {(doc.fileSize / 1024).toFixed(0)} KB</span>}
             </button>
+          ) : (
+            <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.28)' }}>No file</span>
           )}
-          {showReject && (
-            <button type="button" disabled={busy} onClick={() => setRejectOpen(true)}
-              style={{ padding: '6px 13px', borderRadius: 7, border: '1px solid rgba(220,38,38,0.25)', background: 'rgba(220,38,38,0.05)', color: '#b91c1c', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-              Reject
-            </button>
+        </td>
+
+        {/* Actions */}
+        <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+          {editRemarkOpen ? (
+            <div style={{ display: 'grid', gap: 5, minWidth: 180 }}>
+              <textarea autoFocus value={editRemarkValue} onChange={e => setEditRemarkValue(e.target.value)} rows={2}
+                style={{ fontSize: 12, resize: 'vertical', width: '100%', padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.18)' }} placeholder="Enter remark…" />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button type="button" className="btn" disabled={busy} style={{ fontSize: 11, padding: '3px 9px' }} onClick={submitEditRemark}>{busy ? '…' : 'Save'}</button>
+                <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 9px' }} onClick={() => { setEditRemarkOpen(false); setEditRemarkValue(''); }}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+              {pa && (
+                <button type="button" className={pa.isPrimary ? 'btn' : 'btn secondary'} disabled={busy || uploading} onClick={pa.onClick}
+                  style={{ fontSize: 11, padding: '4px 12px', whiteSpace: 'nowrap' }}>{pa.label}</button>
+              )}
+              {showUpload && (
+                <button type="button" className="btn secondary" disabled={uploading} onClick={() => fileInputRef.current?.click()}
+                  title={isUploaded ? 'Replace uploaded file' : 'Upload document (PDF, JPG, PNG — max 10 MB)'}
+                  style={{ fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap' }}>
+                  {uploading ? 'Uploading…' : isUploaded ? '↑ Re-upload' : '↑ Upload'}
+                </button>
+              )}
+              {!pa && isVerified && <span style={{ fontSize: 11, color: '#166534', fontWeight: 700 }}>✓ Verified</span>}
+              {!pa && isNotReq   && <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.28)', fontStyle: 'italic' }}>Not required</span>}
+            </div>
           )}
-        </div>
-        <DocMoreMenu doc={doc} staffId={staffId} onAction={onRefresh} />
-      </div>
+        </td>
+
+        {/* Kebab */}
+        <td style={{ padding: '10px 12px', verticalAlign: 'middle', textAlign: 'right' }}>
+          <DocMoreMenu doc={doc} staffId={staffId}
+            onAction={(path, body, isPatch) => callAction(path, body, isPatch)}
+            onUpload={() => fileInputRef.current?.click()}
+            onReject={() => setRejectOpen(true)}
+            onEditRemark={() => { setEditRemarkOpen(true); setEditRemarkValue(doc.remarks ?? ''); }}
+          />
+        </td>
+      </tr>
+      {rowError && (
+        <tr style={{ borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
+          <td colSpan={5} style={{ padding: '4px 12px 10px', color: '#b91c1c', fontSize: 12 }}>⚠ {rowError}</td>
+        </tr>
+      )}
       {rejectOpen && <RejectDialog staffId={staffId} docId={doc.id} onDone={() => { setRejectOpen(false); onRefresh(); }} onCancel={() => setRejectOpen(false)} />}
     </>
   );
@@ -1127,23 +1192,28 @@ function TabDocuments({ staffId }: { staffId: number }) {
         </div>
       )}
 
-      {/* Note about upload */}
-      {docs.length > 0 && (
-        <div style={{ padding: '10px 14px', background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.18)', borderRadius: 9, fontSize: 12, color: '#92400e', fontWeight: 600 }}>
-          ℹ️ Digital file upload is not enabled. Physical document collection and verification are fully operational and tracked below.
-        </div>
-      )}
-
       {/* Desktop table */}
       {!isMobile && docs.length > 0 && (
-        <SectionCard title="Document Checklist">
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.35)', display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 12, padding: '0 0 8px', borderBottom: '1px solid rgba(15,23,42,0.08)', marginBottom: 2 }}>
-            <span>DOCUMENT</span><span>STATUS</span><span>ACTIONS</span><span></span>
+        <div className="card" style={{ padding: 0, overflow: 'visible' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  {['Document', 'Status', 'File', 'Next Action', ''].map(col => (
+                    <th key={col} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.45)', whiteSpace: 'nowrap', background: 'rgba(250,250,249,0.98)', borderBottom: '1px solid rgba(15,23,42,0.07)', position: 'sticky', top: 0 }}>
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {docs.map(doc => (
+                  <DocRow key={doc.id} doc={doc} staffId={staffId} onRefresh={refresh} isMobile={false} />
+                ))}
+              </tbody>
+            </table>
           </div>
-          {docs.map(doc => (
-            <DocRow key={doc.id} doc={doc} staffId={staffId} onRefresh={refresh} isMobile={false} />
-          ))}
-        </SectionCard>
+        </div>
       )}
 
       {/* Mobile cards */}
