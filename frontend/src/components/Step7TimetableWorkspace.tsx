@@ -906,7 +906,8 @@ export default function Step7TimetableWorkspace({
   const viewTitle = useMemo(() => {
     if (tab === 'SECTION') return selectedClassGroupLabel;
     if (tab === 'TEACHER') return teacherOptions.find((t) => String(t.id) === selectedTeacherId)?.fullName ?? '—';
-    return roomOptions.find((r) => String(r.id) === selectedRoomId)?.building + ' ' + (roomOptions.find((r) => String(r.id) === selectedRoomId)?.roomNumber ?? '') ?? '—';
+    const room = roomOptions.find((r) => String(r.id) === selectedRoomId);
+    return room ? `${room.building ?? ''} ${room.roomNumber ?? ''}`.trim() || '—' : '—';
   }, [tab, selectedClassGroupLabel, teacherOptions, selectedTeacherId, roomOptions, selectedRoomId]);
 
   const gridEntriesForView = useMemo(() => {
