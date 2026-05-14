@@ -661,8 +661,8 @@ function DocMoreMenu({
     // ── File access ──
     { label: 'View / Open',           onClick: onView,              show: hasFile },
     { label: 'Download',              onClick: onSaveDownload,      show: !!doc.fileId },
-    // Upload file — show when physically collected but no file yet
-    { label: 'Upload file',           onClick: onUpload,            show: canEdit && coll === 'COLLECTED_PHYSICAL' && up !== 'UPLOADED' && ver !== 'REJECTED' },
+    // Upload file — show for any document that can still receive a file (pending or collected, not yet uploaded, not rejected)
+    { label: 'Upload file',           onClick: onUpload,            show: canEdit && coll !== 'NOT_REQUIRED' && up !== 'UPLOADED' && ver !== 'REJECTED' },
     // Replace file — secondary when file exists but REJECTED is handled as primary elsewhere
     { label: 'Replace file',          onClick: onUpload,            show: canEdit && hasFile && coll !== 'NOT_REQUIRED' && primaryType !== 'replace' },
     // ── Verification (secondary — appears in More only when not already primary) ──
@@ -951,17 +951,32 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
                                     onClick={() => { setEditRemarkDoc(null); setEditRemarkValue(''); }}>Cancel</button>
                                 </div>
                               </div>
-                            ) : pa ? (
-                              <button type="button" className={pa.isPrimary ? 'btn' : 'btn secondary'} disabled={isBusy}
-                                onClick={pa.onClick}
-                                style={{ fontSize: 11, padding: '4px 12px', whiteSpace: 'nowrap', ...(isBusy ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}>
-                                {pa.label}
-                              </button>
-                            ) : coll === 'NOT_REQUIRED' ? (
-                              <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.28)', fontStyle: 'italic' }}>Not required</span>
-                            ) : ver === 'VERIFIED' ? (
-                              <span style={{ fontSize: 11, color: '#166534', fontWeight: 700 }}>✓ Verified</span>
-                            ) : null}
+                            ) : (
+                              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+                                {pa && (
+                                  <button type="button" className={pa.isPrimary ? 'btn' : 'btn secondary'} disabled={isBusy}
+                                    onClick={pa.onClick}
+                                    style={{ fontSize: 11, padding: '4px 12px', whiteSpace: 'nowrap', ...(isBusy ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}>
+                                    {pa.label}
+                                  </button>
+                                )}
+                                {/* Upload button — always visible when file hasn't been uploaded yet */}
+                                {coll !== 'NOT_REQUIRED' && up !== 'UPLOADED' && ver !== 'REJECTED' && (
+                                  <button type="button" className="btn secondary" disabled={isBusy}
+                                    onClick={() => triggerUpload(doc.id)}
+                                    title="Upload a scanned copy (PDF, JPG, PNG — max 10 MB)"
+                                    style={{ fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap', ...(isBusy ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}>
+                                    {uploadingDoc === doc.id && isBusy ? '…' : '↑ Upload'}
+                                  </button>
+                                )}
+                                {!pa && coll === 'NOT_REQUIRED' && (
+                                  <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.28)', fontStyle: 'italic' }}>Not required</span>
+                                )}
+                                {!pa && ver === 'VERIFIED' && coll !== 'NOT_REQUIRED' && up === 'UPLOADED' && (
+                                  <span style={{ fontSize: 11, color: '#166534', fontWeight: 700 }}>✓ Verified</span>
+                                )}
+                              </div>
+                            )}
                           </td>
                         )}
 
@@ -1081,6 +1096,15 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
                     ) : coll === 'NOT_REQUIRED' ? (
                       <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Not required</span>
                     ) : null}
+                    {/* Upload button always visible when file hasn't been uploaded yet */}
+                    {coll !== 'NOT_REQUIRED' && up !== 'UPLOADED' && ver !== 'REJECTED' && canEdit && (
+                      <button type="button" className="btn secondary" disabled={isBusy}
+                        onClick={() => triggerUpload(doc.id)}
+                        title="Upload a scanned copy (PDF, JPG, PNG — max 10 MB)"
+                        style={{ fontSize: 12, padding: '5px 12px' }}>
+                        {uploadingDoc === doc.id && isBusy ? '…' : '↑ Upload'}
+                      </button>
+                    )}
                     <DocMoreMenu doc={doc} canEdit={canEdit} isBusy={isBusy} align="left"
                       onCollect={() => callAction(doc.id, 'collect')}
                       onMarkPending={() => callAction(doc.id, 'mark-pending')}

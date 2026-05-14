@@ -221,11 +221,12 @@ export function SmartSelect({
 
   return (
     <div className="select-keeper catalog-combobox" style={style}>
-      <button
+      <div className="catalog-combobox__field">
+        <button
           ref={triggerRef}
           id={baseId}
           type="button"
-          className="select-keeper__trigger"
+          className="catalog-combobox__input"
           role="combobox"
           aria-haspopup="listbox"
           aria-expanded={open}
@@ -240,27 +241,25 @@ export function SmartSelect({
           }}
           onKeyDown={onTriggerKey}
           style={{
+            textAlign: 'left',
             color: selected ? undefined : '#94a3b8',
             fontWeight: selected ? 700 : 500,
             ...triggerStyle,
           }}
         >
-          <span className="select-keeper__value" style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {selected ? selected.label : placeholder}
-            </span>
-            {selected?.meta ? (
-              <span className="catalog-combobox__meta" style={{ fontSize: 11 }}>
-                {selected.meta}
-              </span>
-            ) : null}
+          <span className="catalog-combobox__text">
+            {selected ? selected.label : placeholder}
           </span>
-          <span className="select-keeper__chev" aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </span>
+          {selected?.meta ? (
+            <span className="catalog-combobox__meta">{selected.meta}</span>
+          ) : null}
         </button>
+        <span className="select-keeper__chev" aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
+      </div>
 
       {open && !disabled && menuStyle && typeof document !== 'undefined'
         ? createPortal(
