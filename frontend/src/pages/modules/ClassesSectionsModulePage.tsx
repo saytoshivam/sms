@@ -202,12 +202,6 @@ export function ClassesSectionsModulePage() {
       <Link to="/app/classes-sections/bulk-import" className="btn secondary">
         Bulk import
       </Link>
-      <button type="button" className="btn secondary" onClick={() => setTabUrl('generate')}>
-        🔢 Bulk generate
-      </button>
-      <button type="button" className="btn" onClick={() => setTabUrl('add')}>
-        + Add class
-      </button>
     </>
   );
 

@@ -8,7 +8,6 @@ import { ModulePage, type StatusLevel } from '../../components/module/ModulePage
 import { SmartSelect } from '../../components/SmartSelect';
 import { useApiTags } from '../../lib/apiTags';
 import { useImpactStore } from '../../lib/impactStore';
-import { onboardingStepHref } from '../../lib/onboardingWizardMeta';
 import { SavedSubjectsCatalogPanel } from '../../components/catalog/SavedSubjectsCatalogPanel';
 import { formatCompatibleRoomTypesList, schoolHasAnyCompatibleRoom } from '../../lib/roomVenueCompatibility';
 import { parseSubjectVenueRequirement, SUBJECT_VENUE_LABELS, SUBJECT_VENUE_REQUIREMENTS } from '../../lib/subjectVenueRequirement';
@@ -152,14 +151,9 @@ export function SubjectsModulePage() {
         Back to hub
       </Link>
       {readOnly ? null : (
-        <>
-          <Link to="/app/subjects/bulk-import" className="btn secondary">
-            Bulk import
-          </Link>
-          <button type="button" className="btn" onClick={() => setTabUrl('add')}>
-            + Add subject
-          </button>
-        </>
+        <Link to="/app/subjects/bulk-import" className="btn secondary">
+          Bulk import
+        </Link>
       )}
     </>
   );
@@ -201,29 +195,7 @@ export function SubjectsModulePage() {
         />
       ) : null}
 
-      {tab === 'browse' && !readOnly ? (
-        <div
-          className="card"
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 12,
-            border: '1px solid rgba(37,99,235,0.22)',
-            background: 'rgba(239,246,255,0.75)',
-            fontSize: 13,
-            lineHeight: 1.45,
-          }}
-        >
-          <div style={{ fontWeight: 950, marginBottom: 4 }}>Bulk CSV & templates</div>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>
-            Multi-subject CSV upload and batch tools live in the setup wizard (unchanged).{' '}
-            <Link to={onboardingStepHref('SUBJECTS')} style={{ fontWeight: 900, color: 'var(--color-primary, #ea580c)' }}>
-              Open wizard — Subjects step
-            </Link>
-            .
-          </div>
-        </div>
-      ) : null}
+
 
       {tab === 'browse' ? (
         <div className="card stack" style={{ gap: 12, padding: 12, marginTop: 12, border: '1px solid rgba(15,23,42,0.10)', borderRadius: 12 }}>
