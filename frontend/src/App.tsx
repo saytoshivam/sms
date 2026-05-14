@@ -19,6 +19,7 @@ import { PlatformRuntimeFlagsPage } from './pages/platform/PlatformRuntimeFlagsP
 import { PlatformSchoolEditPage } from './pages/platform/PlatformSchoolEditPage';
 import { PlatformSchoolsDirectoryPage } from './pages/platform/PlatformSchoolsDirectoryPage';
 import { StudentsPage } from './pages/StudentsPage';
+import { StudentProfilePage } from './pages/StudentProfilePage';
 import { StaffProfilePage } from './pages/StaffProfilePage';
 import { BulkImportTeachersPage } from './pages/modules/BulkImportTeachersPage';
 import { BulkImportSubjectsPage } from './pages/modules/BulkImportSubjectsPage';
