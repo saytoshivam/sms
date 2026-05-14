@@ -1711,6 +1711,31 @@ textarea:disabled {
   gap: 0;
 }
 
+/* ── Lecture / attendance form row layout ─────────────────────────────────── */
+.lecture-schedule-form__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.lecture-schedule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lecture-schedule-field--grow {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.lecture-schedule-field--date {
+  flex: 0 0 auto;
+  min-width: 190px;
+}
+
 .attendance-field-error {
   color: #b91c1c;
   font-size: 13px;

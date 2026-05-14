@@ -33,6 +33,7 @@
   overflow: hidden;
   box-sizing: border-box;
   line-height: 1.4;
+  min-height: 36px;
 }
 
 .select-keeper__trigger:hover:not(:disabled) {
@@ -101,7 +102,7 @@
   margin: 0;
 }
 
-/* ── Inline/inlined menu ─────────────────────────────────────────────────── */
+/* ── Inline/inlined menu ────────────────────────────────────────────────���── */
 .select-keeper__menu {
   list-style: none;
   margin: 0;
@@ -203,7 +204,7 @@
 /* ─────────────────────────────────────────────────────────────────────────────
    Catalog Combobox  (SmartSelect, ClassGroupSearchCombobox,
                       OptionSearchCombobox, PlatformSchoolSearchCombobox)
-   ─────────────────────────────────��─────────────────────────────────────────── */
+   ───────────────────────────────────────────────────────────────────────────── */
 
 .catalog-combobox {
   position: relative;
@@ -296,5 +297,306 @@
   text-overflow: ellipsis;
   display: block;
   margin-top: 1px;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   DateKeeper — themed date-picker button + calendar popover
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.date-keeper {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.date-keeper__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 9px;
+  border: 1.5px solid rgba(15, 23, 42, 0.15);
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+  box-sizing: border-box;
+  min-height: 36px;
+  line-height: 1.4;
+}
+
+.date-keeper__trigger:hover:not(:disabled) {
+  border-color: var(--color-primary, #ea580c);
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 3%, #ffffff);
+}
+
+.date-keeper__trigger:focus-visible {
+  outline: none;
+  border-color: var(--color-primary, #ea580c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #ea580c) 18%, transparent);
+}
+
+.date-keeper__trigger[aria-expanded='true'] {
+  border-color: var(--color-primary, #ea580c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #ea580c) 14%, transparent);
+}
+
+.date-keeper__trigger:disabled,
+.date-keeper--disabled .date-keeper__trigger {
+  opacity: 0.52;
+  cursor: not-allowed;
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.date-keeper__trigger-icon {
+  flex-shrink: 0;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  transition: color 0.13s;
+}
+
+.date-keeper__trigger[aria-expanded='true'] .date-keeper__trigger-icon {
+  color: var(--color-primary, #ea580c);
+}
+
+.date-keeper__trigger-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.date-keeper__trigger-label--empty {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+/* ── Calendar popover ─────────────────────────────────────────────────────── */
+
+.date-keeper__popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40000;
+  background: #ffffff;
+  border: 1.5px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  box-shadow:
+    0 10px 36px rgba(15, 23, 42, 0.14),
+    0 3px 10px rgba(15, 23, 42, 0.07);
+  padding: 12px;
+  min-width: 264px;
+}
+
+.date-keeper__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 4px;
+}
+
+.date-keeper__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-size: 18px;
+  color: #64748b;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.date-keeper__nav:hover {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 10%, transparent);
+  color: var(--color-primary, #ea580c);
+}
+
+.date-keeper__month {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  justify-content: center;
+}
+
+.date-keeper__month-btn {
+  background: none;
+  border: none;
+  font-size: 13px;
+  font-weight: 750;
+  color: #0f172a;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 6px;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.date-keeper__month-btn:hover {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 10%, transparent);
+  color: var(--color-primary, #ea580c);
+}
+
+.date-keeper__month-btn--active {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 14%, transparent);
+  color: var(--color-primary, #ea580c);
+}
+
+/* ── Weekday headers ─────────────────────────────────────────────────────── */
+
+.date-keeper__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.date-keeper__wd {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  padding: 3px 0;
+}
+
+/* ── Day grid ────────────────────────────────────────────────���────────────── */
+
+.date-keeper__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.date-keeper__row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-keeper__cell--empty {
+  width: 100%;
+}
+
+.date-keeper__day {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0f172a;
+  cursor: pointer;
+  transition: background 0.09s ease, color 0.09s;
+}
+
+.date-keeper__day:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 12%, transparent);
+  color: #7c2d12;
+}
+
+.date-keeper__day--selected {
+  background: var(--color-primary, #ea580c) !important;
+  color: #ffffff !important;
+  font-weight: 800;
+}
+
+.date-keeper__day:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ── Month & Year grid ───────────────────────────────────────────────────── */
+
+.date-keeper__month-grid,
+.date-keeper__year-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.date-keeper__month-cell,
+.date-keeper__year-cell {
+  padding: 8px 4px;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 630;
+  color: #0f172a;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.09s ease, color 0.09s;
+}
+
+.date-keeper__month-cell:hover,
+.date-keeper__year-cell:hover {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 12%, transparent);
+  color: #7c2d12;
+}
+
+.date-keeper__month-cell--selected,
+.date-keeper__year-cell--selected {
+  background: var(--color-primary, #ea580c) !important;
+  color: #fff !important;
+  font-weight: 800;
+}
+
+/* ── Footer (Today / Clear) ──────────────────────────────────────────────── */
+
+.date-keeper__footer {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.date-keeper__clear,
+.date-keeper__today {
+  padding: 5px 13px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease;
+  border: 1.5px solid rgba(15, 23, 42, 0.12);
+  background: none;
+}
+
+.date-keeper__today {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 8%, #fff);
+  color: var(--color-primary, #ea580c);
+  border-color: color-mix(in srgb, var(--color-primary, #ea580c) 30%, transparent);
+}
+
+.date-keeper__today:hover {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 16%, #fff);
+}
+
+.date-keeper__clear {
+  color: #64748b;
+}
+
+.date-keeper__clear:hover {
+  background: rgba(15, 23, 42, 0.05);
 }
 

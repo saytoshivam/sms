@@ -129,7 +129,7 @@ function Tile({ label, value, color, note }: { label: string; value: number | st
 
 function FSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '0 0 auto', minWidth: 140 }}>
       <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
       <SelectKeeper value={value} onChange={onChange} options={options} />
     </label>
