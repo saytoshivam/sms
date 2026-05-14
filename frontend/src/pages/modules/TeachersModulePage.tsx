@@ -671,41 +671,68 @@ export function TeachersModulePage() {
 
             return (
               <div key={row.staffId} className="card" style={{ padding: '14px 16px', display: 'grid', gap: 10, backdropFilter: 'none' }}>
+                {/* Name row */}
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                   <Avatar name={row.fullName} size={46} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 15, color: 'rgba(15,23,42,0.88)' }}>{row.fullName}</div>
-                    <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', fontWeight: 600 }}>{row.employeeNo ?? row.designation ?? '—'}</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-                      <span style={typeBadge(type)}>{typeLabel(type)}</span>
-                      <span style={statusBadge(status)}>{fmtStatus(status)}</span>
-                      <span style={loginBadge(row.hasLoginAccount, row.loginStatus)}>{loginLabel(row.hasLoginAccount, row.loginStatus)}</span>
-                    </div>
+                    <Link to={`/app/teachers/${row.staffId}`} style={{ fontWeight: 800, fontSize: 15, color: 'rgba(15,23,42,0.88)', textDecoration: 'none', display: 'block' }}>{row.fullName}</Link>
+                    {row.designation && <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', fontWeight: 600 }}>{row.designation}</div>}
+                    {row.employeeNo && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', fontWeight: 600 }}>Emp # {row.employeeNo}</div>}
+                    {row.department && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', fontWeight: 500 }}>{row.department}</div>}
                   </div>
                   <RowMenu canEdit={canEdit} staffId={row.staffId} onEdit={() => openEdit(row)} onDelete={() => setDelConfirm({ open: true, staffId: row.staffId, fullName: row.fullName })} />
                 </div>
 
+                {/* Status row with labels */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ color: 'rgba(15,23,42,0.4)', fontWeight: 700, fontSize: 11 }}>Type</span>
+                    <span style={typeBadge(type)}>{typeLabel(type)}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ color: 'rgba(15,23,42,0.4)', fontWeight: 700, fontSize: 11 }}>Status</span>
+                    <span style={statusBadge(status)}>{fmtStatus(status)}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ color: 'rgba(15,23,42,0.4)', fontWeight: 700, fontSize: 11 }}>Login</span>
+                    <span style={loginBadge(row.hasLoginAccount, row.loginStatus)}>{loginLabel(row.hasLoginAccount, row.loginStatus)}</span>
+                  </div>
+                </div>
+
+                {/* Roles */}
                 {row.roles.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {row.roles.map(r => <span key={r} style={roleBadge(r)}>{r}</span>)}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ color: 'rgba(15,23,42,0.4)', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>Roles</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {row.roles.map(r => <span key={r} style={roleBadge(r)}>{r}</span>)}
+                    </div>
                   </div>
                 )}
 
+                {/* Subjects */}
                 {row.subjectCodes.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                    {row.subjectCodes.map(c => <span key={c} style={{ ...BASE_BADGE, background: 'rgba(5,150,105,0.09)', color: '#065f46', fontSize: 11 }}>{c}</span>)}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ color: 'rgba(15,23,42,0.4)', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>Subjects</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                      {row.subjectCodes.map(c => <span key={c} style={{ ...BASE_BADGE, background: 'rgba(5,150,105,0.09)', color: '#065f46', fontSize: 11 }}>{c}</span>)}
+                    </div>
                   </div>
                 )}
 
+                {/* Workload */}
                 {usage && (
-                  <div style={{ fontSize: 12, color: over ? '#b91c1c' : 'rgba(15,23,42,0.55)', fontWeight: 600 }}>
-                    {usage.periods}{cap > 0 ? `/${cap}` : ''} periods/week
-                    {over && <span style={{ marginLeft: 6, ...BASE_BADGE, background: 'rgba(220,38,38,0.08)', color: '#991b1b', fontSize: 10 }}>Over capacity</span>}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: 'rgba(15,23,42,0.4)', fontWeight: 700, fontSize: 11 }}>Workload</span>
+                    <span style={{ fontSize: 12, color: over ? '#b91c1c' : 'rgba(15,23,42,0.7)', fontWeight: 700 }}>
+                      {usage.periods}{cap > 0 ? `/${cap}` : ''} periods/week
+                    </span>
+                    {over && <span style={{ ...BASE_BADGE, background: 'rgba(220,38,38,0.08)', color: '#991b1b', fontSize: 10 }}>Over cap</span>}
                   </div>
                 )}
 
+                {/* Contact */}
                 {(row.phone || row.email) && (
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'rgba(15,23,42,0.5)', fontWeight: 600 }}>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'rgba(15,23,42,0.5)', fontWeight: 600, borderTop: '1px solid rgba(15,23,42,0.06)', paddingTop: 8 }}>
                     {row.phone && <span>📞 {row.phone}</span>}
                     {row.email && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>✉ {row.email}</span>}
                   </div>

@@ -523,10 +523,26 @@ export function ErpWorkspaceChrome({
                   </span>
                 ) : null}
               </Link>
-            ) : (
-              <button type="button" className="erp-sl-icon-btn" aria-label="Notifications (preview)" title="No notifications yet">
+            ) : persona === 'teacher' ? (
+              <Link
+                to="/app/teacher/notifications"
+                className="erp-sl-icon-btn"
+                aria-label="Notifications"
+                title="Notifications"
+                style={{ textDecoration: 'none', position: 'relative' }}
+              >
                 <Bell size={18} />
-              </button>
+              </Link>
+            ) : (
+              <Link
+                to="/app/school/announcements/new"
+                className="erp-sl-icon-btn"
+                aria-label="Post circular"
+                title="Post a circular"
+                style={{ textDecoration: 'none', position: 'relative' }}
+              >
+                <Bell size={18} />
+              </Link>
             )}
             <div className="erp-sl-user-wrap" style={{ position: 'relative' }}>
               <button
