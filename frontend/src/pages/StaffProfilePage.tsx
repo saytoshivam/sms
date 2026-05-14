@@ -252,7 +252,7 @@ function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMa
       </button>
       {open && (
         <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.12)', boxShadow: '0 8px 32px rgba(15,23,42,0.14)', zIndex: 200, minWidth: 200, padding: 6 }}>
-          {item('Upload Document', '📎', () => toast.info('File Upload', 'Digital file upload requires the document storage module to be enabled by your administrator.'), false, true)}
+          {item('Upload Document', '📎', () => onDocuments ? onDocuments() : undefined, false, !onDocuments)}
           {item('Reset Login', '🔄', onResetLogin, false, !profile.hasLoginAccount)}
           <div style={{ height: 1, background: 'rgba(15,23,42,0.07)', margin: '4px 0' }} />
           {item('Deactivate', '⏸', onDeactivate, true, profile.status === 'INACTIVE')}
@@ -865,12 +865,36 @@ function RejectDialog({ staffId, docId, onDone, onCancel }: { staffId: number; d
 function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId: number; onRefresh: () => void; isMobile: boolean }) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const label = doc.documentTypeName || docDisplayLabel(doc.documentType);
   const isPending    = doc.collectionStatus === 'PENDING_COLLECTION';
   const isCollected  = doc.collectionStatus === 'COLLECTED_PHYSICAL';
   const isNotReq     = doc.collectionStatus === 'NOT_REQUIRED';
   const isVerified   = doc.verificationStatus === 'VERIFIED';
+  const isUploaded   = doc.uploadStatus === 'UPLOADED';
+
+  // Upload handler
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await api.post(`/api/staff/${staffId}/documents/${doc.id}/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      onRefresh();
+      toast.success('Uploaded', `${file.name} uploaded successfully.`);
+    } catch (err) {
+      toast.error('Upload failed', formatApiError(err));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
 
   // Next best action
   let primaryLabel = '';
@@ -898,15 +922,24 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
 
   // Reject action (secondary, only when collected and not already verified/rejected)
   const showReject = isCollected && !isVerified && doc.verificationStatus !== 'REJECTED';
+  // Show upload button for all non-waived docs
+  const showUpload = !isNotReq && !isVerified;
 
   if (isMobile) {
     return (
       <>
+        {/* Hidden file input */}
+        <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={handleFileChange} />
         <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.09)', padding: '14px 16px', display: 'grid', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: 'rgba(15,23,42,0.85)' }}>{label}</div>
             <DocStatusBadge status={doc.displayStatus} />
           </div>
+          {doc.originalFilename && (
+            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span>📎</span> <span style={{ fontStyle: 'italic' }}>{doc.originalFilename}</span>
+            </div>
+          )}
           {doc.remarks && (
             <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', fontStyle: 'italic' }}>"{doc.remarks}"</div>
           )}
@@ -920,6 +953,12 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
               <button type="button" disabled={busy} onClick={primaryAction}
                 style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
                 {busy ? '…' : primaryLabel}
+              </button>
+            )}
+            {showUpload && (
+              <button type="button" disabled={uploading} onClick={() => fileInputRef.current?.click()}
+                style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(15,23,42,0.15)', background: uploading ? 'rgba(15,23,42,0.04)' : '#fff', fontWeight: 700, fontSize: 12, cursor: uploading ? 'not-allowed' : 'pointer', color: isUploaded ? '#166534' : 'rgba(15,23,42,0.65)' }}>
+                {uploading ? 'Uploading…' : isUploaded ? '↑ Re-upload' : '↑ Upload'}
               </button>
             )}
             {showReject && (
@@ -939,9 +978,16 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
   // Desktop row
   return (
     <>
+      {/* Hidden file input */}
+      <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={handleFileChange} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid rgba(15,23,42,0.05)' }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(15,23,42,0.82)' }}>{label}</div>
+          {doc.originalFilename && (
+            <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.45)', marginTop: 2 }}>
+              📎 {doc.originalFilename}
+            </div>
+          )}
           {doc.remarks && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.41)', marginTop: 2, fontStyle: 'italic' }}>"{doc.remarks}"</div>}
           {doc.verificationSource && (
             <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', marginTop: 1, fontWeight: 600 }}>
@@ -955,6 +1001,13 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
             <button type="button" disabled={busy} onClick={primaryAction}
               style={{ padding: '6px 13px', borderRadius: 7, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
               {busy ? '…' : primaryLabel}
+            </button>
+          )}
+          {showUpload && (
+            <button type="button" disabled={uploading} onClick={() => fileInputRef.current?.click()}
+              title={isUploaded ? 'Replace uploaded file' : 'Upload document file (PDF, JPG, PNG — max 10 MB)'}
+              style={{ padding: '6px 13px', borderRadius: 7, border: '1px solid rgba(15,23,42,0.15)', background: uploading ? 'rgba(15,23,42,0.04)' : '#fff', fontWeight: 700, fontSize: 12, cursor: uploading ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', color: isUploaded ? '#166534' : 'rgba(15,23,42,0.65)' }}>
+              {uploading ? 'Uploading…' : isUploaded ? '↑ Re-upload' : '↑ Upload'}
             </button>
           )}
           {showReject && (
@@ -1687,6 +1740,7 @@ export function StaffProfilePage() {
               onDeactivate={() => statusMut.mutate('INACTIVE')}
               onMarkExited={() => statusMut.mutate('EXITED')}
               onRefresh={refreshProfile}
+              onDocuments={() => setTab('documents')}
             />
           </div>
         </div>

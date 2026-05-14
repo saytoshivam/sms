@@ -1,0 +1,300 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   SelectKeeper / SmartSelect / CatalogCombobox — global theme styles
+   Primary: var(--color-primary, #ea580c)  Text: #0f172a  Muted: #94a3b8
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Root container ──────────────────────────────────────────────────────── */
+.select-keeper {
+  position: relative;
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+/* ── Trigger button ──────────────────────────────────────────────────────── */
+.select-keeper__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  border: 1.5px solid rgba(15, 23, 42, 0.15);
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  box-sizing: border-box;
+  line-height: 1.4;
+}
+
+.select-keeper__trigger:hover:not(:disabled) {
+  border-color: var(--color-primary, #ea580c);
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 3%, #ffffff);
+}
+
+.select-keeper__trigger:focus-visible {
+  outline: none;
+  border-color: var(--color-primary, #ea580c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #ea580c) 18%, transparent);
+}
+
+.select-keeper__trigger[aria-expanded='true'] {
+  border-color: var(--color-primary, #ea580c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #ea580c) 14%, transparent);
+}
+
+.select-keeper__trigger:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  background: rgba(15, 23, 42, 0.04);
+}
+
+/* ── Value text ──────────────────────────────────────────────────────────── */
+.select-keeper__value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Chevron ─────────────────────────────────────────────────────────────── */
+.select-keeper__chev {
+  flex-shrink: 0;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  transition: transform 0.16s ease, color 0.13s;
+  pointer-events: none;
+}
+
+.select-keeper__trigger[aria-expanded='true'] .select-keeper__chev,
+.select-keeper__trigger:hover .select-keeper__chev {
+  color: var(--color-primary, #ea580c);
+}
+
+.select-keeper__trigger[aria-expanded='true'] .select-keeper__chev {
+  transform: rotate(180deg);
+}
+
+/* ── Portal dropdown (ul or panel wrapper) ───────────────────────────────── */
+.select-keeper__menu--portal {
+  background: #ffffff;
+  border-radius: 11px;
+  border: 1.5px solid rgba(15, 23, 42, 0.1);
+  box-shadow:
+    0 10px 36px rgba(15, 23, 42, 0.14),
+    0 3px 10px rgba(15, 23, 42, 0.07);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  min-width: 160px;
+  list-style: none;
+  margin: 0;
+}
+
+/* ── Inline/inlined menu ─────────────────────────────────────────────────── */
+.select-keeper__menu {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+}
+
+.select-keeper__menu--in-panel {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Menu list (SmartSelect ul inside portal div) ────────────────────────── */
+.select-keeper__menu-list {
+  list-style: none;
+  margin: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Option buttons ──────────────────────────────────────────────────────── */
+.select-keeper__option {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.09s ease, color 0.09s;
+  line-height: 1.4;
+  min-width: 0;
+}
+
+.select-keeper__option:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 10%, transparent);
+  color: #7c2d12;
+}
+
+.select-keeper__option--selected {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 15%, transparent);
+  color: #9a3412;
+  font-weight: 750;
+}
+
+.select-keeper__option--selected:hover {
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 22%, transparent);
+}
+
+.select-keeper__option:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Search input inside searchable panel ────────────────────────────────── */
+.select-keeper__search {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1.5px solid rgba(15, 23, 42, 0.13);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  background: rgba(15, 23, 42, 0.03);
+  outline: none;
+  box-sizing: border-box;
+  margin: 4px 0 2px;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+}
+
+.select-keeper__search:focus {
+  border-color: var(--color-primary, #ea580c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #ea580c) 12%, transparent);
+  background: #ffffff;
+}
+
+/* ── Panel wrapper (search + list for searchable SelectKeeper) ───────────── */
+.select-keeper__panel {
+  background: #ffffff;
+  border-radius: 11px;
+  border: 1.5px solid rgba(15, 23, 42, 0.1);
+  box-shadow:
+    0 10px 36px rgba(15, 23, 42, 0.14),
+    0 3px 10px rgba(15, 23, 42, 0.07);
+  padding: 8px;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Catalog Combobox  (SmartSelect, ClassGroupSearchCombobox,
+                      OptionSearchCombobox, PlatformSchoolSearchCombobox)
+   ─────────────────────────────────��─────────────────────────────────────────── */
+
+.catalog-combobox {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.catalog-combobox__field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* The clickable trigger input / button */
+.catalog-combobox__input {
+  display: block;
+  width: 100%;
+  border: 1.5px solid rgba(15, 23, 42, 0.15);
+  border-radius: 9px;
+  padding: 8px 34px 8px 12px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #0f172a;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1.4;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.catalog-combobox__input:hover:not(:disabled) {
+  border-color: var(--color-primary, #ea580c);
+  background: color-mix(in srgb, var(--color-primary, #ea580c) 3%, #ffffff);
+}
+
+.catalog-combobox__input:focus,
+.catalog-combobox__input:focus-visible {
+  outline: none;
+  border-color: var(--color-primary, #ea580c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #ea580c) 14%, transparent);
+}
+
+.catalog-combobox__input[aria-expanded='true'] {
+  border-color: var(--color-primary, #ea580c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #ea580c) 12%, transparent);
+}
+
+.catalog-combobox__input:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  background: rgba(15, 23, 42, 0.04);
+}
+
+/* Chevron absolutely positioned inside the field */
+.catalog-combobox__field > .select-keeper__chev {
+  position: absolute;
+  right: 10px;
+  pointer-events: none;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.catalog-combobox__field > .select-keeper__chev svg {
+  display: block;
+}
+
+/* Option label text */
+.catalog-combobox__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  min-width: 0;
+}
+
+/* Secondary / meta line inside an option */
+.catalog-combobox__meta {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  margin-top: 1px;
+}
+

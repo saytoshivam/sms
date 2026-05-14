@@ -8,7 +8,11 @@ import com.myhaimi.sms.entity.enums.DocumentUploadStatus;
 import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.DocumentRequirementStatus;
 import com.myhaimi.sms.entity.enums.DocumentTargetType;
+import com.myhaimi.sms.entity.enums.FileCategory;
+import com.myhaimi.sms.entity.enums.FileVisibility;
 import com.myhaimi.sms.entity.enums.VerificationSource;
+import com.myhaimi.sms.modules.files.FileObjectDTO;
+import com.myhaimi.sms.modules.files.FileService;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +20,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.*;
@@ -54,6 +59,7 @@ public class StaffDocumentService {
     private final DocumentTypeRepo  documentTypeRepo;
     private final SchoolDocumentRequirementRepo requirementRepo;
     private final UserRepo          userRepo;
+    private final FileService       fileService;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -217,6 +223,47 @@ public class StaffDocumentService {
                 .stream()
                 .map(this::toDTO)
                 .toList();
+    }
+
+    /**
+     * Upload a file and attach it to a staff document checklist row.
+     * Sets uploadStatus=UPLOADED and links the FileObject.
+     * POST /api/staff/{staffId}/documents/{docId}/upload
+     */
+    @Transactional
+    public StaffDocumentSummaryDTO uploadDocumentFile(
+            Integer staffId, Integer docId,
+            MultipartFile file, Authentication auth) {
+
+        Integer schoolId = requireSchoolId();
+        requireStaff(staffId, schoolId);
+        StaffDocument doc = requireDoc(docId, staffId);
+
+        Integer uploadedBy = resolveCallerStaffId();
+
+        // Upload using TEACHER_DOCUMENT category — validates type (PDF/JPG/PNG) and size (≤ 10 MB)
+        FileObjectDTO fo = fileService.uploadForModule(
+                file,
+                FileCategory.TEACHER_DOCUMENT,
+                "STAFF",
+                staffId.toString(),
+                FileVisibility.PRIVATE,
+                uploadedBy);
+
+        // Link the FileObject
+        doc.setFileId(fo.getId());
+
+        // Upgrade collection status if the document was waiting to be collected
+        if (doc.getCollectionStatus() == DocumentCollectionStatus.PENDING_COLLECTION) {
+            doc.setCollectionStatus(DocumentCollectionStatus.COLLECTED_PHYSICAL);
+        }
+
+        // A newly uploaded file always resets verification to NOT_VERIFIED
+        doc.setVerificationStatus(DocumentVerificationStatus.NOT_VERIFIED);
+        doc.setUploadStatus(DocumentUploadStatus.UPLOADED);
+
+        documentRepo.save(doc);
+        return toDTO(doc);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

@@ -12,8 +12,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -121,6 +123,29 @@ public class StaffController {
     public ResponseEntity<?> markNotRequired(@PathVariable Integer staffId, @PathVariable Integer docId) {
         try { return ResponseEntity.ok(staffDocumentService.markNotRequired(staffId, docId)); }
         catch (IllegalArgumentException ex) { return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage())); }
+    }
+
+    /**
+     * Upload a file and attach it to a staff document checklist row.
+     * Sets uploadStatus=UPLOADED and links the FileObject.
+     * POST /api/staff/{staffId}/documents/{docId}/upload
+     */
+    @PostMapping("/{staffId}/documents/{docId}/upload")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD','TEACHER','CLASS_TEACHER')")
+    public ResponseEntity<?> uploadDocumentFile(
+            @PathVariable Integer staffId,
+            @PathVariable Integer docId,
+            @RequestParam("file") MultipartFile file,
+            Authentication auth) {
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(staffDocumentService.uploadDocumentFile(staffId, docId, file, auth));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Upload failed: " + ex.getMessage()));
+        }
     }
 
     // ── Access lifecycle ──────────────────────────────────────────────────────
