@@ -265,22 +265,22 @@ export function SmartSelect({
         ? createPortal(
             <div
               ref={menuRef}
-              className="select-keeper__menu select-keeper__menu--portal"
+              className="select-keeper__menu--portal"
               style={{
                 ...menuStyle,
                 display: 'flex',
                 flexDirection: 'column',
-                padding: 0,
+                padding: 5,
                 overflow: 'hidden',
               }}
               onKeyDown={onMenuKey}
             >
               {showSearch ? (
-                <div style={{ padding: 8, borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                <div style={{ padding: '0 0 6px 0', borderBottom: '1px solid rgba(15,23,42,0.08)', marginBottom: 4 }}>
                   <input
                     ref={searchRef}
                     type="text"
-                    className="catalog-combobox__input"
+                    className="select-keeper__search"
                     placeholder={searchPlaceholder}
                     value={query}
                     onChange={(e) => {
@@ -288,7 +288,7 @@ export function SmartSelect({
                       setActiveIndex(0);
                     }}
                     onKeyDown={onMenuKey}
-                    style={{ height: 30, padding: '4px 8px' }}
+                    style={{ margin: 0 }}
                   />
                 </div>
               ) : null}
@@ -299,7 +299,7 @@ export function SmartSelect({
                 aria-labelledby={baseId}
                 style={{
                   margin: 0,
-                  padding: 4,
+                  padding: 0,
                   listStyle: 'none',
                   overflowY: 'auto',
                   flex: 1,
