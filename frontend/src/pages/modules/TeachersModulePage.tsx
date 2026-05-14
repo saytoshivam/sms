@@ -480,11 +480,9 @@ export function TeachersModulePage() {
             </button>
           )}
           {canEdit && (
-            <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '7px 14px' }}
-              title="Bulk CSV import is in Setup Wizard → Staff"
-              onClick={() => toast.info('Bulk Import', 'Use Setup Wizard → Staff step to import staff via CSV.')}>
+            <Link to="/app/teachers/bulk-import" className="btn secondary" style={{ fontSize: 13, padding: '7px 14px' }}>
               ↑ Bulk Import
-            </button>
+            </Link>
           )}
           <button type="button" className="btn secondary" style={{ fontSize: 13, padding: '7px 14px' }}
             title={`Export ${filtered.length} staff member(s) to CSV`}

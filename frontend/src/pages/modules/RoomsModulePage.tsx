@@ -8,7 +8,6 @@ import { ModulePage, type StatusLevel } from '../../components/module/ModulePage
 import { SmartSelect } from '../../components/SmartSelect';
 import { useApiTags } from '../../lib/apiTags';
 import { useImpactStore } from '../../lib/impactStore';
-import { onboardingStepHref } from '../../lib/onboardingWizardMeta';
 import { SavedRoomsCatalogPanel } from '../../components/catalog/SavedRoomsCatalogPanel';
 import { ROOM_TYPES, ROOM_TYPE_LABELS, type RoomVenueType } from '../../lib/roomVenueCompatibility';
 
@@ -122,6 +121,9 @@ export function RoomsModulePage() {
       <Link to="/app" className="btn secondary">
         Back to hub
       </Link>
+      <Link to="/app/rooms/bulk-import" className="btn secondary">
+        Bulk import
+      </Link>
       <button type="button" className="btn" onClick={() => setTabUrl('add')}>
         + Add room
       </button>
@@ -148,30 +150,6 @@ export function RoomsModulePage() {
           busy={createOne.isPending}
           onSave={() => createOne.mutate(createDraft)}
         />
-      ) : null}
-
-      {tab === 'browse' ? (
-        <div
-          className="card"
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 12,
-            border: '1px solid rgba(37,99,235,0.22)',
-            background: 'rgba(239,246,255,0.75)',
-            fontSize: 13,
-            lineHeight: 1.45,
-          }}
-        >
-          <div style={{ fontWeight: 950, marginBottom: 4 }}>Bulk CSV, ranges & floor blocks</div>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>
-            Rooms CSV, bulk room-number ranges, and onboarding batch tools are still in the wizard.{' '}
-            <Link to={onboardingStepHref('ROOMS')} style={{ fontWeight: 900, color: 'var(--color-primary, #ea580c)' }}>
-              Open wizard — Rooms step
-            </Link>
-            .
-          </div>
-        </div>
       ) : null}
 
       {tab === 'browse' ? (

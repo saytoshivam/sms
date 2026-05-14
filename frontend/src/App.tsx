@@ -19,7 +19,11 @@ import { PlatformRuntimeFlagsPage } from './pages/platform/PlatformRuntimeFlagsP
 import { PlatformSchoolEditPage } from './pages/platform/PlatformSchoolEditPage';
 import { PlatformSchoolsDirectoryPage } from './pages/platform/PlatformSchoolsDirectoryPage';
 import { StudentsPage } from './pages/StudentsPage';
-import { StudentProfilePage } from './pages/StudentProfilePage';
+import { StaffProfilePage } from './pages/StaffProfilePage';
+import { BulkImportTeachersPage } from './pages/modules/BulkImportTeachersPage';
+import { BulkImportSubjectsPage } from './pages/modules/BulkImportSubjectsPage';
+import { BulkImportRoomsPage } from './pages/modules/BulkImportRoomsPage';
+import { BulkImportClassesPage } from './pages/modules/BulkImportClassesPage';
 import { StudentOnboardWizardPage } from './pages/students/StudentOnboardWizardPage';
 import { BulkImportStudentsPage } from './pages/students/BulkImportStudentsPage';
 import { AttendancePage } from './pages/AttendancePage';
@@ -46,7 +50,7 @@ import { StudentResultTermPage } from './pages/StudentResultTermPage';
 import { StudentExamsPage } from './pages/StudentExamsPage';
 import { SchoolManagementPage } from './pages/SchoolManagementPage';
 import { UserAccessManagementPage } from './pages/UserAccessManagementPage';
-import { SchoolOnboardingWizardPage } from './pages/SchoolOnboardingWizardPage';
+// SchoolOnboardingWizardPage removed — wizard is being phased out
 import { AppHomeRoute } from './pages/AppHomeRoute';
 import { OperationsHubPage } from './pages/OperationsHubPage';
 import { AcademicModulePage } from './pages/modules/AcademicModulePage';
@@ -57,7 +61,6 @@ import { TimeModulePage } from './pages/modules/TimeModulePage';
 import { TimetableModulePage } from './pages/modules/TimetableModulePage';
 import { ClassesSectionsModulePage } from './pages/modules/ClassesSectionsModulePage';
 import { DocumentRequirementsPage } from './pages/students/DocumentRequirementsPage';
-import { StaffProfilePage } from './pages/StaffProfilePage';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useAuth();
@@ -85,11 +88,15 @@ export default function App() {
         <Route path="operations-hub" element={<OperationsHubPage />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="classes-sections" element={<ClassesSectionsModulePage />} />
+        <Route path="classes-sections/bulk-import" element={<BulkImportClassesPage />} />
         <Route path="academic" element={<AcademicModulePage />} />
         <Route path="subjects" element={<SubjectsModulePage />} />
+        <Route path="subjects/bulk-import" element={<BulkImportSubjectsPage />} />
         <Route path="teachers" element={<TeachersModulePage />} />
+        <Route path="teachers/bulk-import" element={<BulkImportTeachersPage />} />
         <Route path="teachers/:staffId" element={<StaffProfilePage />} />
         <Route path="rooms" element={<RoomsModulePage />} />
+        <Route path="rooms/bulk-import" element={<BulkImportRoomsPage />} />
         <Route path="time" element={<TimeModulePage />} />
         <Route
           path="timetable"
@@ -112,8 +119,8 @@ export default function App() {
         <Route path="school-theme" element={<SchoolThemePage />} />
         <Route path="school/management" element={<SchoolManagementPage />} />
         <Route path="school/document-requirements" element={<DocumentRequirementsPage />} />
-        {/* Kept for existing deep links; dashboard no longer exposes the wizard directly. */}
-        <Route path="onboarding" element={<SchoolOnboardingWizardPage />} />
+        {/* Setup wizard removed — redirect deep links to operations hub */}
+        <Route path="onboarding" element={<Navigate to="/app/operations-hub" replace />} />
         <Route path="user-access" element={<UserAccessManagementPage />} />
         {/* Legacy shortcuts; roster is its own module. */}
         <Route path="class-groups" element={<Navigate to="/app/classes-sections" replace />} />

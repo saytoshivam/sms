@@ -10,7 +10,6 @@ import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
 import { useApiTags } from '../../lib/apiTags';
 import { useImpactStore } from '../../lib/impactStore';
-import { onboardingStepHref } from '../../lib/onboardingWizardMeta';
 
 type ClassGroupLite = { id: number };
 
@@ -142,6 +141,9 @@ export function ClassesSectionsModulePage() {
       <Link to="/app" className="btn secondary">
         Back to hub
       </Link>
+      <Link to="/app/classes-sections/bulk-import" className="btn secondary">
+        Bulk import
+      </Link>
       <button type="button" className="btn" onClick={() => setTabUrl('add')}>
         + Add class
       </button>
@@ -151,7 +153,7 @@ export function ClassesSectionsModulePage() {
   return (
     <ModulePage
       title="Classes & sections"
-      subtitle="Browse and edit saved sections below. Use Add new for the same two-column grade + comma-separated sections flow as the setup wizard—we create codes (e.g. 10-A) and display names for you. Bulk CSV stays in the wizard."
+      subtitle="Browse and edit saved sections below. Use Add new for the grade + sections flow, or Bulk import to upload a CSV."
       status={status}
       headerActions={headerActions}
       tabs={[
@@ -170,30 +172,6 @@ export function ClassesSectionsModulePage() {
           onGenerate={() => createSections.mutate()}
           busy={createSections.isPending}
         />
-      ) : null}
-
-      {tab === 'browse' ? (
-        <div
-          className="card"
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 12,
-            border: '1px solid rgba(37,99,235,0.22)',
-            background: 'rgba(239,246,255,0.75)',
-            fontSize: 13,
-            lineHeight: 1.45,
-          }}
-        >
-          <div style={{ fontWeight: 950, marginBottom: 4 }}>Bulk generators & CSV</div>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>
-            Grade ranges, multi-grade templates, and classes CSV live in the setup wizard.{' '}
-            <Link to={onboardingStepHref('CLASSES')} style={{ fontWeight: 900, color: 'var(--color-primary, #ea580c)' }}>
-              Open wizard — Classes &amp; sections
-            </Link>
-            .
-          </div>
-        </div>
       ) : null}
 
       {tab === 'browse' ? (

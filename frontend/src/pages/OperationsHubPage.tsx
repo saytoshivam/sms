@@ -259,7 +259,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
       return {
         level: 'idle',
         primary: 'No sections yet',
-        secondary: 'Add sections in Classes & sections; CSV in Setup wizard.',
+        secondary: 'Add sections in Classes & Sections or use Bulk import.',
       };
     let withIssues = 0;
     let overCap = 0;
@@ -288,11 +288,11 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
     const grades = new Set(
       cgs.map((c) => c.gradeLevel).filter((g): g is number => typeof g === 'number' && Number.isFinite(g)),
     );
-    return {
-      level: 'ok',
-      primary: `${cgs.length} section${cgs.length === 1 ? '' : 's'} · ${grades.size} grade${grades.size === 1 ? '' : 's'}`,
-      secondary: 'Same browser as onboarding.',
-    };
+      return {
+        level: 'ok',
+        primary: `${cgs.length} section${cgs.length === 1 ? '' : 's'} · ${grades.size} grade${grades.size === 1 ? '' : 's'}`,
+        secondary: 'Manage in Classes & Sections.',
+      };
   }, [academic.data, academic.isLoading]);
 
   const subjectsReadiness = useMemo<{ level: StatusLevel; primary: string; secondary?: string }>(() => {
@@ -545,9 +545,6 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
                         : 'Setup needed'
                 }
               />
-              <span className="muted" style={{ fontSize: 11, fontWeight: 800 }}>
-                Setup {requiredDone}/{REQUIRED_STEPS.length} required
-              </span>
               <ImpactPill
                 changes={impact.total}
                 hard={impact.hard}
@@ -568,9 +565,6 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
                 aria-label="Hub search preview"
               />
             </div>
-            <Link to="/app/onboarding" className="btn secondary" style={{ whiteSpace: 'nowrap' }}>
-              Setup wizard & CSV
-            </Link>
           </div>
         </div>
       </header>

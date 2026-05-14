@@ -152,9 +152,14 @@ export function SubjectsModulePage() {
         Back to hub
       </Link>
       {readOnly ? null : (
-        <button type="button" className="btn" onClick={() => setTabUrl('add')}>
-          + Add subject
-        </button>
+        <>
+          <Link to="/app/subjects/bulk-import" className="btn secondary">
+            Bulk import
+          </Link>
+          <button type="button" className="btn" onClick={() => setTabUrl('add')}>
+            + Add subject
+          </button>
+        </>
       )}
     </>
   );
