@@ -1,8 +1,8 @@
+@import './styles/selectKeeper.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import './styles/selectKeeper.css';
 
 /* Default palette — keep in sync with frontend/src/theme/appTheme.ts and AppThemeDefaults.java */
 :root {
