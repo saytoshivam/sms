@@ -64,9 +64,21 @@ export function TimeKeeper({
     if (!btn) return;
     const r = btn.getBoundingClientRect();
     const margin = 10;
+    const gap = 8;
     const vw = window.innerWidth;
-    const top = r.bottom + 8;
+    const vh = window.innerHeight;
     const pop = popoverRef.current;
+
+    // Estimate popover height for flip logic
+    const estPopH = pop ? pop.getBoundingClientRect().height : 300;
+    const spaceBelow = vh - r.bottom - gap - margin;
+    const spaceAbove = r.top - gap - margin;
+    const openUp = spaceBelow < estPopH && spaceAbove > spaceBelow;
+
+    const top = openUp
+      ? Math.max(margin, r.top - gap - estPopH)
+      : r.bottom + gap;
+
     let left: number;
     if (pop) {
       const pw = pop.getBoundingClientRect().width;
@@ -75,11 +87,18 @@ export function TimeKeeper({
     } else {
       left = r.left + r.width / 2;
     }
+
+    // Max height to avoid overflow
+    const maxH = openUp
+      ? Math.min(spaceAbove, 360)
+      : Math.min(spaceBelow, 360);
+
     setPopoverStyle({
       position: 'fixed',
       left,
       top,
       zIndex: 10060,
+      maxHeight: maxH > 80 ? maxH : undefined,
       transform: pop ? undefined : 'translateX(-50%)',
     });
   }, []);

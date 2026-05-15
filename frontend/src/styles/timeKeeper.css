@@ -92,7 +92,10 @@
   padding: 10px;
   min-width: 200px;
   box-sizing: border-box;
-  /* position: fixed + left/top/zIndex set via inline style by the component */
+  display: flex;
+  flex-direction: column;
+  /* position: fixed + left/top/zIndex/maxHeight set via inline style by the component */
+  overflow: hidden;
 }
 
 /* ── Column layout ───────────────────────────────────────────────────────── */
@@ -100,15 +103,19 @@
   display: flex;
   gap: 6px;
   align-items: flex-start;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .time-keeper__col {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 240px;
-  overflow-y: auto;
   flex: 1;
+  overflow-y: auto;
+  min-height: 80px;
+  max-height: 220px;
   scrollbar-width: thin;
   scrollbar-color: rgba(234, 88, 12, 0.3) transparent;
 }
