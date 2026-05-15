@@ -39,6 +39,11 @@
   box-shadow: none;
 }
 
+/* ── User profile wrapper (relative anchor for dropdown popover) ── */
+.erp-sl-user-wrap {
+  position: relative;
+}
+
 .erp-sl-sidebar--overlay.erp-sl-sidebar--open {
   transform: translateX(0);
   box-shadow: 12px 0 40px rgba(15, 23, 42, 0.12);

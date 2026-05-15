@@ -3682,3 +3682,190 @@ textarea:disabled {
   margin: 0;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   WORKSPACE FEATURE PAGE — bulk import, teacher workspace, onboard wizard
+   ═══════════════════════════════════════════════════════════════════════ */
+.workspace-feature-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 32px);
+  box-sizing: border-box;
+}
+
+.workspace-feature-page__title {
+  margin: 0 0 4px;
+  font-size: clamp(1.15rem, 2.8vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+}
+
+.workspace-feature-page__lead {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STUDENT DASHBOARD (ERP-style student portal)
+   ═══════════════════════════════════════════════════════════════════════ */
+.student-dash-erp {
+  display: grid;
+  gap: 16px;
+}
+
+.student-dash-erp__intro {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+/* students-workspace is a page wrapper used for the /students list view */
+.students-workspace {
+  display: grid;
+  gap: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SMS PROVENANCE BADGES — auto / manual / bulk-lock assignment status
+   ═══════════════════════════════════════════════════════════════════════ */
+.sms-provenance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.sms-provenance-badge--auto {
+  background: color-mix(in srgb, var(--color-accent) 22%, #fef9c3);
+  color: #713f12;
+}
+
+.sms-provenance-badge--manual {
+  background: color-mix(in srgb, var(--color-primary) 18%, #fff7ed);
+  color: var(--color-primary);
+}
+
+.sms-provenance-badge--bulk-lock {
+  background: color-mix(in srgb, #8b5cf6 18%, #f5f3ff);
+  color: #5b21b6;
+}
+
+.sms-provenance-badge__label {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.sms-provenance-badge__lock-icon {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.sms-provenance-badge-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SMS MODAL BACKDROP
+   ═══════════════════════════════════════════════════════════════════════ */
+.sms-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CATALOG COMBOBOX — hint / error states in search comboboxes
+   ═══════════════════════════════════════════════════════════════════════ */
+.catalog-combobox__hint {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  list-style: none;
+  font-style: italic;
+}
+
+.catalog-combobox__hint--error {
+  color: #b91c1c;
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LECTURE DAY PREVIEW — compact lecture timeline panel
+   ═══════════════════════════════════════════════════════════════════════ */
+.lecture-day-preview {
+  background: color-mix(in srgb, #ffffff 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 12%, color-mix(in srgb, var(--color-text) 8%, transparent));
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.lecture-day-preview__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lecture-day-preview__title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.lecture-day-preview__hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.lecture-day-preview__body {
+  min-height: 60px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ACADEMIC SUBJECT TILE — subject cards in academic structure step
+   ═══════════════════════════════════════════════════════════════════════ */
+.academic-subject-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #ffffff 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 12%, color-mix(in srgb, var(--color-text) 8%, transparent));
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.academic-subject-tile:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SMART ASSIGN ROOT — wrapper for SmartTeacherAssignmentBlock
+   ═══════════════════════════════════════════════════════════════════════ */
+.smart-assign-root {
+  /* gap is applied inline; this just ensures consistent overflow behavior */
+  overflow: visible;
+}
+

@@ -1,5 +1,11 @@
 /* Students workspace — enterprise list, table + mobile cards */
 
+/* Page wrapper used in /students and student dashboard */
+.students-workspace {
+  display: grid;
+  gap: 12px;
+}
+
 .sw-root {
   display: flex;
   flex-direction: column;

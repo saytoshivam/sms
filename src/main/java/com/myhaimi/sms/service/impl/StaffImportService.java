@@ -521,12 +521,13 @@ public class StaffImportService {
     }
 
     private static InputStream stripBom(InputStream in) throws IOException {
-        in.mark(3);
+        InputStream buffered = in.markSupported() ? in : new java.io.BufferedInputStream(in);
+        buffered.mark(3);
         byte[] bom = new byte[3];
-        int read = in.read(bom, 0, 3);
-        if (read == 3 && bom[0] == (byte)0xEF && bom[1] == (byte)0xBB && bom[2] == (byte)0xBF) return in;
-        in.reset();
-        return in;
+        int read = buffered.read(bom, 0, 3);
+        if (read == 3 && bom[0] == (byte)0xEF && bom[1] == (byte)0xBB && bom[2] == (byte)0xBF) return buffered;
+        buffered.reset();
+        return buffered;
     }
 
     // ── Catalogue loaders ──────────────────────────────────────────────────────

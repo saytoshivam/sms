@@ -164,16 +164,20 @@ public final class CsvImportParser {
         return result;
     }
 
-    /** Strip UTF-8 BOM if present. */
+    /** Strip UTF-8 BOM if present.
+     *  Wraps stream in {@link java.io.BufferedInputStream} when mark/reset is not natively supported
+     *  (e.g. Spring MultipartFile streams).
+     */
     private static InputStream stripBom(InputStream in) throws IOException {
-        in.mark(3);
+        InputStream buffered = in.markSupported() ? in : new java.io.BufferedInputStream(in);
+        buffered.mark(3);
         byte[] bom = new byte[3];
-        int read = in.read(bom, 0, 3);
+        int read = buffered.read(bom, 0, 3);
         if (read == 3 && bom[0] == (byte) 0xEF && bom[1] == (byte) 0xBB && bom[2] == (byte) 0xBF) {
-            return in; // BOM consumed
+            return buffered; // BOM consumed
         }
-        in.reset();
-        return in;
+        buffered.reset();
+        return buffered;
     }
 
     // ── Exception ────────────────────────────────────────────────────────────────

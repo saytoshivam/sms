@@ -771,3 +771,70 @@
 .stw-link-danger:hover:not(:disabled) {
   color: #b91c1c;
 }
+
+/* ── Missing stw- layout helpers ── */
+
+/* Inner content row of the shell head (title + breadcrumb) */
+.stw-shell-head-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Rail variant of the sidebar (icon-only collapsed state) */
+.stw-sidebar--rail .stw-sidebar-title,
+.stw-sidebar--rail .stw-rail-label {
+  display: none;
+}
+
+/* Main content panel card */
+.stw-panel {
+  background: color-mix(in srgb, #ffffff 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 10%, color-mix(in srgb, var(--color-text) 8%, transparent));
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 90%, transparent) inset,
+    0 6px 24px rgba(15, 23, 42, 0.07);
+}
+
+/* Step body = content area inside the panel */
+.stw-step-body {
+  display: grid;
+  gap: 16px;
+}
+
+/* Chip pill (document chip row) */
+.stw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--color-primary) 10%, #fff7ed);
+  color: var(--color-text);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.stw-chip--doc {
+  background: color-mix(in srgb, #3b82f6 10%, #eff6ff);
+  color: #1e40af;
+  border-color: color-mix(in srgb, #3b82f6 24%, transparent);
+}
+
+/* Inner content pane of the live preview sheet */
+.stw-live-inner {
+  padding: 12px 14px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+/* Soft fieldset variant */
+.stw-fieldset--soft {
+  background: color-mix(in srgb, var(--color-primary) 4%, #f8fafc);
+  border-radius: 10px;
+  padding: 12px 14px;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 16%, #cbd5e1);
+}
