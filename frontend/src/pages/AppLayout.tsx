@@ -86,7 +86,6 @@ export function AppLayout() {
 
   const roles = me.data?.roles ?? [];
   const isSuperAdmin = roles.includes('SUPER_ADMIN');
-  const isTeacher = hasTeachingRole(roles);
   const isStudent = roles.includes('STUDENT');
   const linkedStudentId = me.data?.linkedStudentId;
 

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 import { themeUi } from '../theme/uiClasses';
@@ -41,7 +41,7 @@ export function SelectKeeper({
   const id = idProp ?? gen;
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement | HTMLUListElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
@@ -167,7 +167,7 @@ export function SelectKeeper({
         ? createPortal(
             searchable ? (
               <div
-                ref={panelRef}
+                ref={panelRef as Ref<HTMLDivElement>}
                 className="select-keeper__panel select-keeper__menu--portal"
                 style={{
                   ...menuStyle,
@@ -217,7 +217,7 @@ export function SelectKeeper({
               </div>
             ) : (
               <ul
-                ref={panelRef}
+                ref={panelRef as Ref<HTMLUListElement>}
                 className="select-keeper__menu select-keeper__menu--portal"
                 style={menuStyle}
                 role="listbox"

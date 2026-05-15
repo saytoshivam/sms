@@ -31,6 +31,7 @@ import {
   Wallet,
   Palmtree,
   RefreshCw,
+  type LucideIcon,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { erpAttendancePath } from '../../lib/erpAttendancePath';
@@ -63,7 +64,7 @@ const LS_KEYS: Record<ErpChromePersona, string> = {
 type NavItem = {
   to: string;
   label: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; 'aria-hidden'?: boolean }>;
+  icon: LucideIcon;
   end?: boolean;
   prefix?: string;
 };

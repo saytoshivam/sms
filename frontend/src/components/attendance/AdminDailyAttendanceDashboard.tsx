@@ -22,7 +22,8 @@ export type AdminDailyBoardPayload = {
   sections: AdminDailySectionRow[];
 };
 
-type StatusFilter = 'all' | 'pending' | 'overdue' | 'completed';
+type RowStatus = 'pending' | 'overdue' | 'completed';
+type StatusFilter = 'all' | RowStatus;
 
 function rowStatus(s: AdminDailySectionRow): RowStatus {
   if (s.submittedLocked) return 'completed';

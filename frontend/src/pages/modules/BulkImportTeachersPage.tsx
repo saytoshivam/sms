@@ -110,7 +110,7 @@ function PreviewTable({ rows }: { rows: ImportRowResult[] }) {
                 <td><StatusBadge status={row.status} /></td>
                 <td>
                   {row.errors?.length > 0 && <ul className="bi-error-list">{row.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
-                  {row.warnings?.length > 0 && <ul className="bi-error-list" style={{ color: '#92400e' }}>{row.warnings.map((w, i) => <li key={i}>⚠ {w}</li>)}</ul>}
+                  {(row.warnings?.length ?? 0) > 0 && <ul className="bi-error-list" style={{ color: '#92400e' }}>{(row.warnings ?? []).map((w, i) => <li key={i}>⚠ {w}</li>)}</ul>}
                 </td>
               </tr>
             ))}

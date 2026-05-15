@@ -140,7 +140,7 @@ export function TeacherClassWorkspacePage() {
             </p>
           ) : null}
           <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
-            <Link className="btn" to={`/app/teacher/classes/${classGroupId}?tab=students`} onClick={() => setTab('students')}>
+            <Link className="btn" to={`/app/teacher/classes/${classGroupId}?tab=students`}>
               View roster &amp; drill-down
             </Link>
             <Link className="btn secondary" to={attHrefDaily}>

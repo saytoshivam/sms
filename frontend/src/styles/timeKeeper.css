@@ -1,0 +1,218 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   TimeKeeper — themed time-of-day picker
+   Primary: #ea580c  Text: #0f172a  Muted: #94a3b8
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Root container ──────────────────────────────────────────────────────── */
+.time-keeper {
+  position: relative;
+  display: inline-block;
+  min-width: 0;
+  width: 100%;
+}
+
+/* ── Trigger button ──────────────────────────────────────────────────────── */
+.time-keeper__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  border: 1.5px solid rgba(15, 23, 42, 0.15);
+  background-color: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  box-sizing: border-box;
+  line-height: 1.4;
+  min-height: 36px;
+}
+
+.time-keeper__trigger:hover:not(:disabled) {
+  border-color: #ea580c;
+  background-color: rgba(234, 88, 12, 0.04);
+}
+
+.time-keeper__trigger:focus-visible {
+  outline: none;
+  border-color: #ea580c;
+  box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.18);
+}
+
+.time-keeper__trigger[aria-expanded='true'] {
+  border-color: #ea580c;
+  box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.14);
+  background-color: #ffffff;
+}
+
+.time-keeper__trigger:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  background-color: rgba(15, 23, 42, 0.04);
+}
+
+.time-keeper__trigger-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.time-keeper__clock {
+  flex-shrink: 0;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  transition: color 0.13s;
+}
+
+.time-keeper__trigger:hover:not(:disabled) .time-keeper__clock,
+.time-keeper__trigger[aria-expanded='true'] .time-keeper__clock {
+  color: #ea580c;
+}
+
+/* ── Popover panel ───────────────────────────────────────────────────────── */
+.time-keeper__popover {
+  background: #ffffff;
+  border: 1.5px solid rgba(15, 23, 42, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.08);
+  padding: 10px;
+  min-width: 200px;
+  box-sizing: border-box;
+  /* position: fixed + left/top/zIndex set via inline style by the component */
+}
+
+/* ── Column layout ───────────────────────────────────────────────────────── */
+.time-keeper__columns {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.time-keeper__col {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 240px;
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(234, 88, 12, 0.3) transparent;
+}
+
+.time-keeper__col::-webkit-scrollbar {
+  width: 4px;
+}
+
+.time-keeper__col::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.time-keeper__col::-webkit-scrollbar-thumb {
+  background-color: rgba(234, 88, 12, 0.3);
+  border-radius: 4px;
+}
+
+.time-keeper__col--narrow {
+  flex: 0 0 48px;
+  min-width: 48px;
+}
+
+/* ── Column header label ─────────────────────────────────────────────────── */
+.time-keeper__col-label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  padding: 2px 8px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ── Option buttons ──────────────────────────────────────────────────────── */
+.time-keeper__opt {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.time-keeper__opt:hover {
+  background: rgba(234, 88, 12, 0.08);
+  color: #c2410c;
+}
+
+.time-keeper__opt--active {
+  background: rgba(234, 88, 12, 0.12);
+  color: #ea580c;
+  font-weight: 800;
+}
+
+.time-keeper__opt--active:hover {
+  background: rgba(234, 88, 12, 0.18);
+}
+
+/* ── Footer (hint + Done button) ────────────────────────────────────────── */
+.time-keeper__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 2px;
+  margin-top: 8px;
+  border-top: 1px solid rgba(15, 23, 42, 0.07);
+  gap: 8px;
+}
+
+.time-keeper__hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-keeper__done {
+  padding: 5px 14px;
+  border-radius: 7px;
+  border: none;
+  background: #ea580c;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.13s ease;
+  white-space: nowrap;
+}
+
+.time-keeper__done:hover {
+  background: #c2410c;
+}
+
+.time-keeper__done:focus-visible {
+  outline: 2px solid #ea580c;
+  outline-offset: 2px;
+}
+

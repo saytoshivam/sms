@@ -176,17 +176,6 @@ const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   WITHDRAWN:   { bg: 'rgba(220,38,38,0.1)',   color: '#991b1b' },
 };
 
-const DOC_STATUS: Record<string, { bg: string; color: string; label: string }> = {
-  PENDING:            { bg: 'rgba(234,179,8,0.12)',  color: '#854d0e', label: 'Pending Collection' },
-  PENDING_COLLECTION: { bg: 'rgba(234,179,8,0.12)',  color: '#854d0e', label: 'Pending Collection' },
-  COLLECTED_PHYSICAL: { bg: 'rgba(59,130,246,0.12)', color: '#1e40af', label: 'Collected (Physical)' },
-  SUBMITTED:          { bg: 'rgba(59,130,246,0.12)', color: '#1e40af', label: 'Uploaded' },
-  UPLOADED:           { bg: 'rgba(59,130,246,0.12)', color: '#1e40af', label: 'Uploaded' },
-  VERIFIED:           { bg: 'rgba(22,163,74,0.12)',  color: '#166534', label: 'Verified' },
-  REJECTED:           { bg: 'rgba(220,38,38,0.12)',  color: '#991b1b', label: 'Rejected' },
-  NOT_REQUIRED:       { bg: 'rgba(15,23,42,0.07)',   color: 'rgba(15,23,42,0.45)', label: 'Not Required' },
-};
-
 // ─── Reusable micro-components ────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string | null | undefined }) {
@@ -195,16 +184,6 @@ function StatusBadge({ status }: { status: string | null | undefined }) {
   return (
     <span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', background: s.bg, color: s.color, textTransform: 'uppercase' }}>
       {status.replace(/_/g, ' ')}
-    </span>
-  );
-}
-
-function DocPill({ status }: { status: string | null | undefined }) {
-  if (!status) return <span style={{ color: 'rgba(15,23,42,0.4)', fontSize: 12 }}>—</span>;
-  const s = DOC_STATUS[status] ?? { bg: 'rgba(15,23,42,0.06)', color: 'rgba(15,23,42,0.55)', label: status };
-  return (
-    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: s.bg, color: s.color }}>
-      {s.label}
     </span>
   );
 }
@@ -384,12 +363,12 @@ function OverviewTab({ p }: { p: StudentProfilePayload }) {
 
 function GuardiansTab({
   p,
-  studentId,
+  studentId: _studentId,
   onAdd,
   onEdit,
   onSetPrimary,
   onCreateLogin,
-  onRefresh,
+  onRefresh: _onRefresh,
   canEdit,
   canManageParentLogin,
 }: {
@@ -611,7 +590,7 @@ function CombinedStatusText({ doc }: { doc: StudentDocumentSummary }) {
 // ─── Kebab "More" dropdown ────────────────────────────────────────────────────
 function DocMoreMenu({
   doc, canEdit, isBusy, align = 'right',
-  onCollect, onMarkPending, onMarkNotRequired, onUpload, onVerifyPhysical, onVerifyUploaded,
+  onCollect: _onCollect, onMarkPending, onMarkNotRequired, onUpload, onVerifyPhysical, onVerifyUploaded,
   onReject, onEditRemark, onView, onSaveDownload,
 }: {
   doc: StudentDocumentSummary; canEdit: boolean; isBusy: boolean;
@@ -863,7 +842,6 @@ function DocumentsTab({ p, studentId, onRefresh, canEdit }: {
                   const coll   = doc.collectionStatus ?? 'PENDING_COLLECTION';
                   const up     = doc.uploadStatus     ?? 'NOT_UPLOADED';
                   const ver    = doc.verificationStatus ?? 'NOT_VERIFIED';
-                  const hasFile = !!(doc.fileId || doc.fileUrl);
                   const isRejecting = rejectDoc === doc.id;
                   const isEditingRemark = editRemarkDoc === doc.id;
 

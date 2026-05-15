@@ -1,4 +1,5 @@
 @import './styles/selectKeeper.css';
+@import './styles/timeKeeper.css';
 
 @tailwind base;
 @tailwind components;

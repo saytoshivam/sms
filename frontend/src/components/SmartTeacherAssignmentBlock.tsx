@@ -272,7 +272,7 @@ export function SmartTeacherAssignmentBlock({
   clearHomeroomDraft,
   clearAutoAssignedClassTeachers,
   clearAllClassTeacherAssignments,
-  clearAutoHomeroomAssignments,
+  clearAutoHomeroomAssignments: _clearAutoHomeroomAssignments,
   defaultRoomByClassId,
   homeroomSourceByClassId = {},
   homeroomLockedByClassId,

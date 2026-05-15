@@ -124,7 +124,7 @@ export function AcademicModulePage() {
         );
         return readOnly ? (
           /** `inert` keeps layout scrollable but blocks edits (browse from sidebar). */
-          <div inert>{step}</div>
+          <div {...({ inert: 'true' } as Record<string, string>)}>{step}</div>
         ) : (
           step
         );

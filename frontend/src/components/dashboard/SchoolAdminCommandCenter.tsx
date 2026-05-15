@@ -89,11 +89,12 @@ function ModLauncher({ to, Icon, label }: { to: string; Icon: LucideIcon; label:
 }
 
 export function SchoolAdminCommandCenter({
-  profile,
+  profile: _profile,
   persona: _persona = 'default',
   op,
 }: SchoolAdminDashboardShellProps & { op: SchoolAdminOperationalSnapshot }) {
   void _persona;
+  void _profile;
   const {
     ymd,
     leader,
@@ -126,7 +127,7 @@ export function SchoolAdminCommandCenter({
     freshnessSignals,
     todayAtSchool,
     pendingAttendanceTotal,
-    activeSectionsCount,
+    activeSectionsCount: _activeSectionsCount,
   } = op;
 
   const pendingAttCount = mode === 'DAILY' ? dailyCounts.pending + dailyCounts.overdue : gaps.length;

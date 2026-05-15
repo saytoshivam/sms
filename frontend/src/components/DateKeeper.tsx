@@ -168,7 +168,7 @@ export function DateKeeper({
         </button>
         <button
           type="button"
-          className={`date-keeper__month-btn${pickerMode === 'year' ? ' date-keeper__month-btn--active' : ''}`}
+          className={`date-keeper__month-btn${(pickerMode as PickerMode) === 'year' ? ' date-keeper__month-btn--active' : ''}`}
           onClick={() => {
             setYrStart(yearRangeStart(view.getFullYear()));
             setPickerMode((m) => m === 'year' ? 'day' : 'year');

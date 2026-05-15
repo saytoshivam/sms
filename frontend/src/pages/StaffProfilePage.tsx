@@ -216,13 +216,14 @@ type TabId = typeof TABS[number]['id'];
 
 // ─── More menu ────────────────────────────────────────────────────────────────
 
-function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMarkExited, onRefresh: _onRefresh }: {
+function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMarkExited, onRefresh: _onRefresh, onDocuments }: {
   staffId: number;
   profile: StaffProfile;
   onResetLogin: () => void;
   onDeactivate: () => void;
   onMarkExited: () => void;
   onRefresh: () => void;
+  onDocuments?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -419,11 +420,12 @@ function TabEmployment({ profile }: { profile: StaffProfile }) {
 
 // ─── Tab: Academics ───────────────────────────────────────────────────────────
 
-function TabAcademics({ profile, subjects, structure, classGroups }: {
+function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile }: {
   profile: StaffProfile;
   subjects: Subject[];
   structure: AcademicStructure | null;
   classGroups: ClassGroup[];
+  onEditProfile?: () => void;
 }) {
   const subjectMap = new Map(subjects.map(s => [s.id, s]));
   const cgMap = new Map(classGroups.map(cg => [cg.id, cg]));
@@ -730,7 +732,7 @@ function DocMoreMenu({
   doc, staffId, onAction, onUpload, onReject, onEditRemark,
 }: {
   doc: StaffDoc; staffId: number;
-  onAction: (path: string, body?: unknown) => void;
+  onAction: (path: string, body?: unknown, isPatch?: boolean) => void;
   onUpload: () => void;
   onReject: () => void;
   onEditRemark: () => void;
@@ -988,7 +990,7 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
               {!pa && isVerified && <span style={{ fontSize: 12, color: '#166534', fontWeight: 700 }}>✓ Verified</span>}
               {!pa && isNotReq   && <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Not required</span>}
               <DocMoreMenu doc={doc} staffId={staffId}
-                onAction={(path, body, isPatch) => callAction(path, body, isPatch)}
+                onAction={(path: string, body?: unknown, isPatch?: boolean) => callAction(path, body, isPatch)}
                 onUpload={() => fileInputRef.current?.click()}
                 onReject={() => setRejectOpen(true)}
                 onEditRemark={() => { setEditRemarkOpen(true); setEditRemarkValue(doc.remarks ?? ''); }}
@@ -1072,7 +1074,7 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
         {/* Kebab */}
         <td style={{ padding: '10px 12px', verticalAlign: 'middle', textAlign: 'right' }}>
           <DocMoreMenu doc={doc} staffId={staffId}
-            onAction={(path, body, isPatch) => callAction(path, body, isPatch)}
+            onAction={(path: string, body?: unknown, isPatch?: boolean) => callAction(path, body, isPatch)}
             onUpload={() => fileInputRef.current?.click()}
             onReject={() => setRejectOpen(true)}
             onEditRemark={() => { setEditRemarkOpen(true); setEditRemarkValue(doc.remarks ?? ''); }}

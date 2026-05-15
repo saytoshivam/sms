@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-const backend = process.env.VITE_DEV_API_PROXY_TARGET ?? 'http://localhost:8080'
+const backend = (import.meta as { env?: Record<string, string> }).env?.VITE_DEV_API_PROXY_TARGET ?? 'http://localhost:8080'
 
 const apiProxy = {
   '/api': { target: backend, changeOrigin: true },
