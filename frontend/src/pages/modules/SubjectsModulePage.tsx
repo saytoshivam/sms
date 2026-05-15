@@ -138,12 +138,6 @@ export function SubjectsModulePage() {
     onError: (e) => toast.error('Could not add subject', formatApiError(e)),
   });
 
-  const setTabUrl = (next: 'browse' | 'add') => {
-    const sp = new URLSearchParams(searchParams);
-    if (next === 'browse') sp.delete('tab');
-    else sp.set('tab', next);
-    setSearchParams(sp, { replace: true });
-  };
 
   const headerActions = (
     <>

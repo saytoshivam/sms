@@ -4,8 +4,8 @@
  * A 9-step guided wizard to onboard a single staff member.
  * Layout: Left vertical stepper | Center active form | Right live preview + checklist
  *
- * API: POST /api/v1/onboarding/staff/onboard  (structured StaffOnboardingRequest)
- *      PUT  /api/v1/onboarding/staff/{id}/onboard
+ * API: POST /api/staff/onboard  (structured StaffOnboardingRequest)
+ *      PUT  /api/staff/{id}/onboard
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -61,7 +61,6 @@ interface WizardDraft {
   canTakeSubstitution: boolean;
   preferredClassGroupIds: number[];
   restrictedClassGroupIds: number[];
-  unavailablePeriodsNote: string; // placeholder text
 
   // Step 5 – Contact & Emergency
   email: string;
@@ -74,8 +73,7 @@ interface WizardDraft {
   qualifications: string;
   experience: string;
 
-  // Step 7 – Documents Checklist
-  docs: Record<string, boolean>;
+  // Step 7 – Documents (informational only — managed on staff profile after creation)
 
   // Step 8 – Payroll Prep
   bankAccount: string;
@@ -94,10 +92,8 @@ function emptyDraft(): WizardDraft {
     teachableSubjectIds: [], maxWeeklyLectureLoad: '', maxDailyLectureLoad: '',
     canBeClassTeacher: true, canTakeSubstitution: true,
     preferredClassGroupIds: [], restrictedClassGroupIds: [],
-    unavailablePeriodsNote: '',
     email: '', address: '', emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelation: '',
     qualifications: '', experience: '',
-    docs: { 'Offer Letter': false, 'ID Proof': false, 'Photo': false, 'Certificates': false, 'PAN Card': false, 'Bank Details': false },
     bankAccount: '', bankName: '', ifscCode: '', panNumber: '',
   };
 }
@@ -575,17 +571,10 @@ function StepAcademic({ d, set, subjects, classGroups, demand }: {
         </div>
       )}
 
-      {/* ── Unavailable Periods (placeholder) ──────────────────── */}
-      <div>
-        <SectionTitle>Unavailable Periods
-          <span style={{ fontSize: 10, fontWeight: 600, color: 'rgba(15,23,42,0.35)', textTransform: 'none', letterSpacing: 0, marginLeft: 6 }}>(coming soon)</span>
-        </SectionTitle>
-        <div style={{ padding: '10px 12px', background: 'rgba(15,23,42,0.02)', border: '1px solid rgba(15,23,42,0.08)', borderRadius: 9 }}>
-          <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.45)', marginBottom: 6 }}>
-            Define day + period slots when this teacher is unavailable. The timetable scheduler will respect these in a future release.
-          </div>
-          <input style={{ ...inputSt, color: 'rgba(15,23,42,0.35)' }} disabled
-            placeholder="e.g. Monday P1, Friday P5 — configurable after scheduler module launches" />
+      {/* ── Availability Note ───────────────────────────────────── */}
+      <div style={{ padding: '10px 12px', background: 'rgba(15,23,42,0.025)', border: '1px solid rgba(15,23,42,0.07)', borderRadius: 9 }}>
+        <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.45)' }}>
+          Availability restrictions (blocked day/period slots) can be configured later from <strong>Scheduling Settings</strong>.
         </div>
       </div>
 
@@ -643,35 +632,28 @@ function StepQualifications({ d, set }: { d: WizardDraft; set: (p: Partial<Wizar
   );
 }
 
-const DOC_LABELS: Record<string, string> = {
-  'Offer Letter': 'Offer letter signed & returned',
-  'ID Proof': 'Government ID proof (Aadhaar / Passport)',
-  'Photo': 'Passport-size photographs',
-  'Certificates': 'Academic / professional certificates',
-  'PAN Card': 'PAN card copy',
-  'Bank Details': 'Bank account details form',
-};
-
-function StepDocuments({ d, set }: { d: WizardDraft; set: (p: Partial<WizardDraft>) => void }) {
-  const toggle = (key: string) => set({ docs: { ...d.docs, [key]: !d.docs[key] } });
-  const checked = Object.values(d.docs).filter(Boolean).length;
-  const total   = Object.keys(d.docs).length;
+function StepDocuments(_: { d: WizardDraft; set: (p: Partial<WizardDraft>) => void }) {
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <p style={{ margin: 0, fontSize: 13, color: 'rgba(15,23,42,0.5)' }}>
-        Track which documents have been collected. <strong>{checked}/{total}</strong> collected.
-      </p>
-      {Object.entries(d.docs).map(([key, val]) => (
-        <label key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 10, border: `1px solid ${val ? 'rgba(22,163,74,0.3)' : 'rgba(15,23,42,0.09)'}`, background: val ? 'rgba(22,163,74,0.04)' : '#fff', cursor: 'pointer', transition: 'all 0.15s' }}>
-          <input type="checkbox" checked={val} style={{ marginTop: 2, flexShrink: 0, accentColor: '#16a34a' }}
-            onChange={() => toggle(key)} />
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: val ? '#166534' : 'rgba(15,23,42,0.75)' }}>{key}</div>
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.45)', marginTop: 1 }}>{DOC_LABELS[key] ?? ''}</div>
-          </div>
-          {val && <span style={{ marginLeft: 'auto', fontSize: 16 }}>✓</span>}
-        </label>
-      ))}
+    <div style={{ display: 'grid', gap: 14 }}>
+      <div style={{ padding: '16px 18px', background: 'rgba(37,99,235,0.05)', border: '1px solid rgba(37,99,235,0.18)', borderRadius: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: '#1e40af', marginBottom: 6 }}>📋 Document checklist — available after profile creation</div>
+        <p style={{ margin: 0, fontSize: 13, color: 'rgba(15,23,42,0.65)', lineHeight: 1.55 }}>
+          The staff document checklist (Offer letter, ID proof, Aadhaar, certificates, PAN card, bank details, etc.)
+          is managed from the <strong>Documents tab on the staff profile page</strong>.
+        </p>
+        <p style={{ margin: '10px 0 0', fontSize: 13, color: 'rgba(15,23,42,0.55)', lineHeight: 1.5 }}>
+          Once this staff record is saved, open the profile and switch to the <strong>Documents</strong> tab
+          to track collection and upload status for each required document.
+        </p>
+      </div>
+      <div style={{ padding: '12px 14px', background: 'rgba(22,163,74,0.05)', border: '1px solid rgba(22,163,74,0.18)', borderRadius: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', marginBottom: 4 }}>What happens after saving:</div>
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'rgba(15,23,42,0.6)', lineHeight: 1.7 }}>
+          <li>Default document checklist is auto-seeded for this staff member.</li>
+          <li>School admin / HOD can mark documents as collected or upload scanned copies.</li>
+          <li>Each document can be independently verified or rejected with remarks.</li>
+        </ul>
+      </div>
     </div>
   );
 }
@@ -886,7 +868,7 @@ function PreviewRow({ icon, label, children }: { icon: string; label: string; ch
 
 // ─── Main Wizard ──────────────────────────────────────────────────────────────
 
-/** Response shape from POST/PUT /api/v1/onboarding/staff/onboard */
+/** Response shape from POST/PUT /api/staff/onboard */
 interface StaffOnboardingResponse {
   staff: {
     id: number;
@@ -982,7 +964,6 @@ export function StaffOnboardingWizard({ onClose, onSuccess }: StaffOnboardingWiz
         canTakeSubstitution: draft.canTakeSubstitution,
         preferredClassGroupIds: draft.preferredClassGroupIds,
         restrictedClassGroupIds: draft.restrictedClassGroupIds,
-        unavailablePeriodsJson: draft.unavailablePeriodsNote.trim() || null,
       } : null,
       contact: {
         currentAddressLine1: draft.address.trim() || null,
@@ -1008,7 +989,7 @@ export function StaffOnboardingWizard({ onClose, onSuccess }: StaffOnboardingWiz
     if (missing.length > 0) { toast.error('Missing fields', missing.join(', ')); return; }
     setBusy(true);
     try {
-      const res = await api.post<StaffOnboardingResponse>('/api/v1/onboarding/staff/onboard', buildBody('DRAFT'));
+      const res = await api.post<StaffOnboardingResponse>('/api/staff/onboard', buildBody('DRAFT'));
       const result = res.data;
       if (result.warnings?.length) {
         toast.info('Saved with warnings', result.warnings.join(' · '));
@@ -1028,7 +1009,7 @@ export function StaffOnboardingWizard({ onClose, onSuccess }: StaffOnboardingWiz
     if (missing.length > 0) { toast.error('Missing fields', missing.join(', ')); return; }
     setBusy(true);
     try {
-      const res = await api.post<StaffOnboardingResponse>('/api/v1/onboarding/staff/onboard', buildBody('ACTIVE'));
+      const res = await api.post<StaffOnboardingResponse>('/api/staff/onboard', buildBody('ACTIVE'));
       const result = res.data;
       if (result.tempPassword) {
         toast.success('Login created', `Temp password: ${result.tempPassword} — copy it now, shown once.`);

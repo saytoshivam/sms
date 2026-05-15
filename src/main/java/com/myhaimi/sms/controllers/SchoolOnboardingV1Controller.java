@@ -12,12 +12,6 @@ import com.myhaimi.sms.DTO.OnboardingRoomCreateDTO;
 import com.myhaimi.sms.DTO.OnboardingRoomsSetupResultDTO;
 import com.myhaimi.sms.DTO.OnboardingClassDefaultRoomItemDTO;
 import com.myhaimi.sms.DTO.OnboardingClassDefaultRoomViewDTO;
-import com.myhaimi.sms.DTO.OnboardingStaffCreateDTO;
-import com.myhaimi.sms.DTO.OnboardingStaffSetupResultDTO;
-import com.myhaimi.sms.DTO.OnboardingStaffViewDTO;
-import com.myhaimi.sms.DTO.OnboardingStaffUpdateDTO;
-import com.myhaimi.sms.DTO.OnboardingStaffUserCredentialDTO;
-import com.myhaimi.sms.DTO.StaffDeleteInfoDTO;
 import com.myhaimi.sms.DTO.OnboardingFeesSetupDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicStructureSaveDTO;
 import com.myhaimi.sms.DTO.OnboardingAcademicStructureViewDTO;
@@ -25,8 +19,6 @@ import com.myhaimi.sms.DTO.OnboardingTimetableAutoGenerateViewDTO;
 import com.myhaimi.sms.DTO.TeacherDemandSummaryDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentCreateDTO;
 import com.myhaimi.sms.DTO.OnboardingStudentsSetupResultDTO;
-import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingRequest;
-import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingResult;
 import com.myhaimi.sms.service.impl.SchoolOnboardingService;
 import com.myhaimi.sms.service.impl.TeacherDemandAnalysisService;
 import jakarta.validation.Valid;
@@ -131,92 +123,15 @@ public class SchoolOnboardingV1Controller {
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/staff")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<OnboardingStaffSetupResultDTO> createStaff(@Valid @RequestBody List<OnboardingStaffCreateDTO> body) {
-        return ResponseEntity.ok(schoolOnboardingService.createStaff(body));
-    }
-
-    @GetMapping("/staff")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
-    public List<OnboardingStaffViewDTO> onboardedStaff() {
-        return schoolOnboardingService.listOnboardedStaff();
-    }
-
-    @GetMapping("/staff/{id}/delete-info")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public StaffDeleteInfoDTO staffDeleteInfo(@PathVariable Integer id) {
-        return schoolOnboardingService.staffDeleteInfo(id);
-    }
-
-    @DeleteMapping("/staff/{id}")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<Void> deleteStaff(@PathVariable Integer id) {
-        schoolOnboardingService.deleteStaff(id);
-        return ResponseEntity.noContent().build();
-    }
-
-    @PutMapping("/staff/{id}")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<?> updateStaff(@PathVariable Integer id, @Valid @RequestBody OnboardingStaffUpdateDTO body) {
-        // returns credential only when a login was newly created
-        return ResponseEntity.ok(schoolOnboardingService.updateStaff(id, body));
-    }
-
-    @PostMapping("/staff/{id}/reset-login")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<OnboardingStaffUserCredentialDTO> resetStaffLogin(@PathVariable Integer id) {
-        return ResponseEntity.ok(schoolOnboardingService.resetStaffLoginPassword(id));
-    }
-
-    // ── Structured onboarding (v2) ───────────────────────────────────���────────
-
-    /**
-     * Create a single staff member using the structured {@link StaffOnboardingRequest}.
-     * Returns the full {@link StaffOnboardingResult} including computed profile,
-     * non-fatal warnings, and a one-time temp password when a login was newly created.
-     */
-    @PostMapping("/staff/onboard")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<StaffOnboardingResult> onboardStaff(
-            @Valid @RequestBody StaffOnboardingRequest body) {
-        try {
-            return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
-                    .body(schoolOnboardingService.onboardStaff(body));
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest()
-                    .body(new StaffOnboardingResult(null, java.util.List.of(ex.getMessage()), null));
-        }
-    }
-
-    /**
-     * Update an existing staff member using the structured {@link StaffOnboardingRequest}.
-     * Only sections included in the body are modified.
-     */
-    @PutMapping("/staff/{id}/onboard")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<StaffOnboardingResult> updateStaffOnboarding(
-            @PathVariable Integer id,
-            @Valid @RequestBody StaffOnboardingRequest body) {
-        try {
-            return ResponseEntity.ok(schoolOnboardingService.updateStaffOnboarding(id, body));
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest()
-                    .body(new StaffOnboardingResult(null, java.util.List.of(ex.getMessage()), null));
-        }
-    }
-
-    /** Get full staff profile (computed fields, masked payroll). */
-    @GetMapping("/staff/{id}/profile")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
-    public ResponseEntity<?> getStaffProfile(@PathVariable Integer id) {
-        try {
-            return ResponseEntity.ok(schoolOnboardingService.getStaffProfile(id));
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.status(org.springframework.http.HttpStatus.NOT_FOUND)
-                    .body(java.util.Map.of("error", ex.getMessage()));
-        }
-    }
+    // All staff/teacher endpoints have been moved to StaffController at /api/staff/...
+    // GET  /api/staff                - staff directory
+    // GET  /api/staff/{id}           - staff profile
+    // GET  /api/staff/{id}/profile   - staff profile (alias)
+    // POST /api/staff/onboard        - create staff (structured)
+    // PUT  /api/staff/{id}/onboard   - update staff (structured)
+    // GET  /api/staff/{id}/delete-info
+    // DELETE /api/staff/{id}
+    // POST /api/staff/{id}/reset-password
 
     @GetMapping("/fees")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD','ACCOUNTANT')")

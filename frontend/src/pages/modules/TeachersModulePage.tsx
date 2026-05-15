@@ -1,7 +1,7 @@
 /**
  * Staff & Teachers — Production directory page.
  *
- * Data: GET /api/v1/onboarding/staff + academic-structure for workload
+ * Data: GET /api/staff (StaffSummaryDTO) + academic-structure for workload
  * Features: summary tiles, multi-filter, desktop table, mobile cards,
  *           kebab menu with real/stub actions clearly distinguished.
  */
@@ -22,23 +22,26 @@ import { SelectKeeper } from '../../components/SelectKeeper';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type StaffRow = {
-  staffId: number;
+  id: number;                    // StaffSummaryDTO.id  (was staffId in legacy endpoint)
   fullName: string;
   email: string | null;
   phone: string | null;
   employeeNo: string | null;
   designation: string | null;
   roles: string[];
-  subjectCodes: string[];
+  teachableSubjectCodes: string[];          // was subjectCodes in legacy endpoint
   hasLoginAccount: boolean;
   maxWeeklyLectureLoad?: number | null;
+  maxDailyLectureLoad?: number | null;
   preferredClassGroupIds?: number[];
-  // New fields from upgraded API (gracefully absent for old responses)
+  // Fields from StaffSummaryDTO
   staffType?: string | null;   // TEACHING | NON_TEACHING | ADMIN | SUPPORT
   status?: string | null;      // DRAFT | ACTIVE | INACTIVE | EXITED | etc.
   department?: string | null;
-  loginStatus?: string | null; // NONE | ACTIVE
+  loginStatus?: string | null; // NOT_CREATED | ACTIVE | DISABLED
   timetableEligible?: boolean;
+  timetableEligibilityReasons?: string[];
+  missingRequiredItems?: string[];
 };
 
 type SubjectCatalogRow = { id: number; code: string; name: string };
@@ -85,7 +88,7 @@ function effectiveStatus(row: StaffRow): string { return row.status ?? 'ACTIVE';
 
 function effectiveTimetableEligible(row: StaffRow): boolean {
   if (typeof row.timetableEligible === 'boolean') return row.timetableEligible;
-  return effectiveStaffType(row) === 'TEACHING' && row.roles.includes('TEACHER') && row.subjectCodes.length > 0;
+  return effectiveStaffType(row) === 'TEACHING' && row.roles.includes('TEACHER') && row.teachableSubjectCodes.length > 0;
 }
 
 function typeBadge(type: string): React.CSSProperties {
@@ -189,7 +192,7 @@ function RowMenu({ canEdit, staffId, onEdit, onDelete }: { canEdit: boolean; sta
 const ROLE_CHOICES = ['TEACHER','HOD','VICE_PRINCIPAL','PRINCIPAL','ACCOUNTANT','CLERK','SCHOOL_ADMIN'] as const;
 const inputSt: React.CSSProperties = { fontSize: 13, padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(15,23,42,0.15)', width: '100%', boxSizing: 'border-box' };
 
-type EditDraft = { fullName: string; email: string; phone: string; designation: string; employeeNo: string; roles: string[]; teachableSubjectIds: number[]; createLoginAccount: boolean; maxWeeklyLectureLoad: number | ''; };
+type EditDraft = { fullName: string; email: string; phone: string; designation: string; employeeNo: string; roles: string[]; teachableSubjectIds: number[]; createLoginAccount: boolean; maxWeeklyLectureLoad: number | ''; staffType: string; };
 function EF({ label, flex, children }: { label: string; flex?: string; children: React.ReactNode }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: flex ?? '1 1 200px' }}>
@@ -208,7 +211,7 @@ function EditModal({ staffId, initial, subjects, busy, onSave, onClose }: { staf
     if (!d.designation.trim()) { toast.error('Validation', 'Designation is required.'); return; }
     if (d.roles.length === 0)  { toast.error('Validation', 'At least one role is required.'); return; }
     const isTeacher = d.roles.includes('TEACHER');
-    // Build structured StaffOnboardingRequest body matching PUT /api/v1/onboarding/staff/{id}/onboard
+    // Build structured StaffOnboardingRequest body matching PUT /api/staff/{id}/onboard
     onSave(staffId, {
       identity: {
         fullName: d.fullName.trim(),
@@ -217,7 +220,7 @@ function EditModal({ staffId, initial, subjects, busy, onSave, onClose }: { staf
         employeeNo: d.employeeNo.trim() || null,
       },
       employment: {
-        staffType: 'TEACHING',
+        staffType: d.staffType || 'TEACHING',
         designation: d.designation.trim(),
       },
       rolesAndAccess: {
@@ -254,6 +257,16 @@ function EditModal({ staffId, initial, subjects, busy, onSave, onClose }: { staf
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <EF label="Designation *" flex="2 1 180px"><input value={d.designation} onChange={e => setD({ ...d, designation: e.target.value })} style={inputSt} /></EF>
+            <EF label="Staff type" flex="1 1 140px">
+              <select value={d.staffType} onChange={e => setD({ ...d, staffType: e.target.value })} style={inputSt}>
+                <option value="TEACHING">Teaching</option>
+                <option value="NON_TEACHING">Non-Teaching</option>
+                <option value="ADMIN">Admin</option>
+                <option value="SUPPORT">Support</option>
+              </select>
+            </EF>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <EF label="Max weekly periods" flex="1 1 140px"><input type="number" min={0} max={60} value={d.maxWeeklyLectureLoad === '' ? '' : d.maxWeeklyLectureLoad} onChange={e => setD({ ...d, maxWeeklyLectureLoad: e.target.value === '' ? '' : Math.max(0, Math.trunc(Number(e.target.value))) })} style={inputSt} /></EF>
           </div>
         </div>
@@ -317,7 +330,7 @@ function downloadStaffCsv(rows: StaffRow[]) {
   const lines = [
     headers.join(','),
     ...rows.map(r => [
-      r.staffId,
+      r.id,
       r.fullName,
       r.email ?? '',
       r.phone ?? '',
@@ -328,7 +341,7 @@ function downloadStaffCsv(rows: StaffRow[]) {
       r.department ?? '',
       (r as StaffRow & { employmentType?: string | null }).employmentType ?? '',
       r.roles.join('|'),
-      r.subjectCodes.join('|'),
+      r.teachableSubjectCodes.join('|'),
       r.hasLoginAccount ? 'true' : 'false',
       r.maxWeeklyLectureLoad ?? '',
     ].map(esc).join(',')),
@@ -356,11 +369,14 @@ export function TeachersModulePage() {
   const [activeTab, setActiveTab] = useState<'directory' | 'readiness'>('directory');
 
   // ── Queries ──────────────────────────────────────────────────────────────────
-  const staffQ = useQuery({ queryKey: ['onboarding-staff-view'], queryFn: async () => (await api.get<StaffRow[]>('/api/v1/onboarding/staff')).data });
+  const staffQ = useQuery({
+    queryKey: ['staff'],
+    queryFn: async () => (await api.get<{ content: StaffRow[]; totalElements: number }>('/api/staff?size=1000&sort=fullName,asc')).data,
+  });
   const subjectsQ = useQuery({ queryKey: ['subjects-catalog'], queryFn: async () => (await api.get<{ content: SubjectCatalogRow[] }>('/api/subjects?size=1000&sort=name,asc')).data, staleTime: 60_000 });
   const academicQ = useQuery({ queryKey: ['onboarding-academic-structure'], queryFn: async () => (await api.get<AcademicStructure>('/api/v1/onboarding/academic-structure')).data, staleTime: 60_000 });
 
-  const allStaff: StaffRow[] = staffQ.data ?? [];
+  const allStaff: StaffRow[] = staffQ.data?.content ?? [];
   const subjects: SubjectCatalogRow[] = subjectsQ.data?.content ?? [];
 
   // ── Workload map ──────────────────────────────────────────────────────────────
@@ -420,7 +436,7 @@ export function TeachersModulePage() {
   const [delConfirm, setDelConfirm] = useState<{ open: boolean; staffId?: number; fullName?: string }>({ open: false });
 
   const deleteMut = useMutation({
-    mutationFn: async (id: number) => { await api.delete(`/api/v1/onboarding/staff/${id}`); },
+    mutationFn: async (id: number) => { await api.delete(`/api/staff/${id}`); },
     onSuccess: async () => { toast.success('Staff removed.'); setDelConfirm({ open: false }); await invalidate(['staff']); },
     onError: (e) => toast.error('Could not remove', formatApiError(e)),
   });
@@ -428,14 +444,15 @@ export function TeachersModulePage() {
   const [editTarget, setEditTarget] = useState<{ staffId: number; draft: EditDraft } | null>(null);
 
   const openEdit = useCallback((row: StaffRow) => setEditTarget({
-    staffId: row.staffId,
+    staffId: row.id,
     draft: {
       fullName: row.fullName, email: row.email ?? '', phone: row.phone ?? '',
       designation: row.designation ?? '', employeeNo: row.employeeNo ?? '',
       roles: [...row.roles],
-      teachableSubjectIds: subjects.filter(s => row.subjectCodes.includes(s.code)).map(s => s.id),
+      teachableSubjectIds: subjects.filter(s => row.teachableSubjectCodes.includes(s.code)).map(s => s.id),
       createLoginAccount: row.hasLoginAccount,
       maxWeeklyLectureLoad: row.maxWeeklyLectureLoad ?? '',
+      staffType: row.staffType ?? 'TEACHING',
     },
   }), [subjects]);
 
@@ -444,17 +461,17 @@ export function TeachersModulePage() {
   // /app/teachers?edit=<id> to open the edit form for a specific staff member.
   const editIdParam = searchParams.get('edit');
   useEffect(() => {
-    if (!editIdParam || staffQ.isLoading || !staffQ.data || !subjectsQ.data) return;
+    if (!editIdParam || staffQ.isLoading || !staffQ.data?.content || !subjectsQ.data) return;
     const id = parseInt(editIdParam, 10);
     if (isNaN(id)) return;
-    const row = staffQ.data.find((s: StaffRow) => s.staffId === id);
+    const row = staffQ.data?.content?.find((s: StaffRow) => s.id === id);
     if (!row) return;
     openEdit(row);
     setSearchParams(params => { params.delete('edit'); return params; }, { replace: true });
   }, [editIdParam, staffQ.isLoading, staffQ.data, subjectsQ.data, openEdit, setSearchParams]);
 
   const updateMut = useMutation({
-    mutationFn: async ({ id, body }: { id: number; body: object }) => { await api.put(`/api/v1/onboarding/staff/${id}/onboard`, body); },
+    mutationFn: async ({ id, body }: { id: number; body: object }) => { await api.put(`/api/staff/${id}/onboard`, body); },
     onSuccess: async () => { toast.success('Staff updated.'); setEditTarget(null); await invalidate(['staff']); },
     onError: (e) => toast.error('Could not update', formatApiError(e)),
   });
@@ -583,14 +600,14 @@ export function TeachersModulePage() {
               </thead>
               <tbody>
                 {filtered.map(row => {
-                  const usage  = usageByStaff.get(row.staffId);
+                  const usage  = usageByStaff.get(row.id);
                   const cap    = row.maxWeeklyLectureLoad ?? 0;
                   const over   = cap > 0 && usage && usage.periods > cap;
                   const type   = effectiveStaffType(row);
                   const status = effectiveStatus(row);
 
                   return (
-                    <tr key={row.staffId} style={{ borderBottom: '1px solid rgba(15,23,42,0.055)' }}
+                    <tr key={row.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.055)' }}
                       onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(15,23,42,0.018)'}
                       onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = ''}>
 
@@ -598,7 +615,7 @@ export function TeachersModulePage() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <Avatar name={row.fullName} size={36} />
                           <div style={{ minWidth: 0 }}>
-                            <Link to={`/app/teachers/${row.staffId}`} style={{ fontWeight: 700, color: 'rgba(15,23,42,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textDecoration: 'none' }}>{row.fullName}</Link>
+                            <Link to={`/app/teachers/${row.id}`} style={{ fontWeight: 700, color: 'rgba(15,23,42,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textDecoration: 'none' }}>{row.fullName}</Link>
                             <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>{row.employeeNo ?? '—'}</div>
                           </div>
                         </div>
@@ -620,11 +637,11 @@ export function TeachersModulePage() {
                       </td>
 
                       <td style={{ padding: '10px 12px', verticalAlign: 'middle', minWidth: 110 }}>
-                        {row.subjectCodes.length === 0
+                        {row.teachableSubjectCodes.length === 0
                           ? <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.3)' }}>—</span>
                           : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                              {row.subjectCodes.slice(0, 4).map(c => <span key={c} style={{ ...BASE_BADGE, background: 'rgba(5,150,105,0.09)', color: '#065f46', fontSize: 10 }}>{c}</span>)}
-                              {row.subjectCodes.length > 4 && <span style={{ ...BASE_BADGE, background: 'rgba(15,23,42,0.05)', color: '#64748b', fontSize: 10 }}>+{row.subjectCodes.length - 4}</span>}
+                              {row.teachableSubjectCodes.slice(0, 4).map(c => <span key={c} style={{ ...BASE_BADGE, background: 'rgba(5,150,105,0.09)', color: '#065f46', fontSize: 10 }}>{c}</span>)}
+                              {row.teachableSubjectCodes.length > 4 && <span style={{ ...BASE_BADGE, background: 'rgba(15,23,42,0.05)', color: '#64748b', fontSize: 10 }}>+{row.teachableSubjectCodes.length - 4}</span>}
                             </div>}
                       </td>
 
@@ -648,7 +665,7 @@ export function TeachersModulePage() {
                       </td>
 
                       <td style={{ padding: '10px 12px', verticalAlign: 'middle', textAlign: 'right' }}>
-                        <RowMenu canEdit={canEdit} staffId={row.staffId} onEdit={() => openEdit(row)} onDelete={() => setDelConfirm({ open: true, staffId: row.staffId, fullName: row.fullName })} />
+                        <RowMenu canEdit={canEdit} staffId={row.id} onEdit={() => openEdit(row)} onDelete={() => setDelConfirm({ open: true, staffId: row.id, fullName: row.fullName })} />
                       </td>
                     </tr>
                   );
@@ -663,24 +680,24 @@ export function TeachersModulePage() {
       {filtered.length > 0 && (
         <div className="staff-dir-card-list" style={{ display: 'grid', gap: 12 }}>
           {filtered.map(row => {
-            const usage  = usageByStaff.get(row.staffId);
+            const usage  = usageByStaff.get(row.id);
             const cap    = row.maxWeeklyLectureLoad ?? 0;
             const over   = cap > 0 && usage && usage.periods > cap;
             const type   = effectiveStaffType(row);
             const status = effectiveStatus(row);
 
             return (
-              <div key={row.staffId} className="card" style={{ padding: '14px 16px', display: 'grid', gap: 10, backdropFilter: 'none' }}>
+              <div key={row.id} className="card" style={{ padding: '14px 16px', display: 'grid', gap: 10, backdropFilter: 'none' }}>
                 {/* Name row */}
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                   <Avatar name={row.fullName} size={46} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <Link to={`/app/teachers/${row.staffId}`} style={{ fontWeight: 800, fontSize: 15, color: 'rgba(15,23,42,0.88)', textDecoration: 'none', display: 'block' }}>{row.fullName}</Link>
+                    <Link to={`/app/teachers/${row.id}`} style={{ fontWeight: 800, fontSize: 15, color: 'rgba(15,23,42,0.88)', textDecoration: 'none', display: 'block' }}>{row.fullName}</Link>
                     {row.designation && <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', fontWeight: 600 }}>{row.designation}</div>}
                     {row.employeeNo && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', fontWeight: 600 }}>Emp # {row.employeeNo}</div>}
                     {row.department && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', fontWeight: 500 }}>{row.department}</div>}
                   </div>
-                  <RowMenu canEdit={canEdit} staffId={row.staffId} onEdit={() => openEdit(row)} onDelete={() => setDelConfirm({ open: true, staffId: row.staffId, fullName: row.fullName })} />
+                  <RowMenu canEdit={canEdit} staffId={row.id} onEdit={() => openEdit(row)} onDelete={() => setDelConfirm({ open: true, staffId: row.id, fullName: row.fullName })} />
                 </div>
 
                 {/* Status row with labels */}
@@ -710,11 +727,11 @@ export function TeachersModulePage() {
                 )}
 
                 {/* Subjects */}
-                {row.subjectCodes.length > 0 && (
+                {row.teachableSubjectCodes.length > 0 && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <span style={{ color: 'rgba(15,23,42,0.4)', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>Subjects</span>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                      {row.subjectCodes.map(c => <span key={c} style={{ ...BASE_BADGE, background: 'rgba(5,150,105,0.09)', color: '#065f46', fontSize: 11 }}>{c}</span>)}
+                      {row.teachableSubjectCodes.map(c => <span key={c} style={{ ...BASE_BADGE, background: 'rgba(5,150,105,0.09)', color: '#065f46', fontSize: 11 }}>{c}</span>)}
                     </div>
                   </div>
                 )}

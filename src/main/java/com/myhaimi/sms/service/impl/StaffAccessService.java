@@ -188,9 +188,14 @@ public class StaffAccessService {
         if (email == null || email.isBlank())
             throw new IllegalArgumentException("Staff email is required to create a login account.");
 
-        // Roles: prefer caller-supplied list; fall back to StaffRoleMapping
-        Set<Role> roles = resolveRoles(dto.getRoles());
-        if (roles.isEmpty()) roles = resolveStaffOwnRoles(staffId);
+        // Roles: StaffRoleMapping is the ONLY authoritative source.
+        // Caller-supplied role lists from StaffCreateLoginDTO are intentionally ignored here —
+        // roles must be managed through the staff role management flow, not login creation.
+        Set<Role> roles = resolveStaffOwnRoles(staffId);
+        if (roles.isEmpty())
+            throw new IllegalArgumentException(
+                    "Assign at least one staff role (via staff role management) before creating a login account. "
+                    + "Staff roles control portal access permissions.");
 
         User existingLink = userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, staffId).orElse(null);
         if (existingLink != null) {

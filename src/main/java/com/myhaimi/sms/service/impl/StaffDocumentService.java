@@ -239,6 +239,22 @@ public class StaffDocumentService {
         requireStaff(staffId, schoolId);
         StaffDocument doc = requireDoc(docId, staffId);
 
+        // Ownership guard: SCHOOL_ADMIN / PRINCIPAL / VICE_PRINCIPAL / HOD can upload for any staff.
+        // TEACHER / CLASS_TEACHER can only upload their own staff documents.
+        boolean isAdmin = auth.getAuthorities().stream().anyMatch(a -> {
+            String role = a.getAuthority().replaceFirst("^ROLE_", "");
+            return "SCHOOL_ADMIN".equals(role) || "PRINCIPAL".equals(role)
+                    || "VICE_PRINCIPAL".equals(role) || "HOD".equals(role);
+        });
+        if (!isAdmin) {
+            Integer callerStaffId = resolveCallerStaffId();
+            if (callerStaffId == null || !callerStaffId.equals(staffId)) {
+                throw new IllegalArgumentException(
+                        "You can only upload documents for your own staff profile. "
+                        + "Ask a school admin or principal to upload documents on your behalf.");
+            }
+        }
+
         Integer uploadedBy = resolveCallerStaffId();
 
         // Upload using TEACHER_DOCUMENT category — validates type (PDF/JPG/PNG) and size (≤ 10 MB)

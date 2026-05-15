@@ -35,7 +35,7 @@ type GradeSectionsRow = {
 const INITIAL_ROWS: GradeSectionsRow[] = [{ gradeLevel: '', sectionsText: '' }];
 
 export function ClassesSectionsModulePage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const tabFromUrl = (searchParams.get('tab') ?? 'browse') as 'browse' | 'add' | 'generate';
   const [tab, setTab] = useState<'browse' | 'add' | 'generate'>(tabFromUrl);
   useEffect(() => setTab(tabFromUrl), [tabFromUrl]);
@@ -187,12 +187,6 @@ export function ClassesSectionsModulePage() {
     },
   });
 
-  const setTabUrl = (next: 'browse' | 'add' | 'generate') => {
-    const sp = new URLSearchParams(searchParams);
-    if (next === 'browse') sp.delete('tab');
-    else sp.set('tab', next);
-    setSearchParams(sp, { replace: true });
-  };
 
   const headerActions = (
     <>

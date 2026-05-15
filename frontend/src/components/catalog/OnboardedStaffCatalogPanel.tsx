@@ -60,7 +60,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
 
   const staffCatalog = useQuery({
     queryKey: ['onboarding-staff-view'],
-    queryFn: async () => (await api.get<OnboardedStaffRow[]>('/api/v1/onboarding/staff')).data,
+    queryFn: async () => (await api.get<OnboardedStaffRow[] | { content: OnboardedStaffRow[] }>('/api/staff?size=500&sort=fullName,asc')).data,
   });
 
   const subjectsCatalog = useQuery({
@@ -101,13 +101,13 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
 
   async function ensureStaffDeleteInfo(staffId: number) {
     if (staffDeleteInfoCache[staffId]) return;
-    const r = await api.get(`/api/v1/onboarding/staff/${staffId}/delete-info`);
+    const r = await api.get(`/api/staff/${staffId}/delete-info`);
     setStaffDeleteInfoCache((p) => ({ ...p, [staffId]: r.data as StaffDeleteInfo }));
   }
 
   const deleteStaff = useMutation({
     mutationFn: async (staffId: number) => {
-      await api.delete(`/api/v1/onboarding/staff/${staffId}`);
+      await api.delete(`/api/staff/${staffId}`);
     },
     onSuccess: async () => {
       setStaffDeleteModal({ open: false });
@@ -119,21 +119,21 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
 
   const deleteAllStaff = useMutation({
     mutationFn: async (rows: OnboardedStaffRow[]) => {
-      const sorted = rows.slice().sort((a, b) => Number(a.staffId) - Number(b.staffId));
+      const sorted = rows.slice().sort((a, b) => Number(a.id) - Number(b.id));
       let deleted = 0;
       let skipped = 0;
       const skippedNames: string[] = [];
       for (const r of sorted) {
-        const id = Number(r.staffId);
+        const id = Number(r.id);
         if (!Number.isFinite(id)) continue;
         try {
-          const info = (await api.get<StaffDeleteInfo>(`/api/v1/onboarding/staff/${id}/delete-info`)).data;
+          const info = (await api.get<StaffDeleteInfo>(`/api/staff/${id}/delete-info`)).data;
           if (info?.canDelete === false) {
             skipped += 1;
             skippedNames.push(r.fullName || r.email || String(id));
             continue;
           }
-          await api.delete(`/api/v1/onboarding/staff/${id}`);
+          await api.delete(`/api/staff/${id}`);
           deleted += 1;
         } catch {
           skipped += 1;
@@ -153,7 +153,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
 
   const resetStaffLogin = useMutation({
     mutationFn: async (args: { staffId: number; fullName: string }) =>
-      (await api.post<StaffLoginCredential>(`/api/v1/onboarding/staff/${args.staffId}/reset-login`)).data,
+      (await api.post<StaffLoginCredential>(`/api/staff/${args.staffId}/reset-password`)).data,
     onSuccess: async (cred, vars) => {
       setStaffResetLoginConfirm({ open: false });
       await invalidate(['staff']);
@@ -168,8 +168,8 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
     mutationFn: async ({ staffId, body }: { staffId: number; body: StaffDraft }) => {
       const roles = (body.roles ?? []).map((r) => String(r).trim().toUpperCase()).filter(Boolean);
       const isTeacher = roles.includes('TEACHER');
-      // Use the structured onboard endpoint — PUT /api/v1/onboarding/staff/{id}/onboard
-      const r = await api.put(`/api/v1/onboarding/staff/${staffId}/onboard`, {
+      // Use the structured onboard endpoint — PUT /api/staff/{id}/onboard
+      const r = await api.put(`/api/staff/${staffId}/onboard`, {
         identity: {
           fullName: body.fullName,
           phone: body.phone ?? '',
@@ -177,7 +177,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
           employeeNo: body.employeeNo || null,
         },
         employment: {
-          staffType: 'TEACHING',
+          staffType: body.staffType ?? 'TEACHING',
           designation: body.designation ?? '',
         },
         rolesAndAccess: {
@@ -301,11 +301,11 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
             </div>
 
             {(() => {
-              const filtered = (staffCatalog.data ?? [])
+              const filtered = pageContent(staffCatalog.data)
                 .filter((s) => {
                   const q = staffTableSearch.trim().toLowerCase();
                   if (q) {
-                    const subjectBits = (s.subjectCodes ?? []).map((code) => {
+                    const subjectBits = (s.teachableSubjectCodes ?? []).map((code) => {
                       const k = String(code).trim().toLowerCase();
                       return subjectSearchStringsByCode.get(k) ?? k;
                     });
@@ -316,7 +316,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                       s.employeeNo ?? '',
                       s.designation ?? '',
                       ...(s.roles ?? []),
-                      ...(s.subjectCodes ?? []),
+                      ...(s.teachableSubjectCodes ?? []),
                       ...subjectBits,
                     ]
                       .join(' ')
@@ -338,17 +338,18 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                 const subjectCatalog = pageContent(subjectsCatalog.data);
                 setStaffEdit({
                   open: true,
-                  staffId: s.staffId,
+                  staffId: s.id,
                   draft: {
                     fullName: s.fullName ?? '',
                     email: s.email ?? '',
                     phone: s.phone ?? '',
                     employeeNo: s.employeeNo ?? '',
                     designation: s.designation ?? '',
+                    staffType: s.staffType ?? 'TEACHING',
                     roles: s.roles ?? [],
                     teachableSubjectIds:
-                      (s.subjectCodes ?? []).length
-                        ? subjectCatalog.filter((sub) => (s.subjectCodes ?? []).includes(sub.code)).map((sub) => sub.id)
+                      (s.teachableSubjectCodes ?? []).length
+                        ? subjectCatalog.filter((sub) => (s.teachableSubjectCodes ?? []).includes(sub.code)).map((sub) => sub.id)
                         : [],
                     createLoginAccount: true,
                     maxWeeklyLectureLoad: s.maxWeeklyLectureLoad ?? null,
@@ -361,34 +362,34 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                 readOnly ? null : (
                 <RowActionsMenu
                   actions={[
-                    { id: `staff-${s.staffId}-edit`, label: 'Edit', onSelect: () => openEdit(s) },
+                    { id: `staff-${s.id}-edit`, label: 'Edit', onSelect: () => openEdit(s) },
                     {
-                      id: `staff-${s.staffId}-reset-login`,
+                      id: `staff-${s.id}-reset-login`,
                       label: 'Reset login',
                       disabled: !s.hasLoginAccount,
                       disabledReason: 'No login account — use Edit staff to create one.',
                       onSelect: () =>
                         setStaffResetLoginConfirm({
                           open: true,
-                          staffId: s.staffId,
+                          staffId: s.id,
                           fullName: s.fullName,
                           email: s.email,
                         }),
                     },
                     {
-                      id: `staff-${s.staffId}-assign`,
+                      id: `staff-${s.id}-assign`,
                       label: 'Assign subjects',
                       disabled: !(s.roles ?? []).includes('TEACHER'),
                       disabledReason: 'Only staff with TEACHER role can be assigned subjects.',
                       onSelect: () => openEdit(s),
                     },
                     {
-                      id: `staff-${s.staffId}-delete`,
+                      id: `staff-${s.id}-delete`,
                       label: 'Delete',
                       danger: true,
                       onSelect: async () => {
-                        await ensureStaffDeleteInfo(s.staffId);
-                        setStaffDeleteModal({ open: true, staffId: s.staffId, fullName: s.fullName, email: s.email });
+                        await ensureStaffDeleteInfo(s.id);
+                        setStaffDeleteModal({ open: true, staffId: s.id, fullName: s.fullName, email: s.email });
                       },
                     },
                   ]}
@@ -424,7 +425,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                 <div className="w-full">
                   <div className="grid grid-cols-1 gap-3 md:hidden">
                     {filtered.map((s) => (
-                      <div key={s.staffId} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div key={s.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="truncate text-base font-black text-slate-900">{s.fullName}</div>
@@ -455,7 +456,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                           <div className="flex items-start justify-between gap-3">
                             <div className="text-slate-500">Subjects</div>
                             <div className="text-right font-semibold text-slate-800 break-words">
-                              {(s.subjectCodes ?? []).length ? (s.subjectCodes ?? []).join(', ') : <span className="text-slate-500">—</span>}
+                              {(s.teachableSubjectCodes ?? []).length ? (s.teachableSubjectCodes ?? []).join(', ') : <span className="text-slate-500">—</span>}
                             </div>
                           </div>
                           <div className="flex items-start justify-between gap-3">
@@ -482,15 +483,15 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                           </thead>
                           <tbody>
                             {filtered.map((s, idx) => {
-                              const open = staffExpandedId === s.staffId;
+                              const open = staffExpandedId === s.id;
                               return (
-                                <Fragment key={s.staffId}>
+                                <Fragment key={s.id}>
                                   <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} border-b border-slate-100 hover:bg-orange-50/30`}>
                                     <td className="px-4 py-3">
                                       <button
                                         type="button"
                                         className="w-full text-left"
-                                        onClick={() => setStaffExpandedId((p) => (p === s.staffId ? null : s.staffId))}
+                                        onClick={() => setStaffExpandedId((p) => (p === s.id ? null : s.id))}
                                       >
                                         <div className="font-extrabold text-slate-900">{s.fullName}</div>
                                         <div className="mt-0.5 text-xs font-semibold text-slate-500">
@@ -525,7 +526,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                                             <div>
                                               <div className="text-xs font-black tracking-wide text-slate-500">Subjects</div>
                                               <div className="mt-1 break-words text-sm font-semibold text-slate-900">
-                                                {(s.subjectCodes ?? []).length ? (s.subjectCodes ?? []).join(', ') : '—'}
+                                                {(s.teachableSubjectCodes ?? []).length ? (s.teachableSubjectCodes ?? []).join(', ') : '—'}
                                               </div>
                                             </div>
                                           </div>
@@ -562,7 +563,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                           <tbody>
                             {filtered.map((s, idx) => (
                               <tr
-                                key={s.staffId}
+                                key={s.id}
                                 className={`${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'} border-b border-slate-100 hover:bg-orange-50/30`}
                               >
                                 <td className="px-4 py-3 font-extrabold text-slate-900">{s.fullName}</td>
@@ -579,7 +580,7 @@ export function OnboardedStaffCatalogPanel({ readOnly = false }: { readOnly?: bo
                                 </td>
                                 <td className="px-4 py-3">
                                   <div className="max-w-[360px] break-words font-semibold text-slate-800">
-                                    {(s.subjectCodes ?? []).length ? (s.subjectCodes ?? []).join(', ') : <span className="text-slate-500">—</span>}
+                                    {(s.teachableSubjectCodes ?? []).length ? (s.teachableSubjectCodes ?? []).join(', ') : <span className="text-slate-500">—</span>}
                                   </div>
                                 </td>
                                 <td className="px-4 py-3">{statusBadge(!!s.hasLoginAccount)}</td>

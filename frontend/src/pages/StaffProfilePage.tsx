@@ -2,7 +2,7 @@
  * Staff Profile Page — /app/teachers/:staffId
  *
  * Full profile view for a single staff member.
- * Data: GET /api/v1/onboarding/staff/{id}/profile
+ * Data: GET /api/staff/{id}
  *
  * Tabs: Overview · Employment · Academics · Timetable ·
  *       Documents · Access · Leave · Payroll · Activity Log
@@ -1632,7 +1632,7 @@ export function StaffProfilePage() {
 
   const profileQ = useQuery({
     queryKey: ['staff-profile', id],
-    queryFn: async () => (await api.get<StaffProfile>(`/api/v1/onboarding/staff/${id}/profile`)).data,
+    queryFn: async () => (await api.get<StaffProfile>(`/api/staff/${id}`)).data,
     enabled: !isNaN(id),
     retry: false,
   });
@@ -1670,7 +1670,7 @@ export function StaffProfilePage() {
 
   const statusMut = useMutation({
     mutationFn: async (newStatus: string) => {
-      await api.put(`/api/v1/onboarding/staff/${id}/onboard`, {
+      await api.put(`/api/staff/${id}/onboard`, {
         identity: { fullName: profile?.fullName ?? '', phone: profile?.phone ?? '' },
         employment: { staffType: profile?.staffType ?? 'TEACHING', designation: profile?.designation ?? '', status: newStatus },
         rolesAndAccess: { roles: profile?.roles ?? [] },

@@ -1,6 +1,10 @@
 package com.myhaimi.sms.controllers;
 
+import com.myhaimi.sms.DTO.StaffDeleteInfoDTO;
 import com.myhaimi.sms.DTO.staff.*;
+import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingRequest;
+import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingResult;
+import com.myhaimi.sms.service.impl.SchoolOnboardingService;
 import com.myhaimi.sms.service.impl.StaffAccessService;
 import com.myhaimi.sms.service.impl.StaffDocumentService;
 import com.myhaimi.sms.service.impl.StaffReadinessService;
@@ -25,10 +29,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class StaffController {
 
-    private final StaffService          staffService;
-    private final StaffDocumentService  staffDocumentService;
-    private final StaffAccessService    staffAccessService;
-    private final StaffReadinessService staffReadinessService;
+    private final StaffService             staffService;
+    private final StaffDocumentService     staffDocumentService;
+    private final StaffAccessService       staffAccessService;
+    private final StaffReadinessService    staffReadinessService;
+    private final SchoolOnboardingService  schoolOnboardingService;
 
     // ── Core CRUD ─────────────────────────────────────────────────────────────
 
@@ -49,18 +54,62 @@ public class StaffController {
         }
     }
 
+    /** Full profile — alias for /{id}; kept for explicit frontend path. */
+    @GetMapping("/{id}/profile")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
+    public ResponseEntity<?> getProfile(@PathVariable Integer id) {
+        return getById(id);
+    }
+
+    // ── Onboarding (single staff) ─────────────────────────────────────────────
+
     /**
-     * @deprecated Use {@code POST /api/v1/onboarding/staff/onboard} with
-     * {@link com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingRequest} instead.
-     * Accepting raw JPA entities over HTTP is not permitted for security reasons.
+     * Create a single staff member using the structured {@link StaffOnboardingRequest}.
+     * POST /api/staff/onboard
      */
-    @PostMapping
-    @Deprecated
-    public ResponseEntity<?> create() {
-        return ResponseEntity.status(HttpStatus.GONE)
-                .body(Map.of("error",
-                        "This endpoint has been removed. Use POST /api/v1/onboarding/staff/onboard " +
-                        "with the structured StaffOnboardingRequest body."));
+    @PostMapping("/onboard")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<StaffOnboardingResult> onboardStaff(
+            @Valid @RequestBody StaffOnboardingRequest body) {
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(schoolOnboardingService.onboardStaff(body));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest()
+                    .body(new StaffOnboardingResult(null, java.util.List.of(ex.getMessage()), null));
+        }
+    }
+
+    /**
+     * Update an existing staff member using the structured {@link StaffOnboardingRequest}.
+     * PUT /api/staff/{id}/onboard
+     */
+    @PutMapping("/{id}/onboard")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<StaffOnboardingResult> updateStaffOnboarding(
+            @PathVariable Integer id,
+            @Valid @RequestBody StaffOnboardingRequest body) {
+        try {
+            return ResponseEntity.ok(schoolOnboardingService.updateStaffOnboarding(id, body));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest()
+                    .body(new StaffOnboardingResult(null, java.util.List.of(ex.getMessage()), null));
+        }
+    }
+
+    // ── Delete ────────────────────────────────────────────────────────────────
+
+    @GetMapping("/{id}/delete-info")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public StaffDeleteInfoDTO staffDeleteInfo(@PathVariable Integer id) {
+        return schoolOnboardingService.staffDeleteInfo(id);
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<Void> deleteStaff(@PathVariable Integer id) {
+        schoolOnboardingService.deleteStaff(id);
+        return ResponseEntity.noContent().build();
     }
 
     // ── Document checklist ────────────────────────────────────────────────────
