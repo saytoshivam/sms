@@ -188,7 +188,6 @@ export function BulkImportTeachersPage() {
           <h2 className="workspace-feature-page__title">Bulk Import Teachers / Staff</h2>
           <p className="workspace-feature-page__lead" style={{ margin: 0 }}>Upload a CSV to preview, validate, and import multiple staff members at once.</p>
         </div>
-        <div className="bi-header-actions"><Link className="btn secondary" to="/app/teachers">← Back to Teachers</Link></div>
       </header>
 
       <div className="bi-steps">

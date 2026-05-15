@@ -158,7 +158,6 @@ export function BulkImportClassesPage() {
           <h2 className="workspace-feature-page__title">Bulk Import Classes &amp; Sections</h2>
           <p className="workspace-feature-page__lead" style={{ margin: 0 }}>Upload a CSV to preview, validate, and import classes and sections at once.</p>
         </div>
-        <div className="bi-header-actions"><Link className="btn secondary" to="/app/classes-sections">← Back to Classes &amp; Sections</Link></div>
       </header>
 
       <div className="bi-steps">

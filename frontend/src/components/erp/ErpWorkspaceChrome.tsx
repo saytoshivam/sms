@@ -37,6 +37,7 @@ import { api } from '../../lib/api';
 import { erpAttendancePath } from '../../lib/erpAttendancePath';
 import { hasTeachingRole } from '../../lib/roleGroups';
 import { withWorkspaceReadOnly } from '../../lib/workspaceViewMode';
+import { parentRouteOf } from '../../lib/parentRoute';
 import '../../styles/erpShell.css';
 
 export type ErpMe = {
@@ -263,7 +264,7 @@ function navActive(pathname: string, item: NavItem): boolean {
 
 function shouldShowFeatureBack(pathname: string): boolean {
   const p = pathname.replace(/\/$/, '') || '/';
-  if (p === '/app' || p === '/app/dashboard') return false;
+  if (p === '/app' || p === '/app/dashboard' || p === '/app/operations-hub') return false;
   return p.startsWith('/app');
 }
 
@@ -274,7 +275,7 @@ function ErpFeatureBackRow() {
   if (!visible) return null;
   return (
     <div className="shell-back-banner">
-      <button type="button" className="shell-back-btn" onClick={() => navigate(-1)}>
+      <button type="button" className="shell-back-btn" onClick={() => navigate(parentRouteOf(pathname))}>
         ← Back
       </button>
     </div>

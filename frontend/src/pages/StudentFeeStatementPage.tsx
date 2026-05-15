@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { SmartSelect } from '../components/SmartSelect';
 
@@ -45,9 +44,6 @@ export function StudentFeeStatementPage() {
   return (
     <div className="fee-statement-page">
       <header className="fee-st-header">
-        <Link to="/app" className="fee-st-back">
-          ← Back
-        </Link>
         <h1 className="fee-st-title">Fee Statement</h1>
       </header>
 

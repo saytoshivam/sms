@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 
 export type StudentExamCard = {
@@ -35,11 +34,7 @@ export function StudentExamsPage() {
   return (
     <div className="exam-page">
       <header className="exam-topbar">
-        <Link to="/app" className="exam-topbar-back">
-          ← Back
-        </Link>
         <h1 className="exam-topbar-title">Exams Available</h1>
-        <span style={{ width: 56 }} aria-hidden />
       </header>
 
       <div className="exam-body">

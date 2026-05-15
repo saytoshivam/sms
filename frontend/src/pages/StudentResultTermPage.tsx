@@ -37,9 +37,6 @@ export function StudentResultTermPage() {
   return (
     <div className="res-page">
       <header className="res-topbar">
-        <Link to="/app/student/results" className="res-topbar-back">
-          ← Back
-        </Link>
         <h1 className="res-topbar-title">Result</h1>
         <span style={{ width: 56 }} aria-hidden />
       </header>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { parentRouteOf } from '../lib/parentRoute';
 import { useQuery } from '@tanstack/react-query';
 import { ToastViewport } from '../components/ToastViewport';
 import { useAuth } from '../lib/auth';
@@ -40,19 +41,20 @@ function initialsFrom(displayName: string | null | undefined, email: string) {
   return email.slice(0, 2).toUpperCase();
 }
 
-/** True on /app/* feature routes; hidden on operations hub (/app) and school dashboard (/app/dashboard). */
+/** True on /app/* feature routes; hidden on root, dashboard, and operations hub. */
 function shouldShowFeatureBack(pathname: string): boolean {
   const p = pathname.replace(/\/$/, '') || '/';
-  if (p === '/app' || p === '/app/dashboard') return false;
+  if (p === '/app' || p === '/app/dashboard' || p === '/app/operations-hub') return false;
   return p.startsWith('/app');
 }
 
 function FeatureBackRow({ visible }: { visible: boolean }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   if (!visible) return null;
   return (
     <div className="shell-back-banner">
-      <button type="button" className="shell-back-btn" onClick={() => navigate(-1)}>
+      <button type="button" className="shell-back-btn" onClick={() => navigate(parentRouteOf(pathname))}>
         ← Back
       </button>
     </div>

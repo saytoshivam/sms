@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { AnnouncementCategory } from './StudentAnnouncementsPage';
 
@@ -47,9 +47,6 @@ export function StudentAnnouncementDetailPage() {
   return (
     <div className="student-mobile-page">
       <header className="student-m-subheader">
-        <Link to="/app/student/announcements" className="student-m-back">
-          ← Back
-        </Link>
         <h1 className="student-m-title">Announcement</h1>
       </header>
 

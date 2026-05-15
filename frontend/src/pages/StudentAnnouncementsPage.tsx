@@ -65,9 +65,6 @@ export function StudentAnnouncementsPage() {
   return (
     <div className="student-mobile-page">
       <header className="student-m-subheader">
-        <Link to="/app" className="student-m-back">
-          ← Back
-        </Link>
         <h1 className="student-m-title">Announcement</h1>
       </header>
 

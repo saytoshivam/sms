@@ -160,7 +160,6 @@ export function BulkImportSubjectsPage() {
           <h2 className="workspace-feature-page__title">Bulk Import Subjects</h2>
           <p className="workspace-feature-page__lead" style={{ margin: 0 }}>Upload a CSV to preview, validate, and import the subject catalog at once.</p>
         </div>
-        <div className="bi-header-actions"><Link className="btn secondary" to="/app/subjects">← Back to Subjects</Link></div>
       </header>
 
       <div className="bi-steps">

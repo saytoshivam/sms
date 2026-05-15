@@ -382,11 +382,6 @@ export function BulkImportStudentsPage() {
             Upload a CSV file to preview, validate, and import multiple students at once.
           </p>
         </div>
-        <div className="bi-header-actions">
-          <Link className="btn secondary" to="/app/students">
-            ← Back to Students
-          </Link>
-        </div>
       </header>
 
       {/* ── Step indicator ── */}

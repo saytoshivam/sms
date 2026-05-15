@@ -1715,10 +1715,6 @@ export function StaffProfilePage() {
         <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.45)' }}>
           {formatApiError(profileQ.error)}
         </div>
-        <button type="button" onClick={() => navigate('/app/teachers')}
-          style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-          ← Back to Staff Directory
-        </button>
       </div>
     );
   }

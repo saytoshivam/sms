@@ -1433,7 +1433,6 @@ export function StudentProfilePage() {
     return (
       <div className="workspace-feature-page stack">
         <p>Invalid student.</p>
-        <Link className="btn secondary" to="/app/students">← Back to students</Link>
       </div>
     );
   }

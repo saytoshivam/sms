@@ -158,7 +158,6 @@ export function BulkImportRoomsPage() {
           <h2 className="workspace-feature-page__title">Bulk Import Rooms</h2>
           <p className="workspace-feature-page__lead" style={{ margin: 0 }}>Upload a CSV to preview, validate, and import rooms at once.</p>
         </div>
-        <div className="bi-header-actions"><Link className="btn secondary" to="/app/rooms">← Back to Rooms</Link></div>
       </header>
 
       <div className="bi-steps">

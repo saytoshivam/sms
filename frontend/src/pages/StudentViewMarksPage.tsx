@@ -64,9 +64,6 @@ export function StudentViewMarksPage() {
   return (
     <div className="vm-page">
       <header className="vm-topbar">
-        <Link to="/app" className="vm-topbar-back">
-          ← Back
-        </Link>
         <h1 className="vm-topbar-title">View Marks</h1>
         <span style={{ width: 56 }} aria-hidden />
       </header>

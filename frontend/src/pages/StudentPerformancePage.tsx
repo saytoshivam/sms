@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Bar,
   BarChart,
@@ -44,10 +44,8 @@ function usePerformanceDashboard(url: string, enabled = true) {
 
 function PerformanceBody({
   q,
-  backLink,
 }: {
   q: ReturnType<typeof usePerformanceDashboard>;
-  backLink: { to: string; label: string };
 }) {
   if (q.isLoading) {
     return <div className="muted">Loading performance…</div>;
@@ -58,9 +56,6 @@ function PerformanceBody({
     return (
       <div className="card stack">
         <div style={{ color: '#b91c1c' }}>{msg}</div>
-        <Link className="btn secondary" to={backLink.to}>
-          {backLink.label}
-        </Link>
       </div>
     );
   }
@@ -80,11 +75,6 @@ function PerformanceBody({
 
   return (
     <div className="stack perf-page">
-      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <Link className="muted" to={backLink.to} style={{ fontSize: 14 }}>
-          ← {backLink.label}
-        </Link>
-      </div>
 
       <div className="perf-top">
         <div className="card perf-hero perf-top__hero">
@@ -196,7 +186,7 @@ export function StudentMyPerformancePage() {
         />
         <span>Since I joined (enrollment date)</span>
       </label>
-      <PerformanceBody q={q} backLink={{ to: '/app', label: 'Back to dashboard' }} />
+      <PerformanceBody q={q} />
     </div>
   );
 }
@@ -241,7 +231,7 @@ export function StudentPerformancePage() {
               <span>Since student joined (enrollment date)</span>
             </label>
           ) : null}
-          <PerformanceBody q={q} backLink={{ to: '/app/students', label: 'Back to students' }} />
+          <PerformanceBody q={q} />
         </>
       )}
     </div>
