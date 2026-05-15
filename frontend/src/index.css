@@ -1302,6 +1302,179 @@ textarea:disabled {
   max-width: 1100px;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   WORKSPACE SHELL — shared layout primitives for platform / admin pages
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Page wrapper */
+.workspace-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 32px);
+  box-sizing: border-box;
+}
+
+/* ── Hero band ── */
+.workspace-hero {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-primary) 12%, #fffbeb),
+    color-mix(in srgb, var(--color-accent) 8%, #ffffff));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-radius: 16px;
+  padding: 20px 24px 18px;
+  box-shadow: 0 1px 0 rgba(255,255,255,.9) inset,
+              0 6px 24px color-mix(in srgb, var(--color-primary) 6%, rgba(2,6,23,.07));
+}
+
+.workspace-hero__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.workspace-hero__eyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-text-muted);
+}
+
+.workspace-hero__tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  background: color-mix(in srgb, var(--color-primary) 15%, #fff7ed);
+  color: var(--color-primary);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+.workspace-hero__title {
+  margin: 0 0 6px;
+  font-size: clamp(1.35rem, 3.5vw, 1.75rem);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-text);
+}
+
+.workspace-hero__subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+/* ── Metric strip ── */
+.workspace-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.workspace-metric-card {
+  background: color-mix(in srgb, #ffffff 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 10%, color-mix(in srgb, var(--color-text) 8%, transparent));
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-primary) 4%, rgba(2,6,23,.06));
+}
+
+.workspace-metric-card__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.workspace-metric-card__value {
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.workspace-metric-card__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+/* ── Workspace section (tool grid, etc.) ── */
+.workspace-section {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-section__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.workspace-section__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.workspace-section__hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* ── Workspace placeholder (info / API reference boxes) ── */
+.workspace-placeholder {
+  background: color-mix(in srgb, var(--color-primary) 4%, #f8fafc);
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 18%, #cbd5e1);
+  border-radius: 12px;
+  padding: 14px 18px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+/* ── Workspace panel (card-like section with optional header + action) ── */
+.workspace-panel {
+  background: color-mix(in srgb, #ffffff 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 12%, color-mix(in srgb, var(--color-text) 10%, transparent));
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 90%, transparent) inset,
+    0 10px 30px color-mix(in srgb, var(--color-primary) 5%, rgba(2, 6, 23, 0.08));
+  backdrop-filter: blur(10px);
+}
+
+.workspace-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.workspace-panel__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
 .platform-schools-table {
   width: 100%;
   border-collapse: collapse;
