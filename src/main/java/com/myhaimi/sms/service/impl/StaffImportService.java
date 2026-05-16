@@ -59,6 +59,7 @@ public class StaffImportService {
     private final RoleRepo              roleRepo;
     private final UserRepo              userRepo;
     private final StaffTeachableSubjectRepository teachableSubjectRepo;
+    private final StaffRoleMappingRepository      staffRoleMappingRepository;
     private final PasswordEncoder       passwordEncoder;
 
     // ── Preview ───────────────────────────────────────────────────────────────
@@ -365,12 +366,20 @@ public class StaffImportService {
         String rolesRaw = normalise(row.getRoles());
         Set<Role> roleEntities = new HashSet<>();
         if (rolesRaw != null) {
-            for (String rName : rolesRaw.split(",")) {
+            // Support both pipe-separated (ENG001|ENG002) and comma-separated
+            String[] roleParts = rolesRaw.contains("|") ? rolesRaw.split("\\|") : rolesRaw.split(",");
+            for (String rName : roleParts) {
                 String up = rName.trim().toUpperCase(Locale.ROOT);
                 if (!up.isEmpty()) {
                     roleRepo.findByName(up).stream().findFirst().ifPresent(roleEntities::add);
                 }
             }
+        }
+
+        // Create StaffRoleMapping records — these are the authoritative source for staff roles
+        // (User.roles is for login auth; StaffRoleMapping drives the ERP role display)
+        for (Role r : roleEntities) {
+            staffRoleMappingRepository.save(new StaffRoleMapping(savedStaff, r));
         }
 
         // ── 3. Teachable subjects ────────────────────────────────────────────
@@ -463,12 +472,20 @@ public class StaffImportService {
         row.setJoiningDate(get(fields, idx, "joiningdate"));
         row.setEmploymentType(get(fields, idx, "employmenttype"));
         row.setRoles(get(fields, idx, "roles"));
-        row.setSubjectCodes(get(fields, idx, "subjectcodes"));
+        // Accept both "subjectcodes" and "subjects" as column name
+        String subjectCodesVal = get(fields, idx, "subjectcodes");
+        if (subjectCodesVal == null) subjectCodesVal = get(fields, idx, "subjects");
+        // Normalise pipe-separator to comma so downstream split(",") works
+        if (subjectCodesVal != null) subjectCodesVal = subjectCodesVal.replace('|', ',');
+        row.setSubjectCodes(subjectCodesVal);
         row.setMaxWeeklyLectureLoad(get(fields, idx, "maxweeklylectureload"));
         row.setCanBeClassTeacher(get(fields, idx, "canbeclassteacher"));
         row.setCanTakeSubstitution(get(fields, idx, "cantakesubstitution"));
         row.setCreateLoginAccount(get(fields, idx, "createloginaccount"));
-        row.setAddressLine1(get(fields, idx, "addressline1"));
+        // Accept both "addressline1" and "address" as column name
+        String addrVal = get(fields, idx, "addressline1");
+        if (addrVal == null) addrVal = get(fields, idx, "address");
+        row.setAddressLine1(addrVal);
         row.setCity(get(fields, idx, "city"));
         row.setState(get(fields, idx, "state"));
         row.setPincode(get(fields, idx, "pincode"));

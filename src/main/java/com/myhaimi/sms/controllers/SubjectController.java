@@ -38,17 +38,10 @@ public class SubjectController {
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/{id:[0-9]+}")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public Subject update(@PathVariable Integer id, @Valid @RequestBody SubjectUpdateDTO body) {
         return subjectService.update(id, body);
-    }
-
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<?> delete(@PathVariable Integer id) {
-        subjectService.delete(id);
-        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/delete-all")
@@ -58,7 +51,14 @@ public class SubjectController {
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/{id}/delete-info")
+    @DeleteMapping("/{id:[0-9]+}")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<?> delete(@PathVariable Integer id) {
+        subjectService.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{id:[0-9]+}/delete-info")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public SubjectDeleteInfoDTO deleteInfo(@PathVariable Integer id) {
         return subjectService.deleteInfo(id);
