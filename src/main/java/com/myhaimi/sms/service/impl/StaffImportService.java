@@ -94,7 +94,6 @@ public class StaffImportService {
         for (StaffImportRowDto row : rows) {
             List<String> errors   = new ArrayList<>();
             List<String> warnings = new ArrayList<>();
-            boolean      isDuplicate = false;
 
             // ── fullName ─────────────────────────────────────────────────────
             if (blank(row.getFullName()))
@@ -144,10 +143,13 @@ public class StaffImportService {
             String empNo = normalise(row.getEmployeeNo());
             if (empNo != null) {
                 if (!seenEmpNos.add(empNo.toLowerCase())) {
+                    // Same empNo appears twice in the CSV itself → hard error
                     errors.add("Row " + row.getRowNumber() + ": employeeNo '" + empNo + "' appears more than once in this CSV.");
                 } else if (existingEmpNos.contains(empNo.toLowerCase())) {
-                    isDuplicate = true;  // active staff with this empNo → skip
+                    // Active staff with this empNo exists — update in place on commit
+                    warnings.add("Row " + row.getRowNumber() + ": Staff with employeeNo '" + empNo + "' already exists and will be updated.");
                 } else if (deletedEmpNos.contains(empNo.toLowerCase())) {
+                    // Previously soft-deleted — will be resurrected on commit
                     warnings.add("Row " + row.getRowNumber() + ": Staff with employeeNo '" + empNo + "' was previously deleted and will be re-imported.");
                 }
             }
@@ -233,10 +235,7 @@ public class StaffImportService {
             }
 
             // ── Classify row ─────────────────────────────────────────────────
-            if (isDuplicate && errors.isEmpty()) {
-                results.add(StaffImportRowResultDto.duplicate(row,
-                        "Row " + row.getRowNumber() + ": Staff with employeeNo '" + empNo + "' already exists in this school."));
-            } else if (!errors.isEmpty()) {
+            if (!errors.isEmpty()) {
                 results.add(StaffImportRowResultDto.invalid(row, errors));
             } else if (!warnings.isEmpty()) {
                 StaffImportRowResultDto r = StaffImportRowResultDto.warn(row, warnings);
