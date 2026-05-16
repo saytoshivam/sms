@@ -404,15 +404,20 @@ public class StaffImportService {
 
         // Create StaffRoleMapping records — these are the authoritative source for staff roles
         // (User.roles is for login auth; StaffRoleMapping drives the ERP role display).
-        // Delete existing mappings first (safe for both new and resurrected staff).
-        staffRoleMappingRepository.deleteByStaff_Id(savedStaff.getId());
+        // Use entity-level deleteAll (carries its own @Transactional) to avoid needing an
+        // outer transaction — persistRow() is called via this.persistRow() (same-class), so
+        // Spring's AOP proxy cannot honour the @Transactional on this method.
+        List<StaffRoleMapping> oldMappings = staffRoleMappingRepository.findByStaff_Id(savedStaff.getId());
+        if (!oldMappings.isEmpty()) staffRoleMappingRepository.deleteAll(oldMappings);
         for (Role r : roleEntities) {
             staffRoleMappingRepository.save(new StaffRoleMapping(savedStaff, r));
         }
 
         // ── 3. Teachable subjects ────────────────────────────────────────────
         // Clear existing teachable subjects first (safe for resurrections).
-        teachableSubjectRepo.deleteByStaff_Id(savedStaff.getId());
+        // Same reason: entity-level deleteAll avoids the @Modifying transaction requirement.
+        List<StaffTeachableSubject> oldTeachable = teachableSubjectRepo.findByStaff_Id(savedStaff.getId());
+        if (!oldTeachable.isEmpty()) teachableSubjectRepo.deleteAll(oldTeachable);
         if (!row.getResolvedSubjectIds().isEmpty()) {
             for (Integer subId : row.getResolvedSubjectIds()) {
                 subjectRepo.findById(subId).ifPresent(subject -> {
