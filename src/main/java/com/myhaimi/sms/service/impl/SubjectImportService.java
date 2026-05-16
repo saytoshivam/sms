@@ -140,15 +140,26 @@ public class SubjectImportService {
         for (SubjectImportRowDto row : validRows) {
             try {
                 String code = row.getCode().toUpperCase().trim();
-                // Re-check for duplicates introduced between preview and commit
-                boolean exists = subjectRepo.findBySchool_IdAndCode(schoolId, code)
-                        .filter(s -> !s.isDeleted()).isPresent();
-                if (exists) { skipped++; continue; }
 
-                Subject s = new Subject();
-                s.setSchool(school);
+                // Check for an existing subject (active or soft-deleted) with this code.
+                Subject existing = subjectRepo.findBySchool_IdAndCode(schoolId, code).orElse(null);
+                if (existing != null && !existing.isDeleted()) {
+                    // Already active – skip (e.g. someone added it between preview and commit).
+                    skipped++;
+                    continue;
+                }
+
+                Subject s;
+                if (existing != null) {
+                    // Resurrect the soft-deleted record instead of inserting a duplicate.
+                    s = existing;
+                    s.setDeleted(false);
+                } else {
+                    s = new Subject();
+                    s.setSchool(school);
+                    s.setCode(code);
+                }
                 s.setName(row.getName().trim());
-                s.setCode(code);
                 String typeStr = row.getType() == null || row.getType().isBlank() ? "CORE" : row.getType().toUpperCase().trim();
                 try { s.setType(SubjectType.valueOf(typeStr)); } catch (IllegalArgumentException ex) { s.setType(SubjectType.CORE); }
                 if (row.getWeeklyFrequency() != null && !row.getWeeklyFrequency().isBlank()) {

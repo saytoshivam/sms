@@ -77,11 +77,42 @@ public class SubjectService {
                 .toList();
     }
 
+    @Transactional
     public Subject create(Subject subject) {
         Integer schoolId = requireSchoolId();
         School school = schoolRepo.findById(schoolId).orElseThrow();
+
+        String code = subject.getCode() == null ? "" : subject.getCode().trim().toUpperCase();
+
+        // Check if a previously soft-deleted subject with the same code exists.
+        // If so, resurrect it (update fields) instead of inserting a new row, which
+        // would violate the unique constraint on (school_id, code).
+        Subject existing = subjectRepo.findBySchool_IdAndCode(schoolId, code).orElse(null);
+        if (existing != null && existing.isDeleted()) {
+            // Resurrect: restore all user-supplied fields and clear the deleted flag.
+            existing.setDeleted(false);
+            existing.setName(subject.getName() == null ? existing.getName() : subject.getName().trim());
+            existing.setCode(code);
+            if (subject.getType() != null) existing.setType(subject.getType());
+            if (subject.getAllocationVenueRequirement() != null)
+                existing.setAllocationVenueRequirement(subject.getAllocationVenueRequirement());
+            else
+                existing.setAllocationVenueRequirement(SubjectAllocationVenueRequirement.STANDARD_CLASSROOM);
+            existing.setSpecializedVenueType(subject.getSpecializedVenueType());
+            if (subject.getWeeklyFrequency() != null) existing.setWeeklyFrequency(subject.getWeeklyFrequency());
+            String actor = actorEmailOrSystem();
+            existing.setUpdatedBy(actor);
+            return subjectRepo.save(existing);
+        }
+
+        if (existing != null) {
+            // Active subject with same code already exists.
+            throw new IllegalArgumentException("A subject with code '" + code + "' already exists.");
+        }
+
         subject.setId(null);
         subject.setSchool(school);
+        subject.setCode(code);
         if (subject.getAllocationVenueRequirement() == null) {
             subject.setAllocationVenueRequirement(SubjectAllocationVenueRequirement.STANDARD_CLASSROOM);
         }
