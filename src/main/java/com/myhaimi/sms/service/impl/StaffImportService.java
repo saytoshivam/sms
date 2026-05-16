@@ -79,7 +79,8 @@ public class StaffImportService {
             throw new IllegalArgumentException("CSV contains no data rows (only a header was found).");
 
         // 2. Pre-load catalogues (avoids N+1)
-        Set<String> existingEmpNos  = loadExistingEmpNos(schoolId);
+        Set<String> existingEmpNos  = loadExistingEmpNos(schoolId);      // active only → true duplicate
+        Set<String> deletedEmpNos   = loadDeletedEmpNos(schoolId);       // soft-deleted → resurrection
         Set<String> existingEmails  = loadExistingEmails(schoolId);
         Map<String, Integer> subjectCodeToId = loadSubjectCodeMap(schoolId);
 
@@ -145,7 +146,9 @@ public class StaffImportService {
                 if (!seenEmpNos.add(empNo.toLowerCase())) {
                     errors.add("Row " + row.getRowNumber() + ": employeeNo '" + empNo + "' appears more than once in this CSV.");
                 } else if (existingEmpNos.contains(empNo.toLowerCase())) {
-                    isDuplicate = true;
+                    isDuplicate = true;  // active staff with this empNo → skip
+                } else if (deletedEmpNos.contains(empNo.toLowerCase())) {
+                    warnings.add("Row " + row.getRowNumber() + ": Staff with employeeNo '" + empNo + "' was previously deleted and will be re-imported.");
                 }
             }
 
@@ -306,19 +309,43 @@ public class StaffImportService {
     void persistRow(School school, StaffImportRowDto row, Integer schoolId) {
         Integer schoolId2 = school.getId();
 
-        // ── 1. Resolve or create Staff ──────────────────────────────────────
+        // ── 1. Resolve or resurrect Staff ──────────────────────────────────────
         String empNo = normalise(row.getEmployeeNo());
         String email = normalise(row.getEmail());
         if (email != null) email = email.toLowerCase(Locale.ROOT);
 
-        // Auto-generate employeeNo if absent
+        // Auto-generate employeeNo if absent — keep trying until we find one with
+        // no collision (active OR soft-deleted rows share the same unique constraint).
         if (empNo == null || empNo.isBlank()) {
-            empNo = "EMP-" + String.format("%04d", staffRepo.countBySchool_Id(schoolId2) + 1);
+            long n = staffRepo.countBySchool_Id(schoolId2);
+            String candidate;
+            do {
+                n++;
+                candidate = "EMP-" + String.format("%04d", n);
+            } while (staffRepo.findFirstBySchool_IdAndEmployeeNoIgnoreCase(schoolId2, candidate).isPresent());
+            empNo = candidate;
         }
 
-        Staff staff = new Staff();
-        staff.setSchool(school);
-        staff.setEmployeeNo(empNo);
+        // Try to find an existing (possibly soft-deleted) staff row to resurrect
+        // so we never violate the unique(school_id, employee_no) constraint.
+        Staff staff = null;
+        if (email != null) {
+            staff = staffRepo.findFirstBySchool_IdAndEmailIgnoreCase(schoolId2, email).orElse(null);
+        }
+        if (staff == null) {
+            staff = staffRepo.findFirstBySchool_IdAndEmployeeNoIgnoreCase(schoolId2, empNo).orElse(null);
+        }
+
+        final boolean isResurrection = staff != null;
+        if (isResurrection) {
+            staff.setDeleted(false);
+        } else {
+            staff = new Staff();
+            staff.setSchool(school);
+            staff.setEmployeeNo(empNo);
+            staff.setCreatedBy("bulk-import");
+        }
+
         staff.setFullName(row.getFullName().trim());
         staff.setPhone(row.getPhone() != null ? row.getPhone().trim() : null);
         staff.setEmail(email);
@@ -358,7 +385,6 @@ public class StaffImportService {
         if (normalise(row.getHighestQualification())       != null) staff.setHighestQualification(row.getHighestQualification().trim());
         if (normalise(row.getProfessionalQualification())  != null) staff.setProfessionalQualification(row.getProfessionalQualification().trim());
 
-        staff.setCreatedBy("bulk-import");
         staff.setUpdatedBy("bulk-import");
         final Staff savedStaff = staffRepo.save(staff);
 
@@ -377,12 +403,16 @@ public class StaffImportService {
         }
 
         // Create StaffRoleMapping records — these are the authoritative source for staff roles
-        // (User.roles is for login auth; StaffRoleMapping drives the ERP role display)
+        // (User.roles is for login auth; StaffRoleMapping drives the ERP role display).
+        // Delete existing mappings first (safe for both new and resurrected staff).
+        staffRoleMappingRepository.deleteByStaff_Id(savedStaff.getId());
         for (Role r : roleEntities) {
             staffRoleMappingRepository.save(new StaffRoleMapping(savedStaff, r));
         }
 
         // ── 3. Teachable subjects ────────────────────────────────────────────
+        // Clear existing teachable subjects first (safe for resurrections).
+        teachableSubjectRepo.deleteByStaff_Id(savedStaff.getId());
         if (!row.getResolvedSubjectIds().isEmpty()) {
             for (Integer subId : row.getResolvedSubjectIds()) {
                 subjectRepo.findById(subId).ifPresent(subject -> {
@@ -552,6 +582,13 @@ public class StaffImportService {
     private Set<String> loadExistingEmpNos(Integer schoolId) {
         return staffRepo.findBySchool_IdAndIsDeletedFalseOrderByEmployeeNoAsc(schoolId)
                 .stream().map(s -> s.getEmployeeNo().toLowerCase()).collect(Collectors.toSet());
+    }
+
+    private Set<String> loadDeletedEmpNos(Integer schoolId) {
+        return staffRepo.findBySchool_IdOrderByEmployeeNoAsc(schoolId).stream()
+                .filter(Staff::isDeleted)
+                .map(s -> s.getEmployeeNo().toLowerCase())
+                .collect(Collectors.toSet());
     }
 
     private Set<String> loadExistingEmails(Integer schoolId) {

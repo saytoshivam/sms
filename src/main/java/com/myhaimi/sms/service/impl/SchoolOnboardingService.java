@@ -1435,7 +1435,7 @@ public class SchoolOnboardingService {
             if (!code.isBlank()) anySubjectCodeById.put(s.getId(), code);
         }
 
-        List<Staff> staff = staffRepo.findBySchool_IdOrderByEmployeeNoAsc(schoolId);
+        List<Staff> staff = staffRepo.findBySchool_IdAndIsDeletedFalseOrderByEmployeeNoAsc(schoolId);
         List<StaffTeachableSubject> allTeachable = staffTeachableSubjectRepository.findByStaff_School_Id(schoolId);
         java.util.Map<Integer, List<Integer>> teachableByStaff = new java.util.HashMap<>();
         for (StaffTeachableSubject t : allTeachable) {
@@ -1448,13 +1448,16 @@ public class SchoolOnboardingService {
                     .computeIfAbsent(t.getStaff().getId(), k -> new java.util.ArrayList<>())
                     .add(activeId);
         }
+        // Use StaffRoleMapping as the authoritative source for staff roles
+        // (covers CSV-imported staff who may not have a login account yet).
         java.util.Map<Integer, List<String>> roleNamesByStaff = new java.util.HashMap<>();
-        for (User u : userRepo.findBySchool_IdWithProfilesOrderByEmailAsc(schoolId)) {
-            if (u.getLinkedStaff() == null) continue;
-            roleNamesByStaff.put(
-                    u.getLinkedStaff().getId(),
-                    u.getRoles().stream().map(Role::getName).sorted().toList());
+        for (com.myhaimi.sms.entity.StaffRoleMapping m : staffRoleMappingRepository.findByStaff_School_Id(schoolId)) {
+            if (m.getStaff() == null || m.getRole() == null) continue;
+            roleNamesByStaff
+                    .computeIfAbsent(m.getStaff().getId(), k -> new java.util.ArrayList<>())
+                    .add(m.getRole().getName());
         }
+        roleNamesByStaff.values().forEach(list -> list.sort(String::compareToIgnoreCase));
         List<OnboardingAcademicStaffItemDTO> stRows = staff.stream()
                 .map(st -> {
                     List<String> stRoles       = roleNamesByStaff.getOrDefault(st.getId(), List.of());
