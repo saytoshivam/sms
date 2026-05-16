@@ -44,7 +44,7 @@ public class StaffController {
     }
 
     /** Full profile including masked payroll fields. */
-    @GetMapping("/{id}")
+    @GetMapping("/{id:[0-9]+}")
     public ResponseEntity<?> getById(@PathVariable Integer id) {
         try {
             StaffProfileDTO dto = staffService.getById(id);
@@ -55,7 +55,7 @@ public class StaffController {
     }
 
     /** Full profile — alias for /{id}; kept for explicit frontend path. */
-    @GetMapping("/{id}/profile")
+    @GetMapping("/{id:[0-9]+}/profile")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
     public ResponseEntity<?> getProfile(@PathVariable Integer id) {
         return getById(id);
@@ -84,7 +84,7 @@ public class StaffController {
      * Update an existing staff member using the structured {@link StaffOnboardingRequest}.
      * PUT /api/staff/{id}/onboard
      */
-    @PutMapping("/{id}/onboard")
+    @PutMapping("/{id:[0-9]+}/onboard")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public ResponseEntity<StaffOnboardingResult> updateStaffOnboarding(
             @PathVariable Integer id,
@@ -99,23 +99,23 @@ public class StaffController {
 
     // ── Delete ────────────────────────────────────────────────────────────────
 
-    @GetMapping("/{id}/delete-info")
+    @GetMapping("/{id:[0-9]+}/delete-info")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public StaffDeleteInfoDTO staffDeleteInfo(@PathVariable Integer id) {
         return schoolOnboardingService.staffDeleteInfo(id);
-    }
-
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<Void> deleteStaff(@PathVariable Integer id) {
-        schoolOnboardingService.deleteStaff(id);
-        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/delete-all")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
     public ResponseEntity<Void> deleteAllStaff() {
         schoolOnboardingService.deleteAllStaffForSchool();
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/{id:[0-9]+}")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<Void> deleteStaff(@PathVariable Integer id) {
+        schoolOnboardingService.deleteStaff(id);
         return ResponseEntity.noContent().build();
     }
 
