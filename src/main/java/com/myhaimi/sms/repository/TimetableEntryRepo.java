@@ -81,5 +81,9 @@ public interface TimetableEntryRepo extends JpaRepository<TimetableEntry, Intege
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update TimetableEntry e set e.room = null where e.school.id = :schoolId and e.room.id = :roomId")
     int clearRoomsBySchool_IdAndRoom_Id(@Param("schoolId") Integer schoolId, @Param("roomId") Integer roomId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update TimetableEntry e set e.staff = null where e.school.id = :schoolId")
+    int clearStaffBySchool_Id(@Param("schoolId") Integer schoolId);
 }
 

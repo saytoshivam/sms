@@ -35,5 +35,9 @@ public interface SubjectSectionOverrideRepo extends JpaRepository<SubjectSection
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update SubjectSectionOverride sso set sso.staff = null where sso.classGroup.school.id = :schoolId and sso.staff.id = :staffId")
     int clearStaffBySchool_IdAndStaff_Id(@Param("schoolId") Integer schoolId, @Param("staffId") Integer staffId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update SubjectSectionOverride sso set sso.staff = null where sso.classGroup.school.id = :schoolId")
+    int clearStaffBySchool_Id(@Param("schoolId") Integer schoolId);
 }
 

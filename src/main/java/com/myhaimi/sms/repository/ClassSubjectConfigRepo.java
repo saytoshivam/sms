@@ -30,5 +30,9 @@ public interface ClassSubjectConfigRepo extends JpaRepository<ClassSubjectConfig
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query("update ClassSubjectConfig c set c.staff = null where c.school.id = :schoolId and c.staff.id = :staffId")
   int clearStaffBySchool_IdAndStaff_Id(@Param("schoolId") Integer schoolId, @Param("staffId") Integer staffId);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query("update ClassSubjectConfig c set c.staff = null where c.school.id = :schoolId")
+  int clearStaffBySchool_Id(@Param("schoolId") Integer schoolId);
 }
 

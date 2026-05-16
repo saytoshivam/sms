@@ -13,6 +13,7 @@ import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
 import { useApiTags } from '../../lib/apiTags';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { RowActionsMenu } from '../../components/RowActionsMenu';
 import { StaffOnboardingWizard } from '../../components/StaffOnboardingWizard';
 import { StaffReadinessDashboard } from '../../components/StaffReadinessDashboard';
 import { buildEffectiveAllocRows, type ClassSubjectConfigRow, type SectionSubjectOverrideRow } from '../../lib/academicStructureUtils';
@@ -431,14 +432,21 @@ export function TeachersModulePage() {
   const ttEligible   = allStaff.filter(s => effectiveTimetableEligible(s));
   const hasFilters   = search || fType !== 'ALL' || fRole !== 'ALL' || fDept !== 'ALL' || fStatus !== 'ALL' || fLogin !== 'ALL' || fTimetable !== 'ALL';
 
-  // ── Mutations ─────────────────────────────────────────────────────────────────
+  // ── Mutations ────────────────────────────────────────────────────���────────────
   const [showWizard, setShowWizard] = useState(false);
   const [delConfirm, setDelConfirm] = useState<{ open: boolean; staffId?: number; fullName?: string }>({ open: false });
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
 
   const deleteMut = useMutation({
     mutationFn: async (id: number) => { await api.delete(`/api/staff/${id}`); },
     onSuccess: async () => { toast.success('Staff removed.'); setDelConfirm({ open: false }); await invalidate(['staff']); },
     onError: (e) => toast.error('Could not remove', formatApiError(e)),
+  });
+
+  const deleteAllMut = useMutation({
+    mutationFn: async () => { await api.delete('/api/staff/delete-all'); },
+    onSuccess: async () => { toast.success('All staff deleted.'); setDeleteAllOpen(false); await invalidate(['staff']); },
+    onError: (e) => toast.error('Could not delete all staff', formatApiError(e)),
   });
 
   const [editTarget, setEditTarget] = useState<{ staffId: number; draft: EditDraft } | null>(null);
@@ -510,6 +518,19 @@ export function TeachersModulePage() {
             }}>
             ↓ Export CSV ({filtered.length})
           </button>
+          {canEdit && (
+            <RowActionsMenu
+              ariaLabel="Staff directory actions"
+              actions={[
+                {
+                  id: 'delete-all-staff',
+                  label: 'Delete all staff',
+                  danger: true,
+                  onSelect: () => setDeleteAllOpen(true),
+                },
+              ]}
+            />
+          )}
         </div>
       </div>
 
@@ -769,6 +790,17 @@ export function TeachersModulePage() {
         confirmLabel="Remove" danger
         onConfirm={() => { if (delConfirm.staffId != null) deleteMut.mutate(delConfirm.staffId); }}
         onClose={() => setDelConfirm({ open: false })}
+      />
+
+      <ConfirmDialog
+        open={deleteAllOpen}
+        title="Delete all staff?"
+        description="This removes every staff member and their login accounts. Academic structure and timetable staff references will be cleared."
+        danger
+        confirmLabel={deleteAllMut.isPending ? 'Deleting…' : 'Delete all'}
+        confirmDisabled={deleteAllMut.isPending}
+        onConfirm={async () => { await deleteAllMut.mutateAsync(); }}
+        onClose={() => (deleteAllMut.isPending ? null : setDeleteAllOpen(false))}
       />
 
       {/* Edit modal */}

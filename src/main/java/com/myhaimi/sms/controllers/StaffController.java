@@ -112,6 +112,13 @@ public class StaffController {
         return ResponseEntity.noContent().build();
     }
 
+    @DeleteMapping("/delete-all")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<Void> deleteAllStaff() {
+        schoolOnboardingService.deleteAllStaffForSchool();
+        return ResponseEntity.noContent().build();
+    }
+
     // ── Document checklist ────────────────────────────────────────────────────
 
     @GetMapping("/{staffId}/documents")

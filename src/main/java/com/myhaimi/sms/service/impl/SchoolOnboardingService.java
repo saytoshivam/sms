@@ -841,6 +841,28 @@ public class SchoolOnboardingService {
         staffRepo.save(st);
     }
 
+    @Transactional
+    public void deleteAllStaffForSchool() {
+        Integer schoolId = requireSchoolId();
+        List<Staff> allStaff = staffRepo.findBySchool_IdAndIsDeletedFalseOrderByEmployeeNoAsc(schoolId);
+        if (allStaff.isEmpty()) return;
+        String actor = actorEmailOrSystem();
+
+        // Clear FK references in bulk before soft-deleting any staff.
+        subjectAllocationRepo.clearStaffBySchool_Id(schoolId);
+        classSubjectConfigRepo.clearStaffBySchool_Id(schoolId);
+        subjectSectionOverrideRepo.clearStaffBySchool_Id(schoolId);
+        timetableEntryRepo.clearStaffBySchool_Id(schoolId);
+
+        for (Staff st : allStaff) {
+            staffTeachableSubjectRepository.deleteByStaff_Id(st.getId());
+            userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, st.getId()).ifPresent(userRepo::delete);
+            st.setDeleted(true);
+            st.setUpdatedBy(actor);
+            staffRepo.save(st);
+        }
+    }
+
     // ── Structured onboarding (StaffOnboardingRequest) ─────────────────────────
 
 

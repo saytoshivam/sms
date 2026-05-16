@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
@@ -49,6 +49,7 @@ export function SavedSubjectsCatalogPanel({ readOnly = false }: { readOnly?: boo
   const recordChange = useImpactStore((s) => s.recordChange);
 
   const [subjectSearch, setSubjectSearch] = useState('');
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
 
   const [subjectDeleteInfoCache, setSubjectDeleteInfoCache] = useState<
     Record<number, { canDelete: boolean; reasons: string[] }>
@@ -94,6 +95,23 @@ export function SavedSubjectsCatalogPanel({ readOnly = false }: { readOnly?: boo
     queryKey: ['subjects-catalog'],
     queryFn: async () =>
       (await api.get('/api/subjects?size=1000&sort=name,asc')).data as SubjectCatalogRow[] | { content: SubjectCatalogRow[] },
+  });
+
+  const deleteAllSubjects = useMutation({
+    mutationFn: async () => api.delete('/api/subjects/delete-all'),
+    onSuccess: async () => {
+      setDeleteAllOpen(false);
+      recordChange({
+        id: 'subjects:delete-all',
+        scope: 'subjects',
+        severity: 'hard',
+        message: 'Deleted all subjects',
+        refs: {},
+      });
+      await invalidate(['subjects']);
+      toast.success('Deleted', 'All subjects were deleted.');
+    },
+    onError: (e) => toast.error('Delete failed', formatApiError(e)),
   });
 
   async function ensureSubjectDeleteInfo(subjectId: number) {
@@ -147,10 +165,25 @@ export function SavedSubjectsCatalogPanel({ readOnly = false }: { readOnly?: boo
       </div>
 
       <div className="stack" style={{ gap: 10, marginTop: 10 }}>
-        <div className="row" style={{ justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'baseline' }}>
+        <div className="row" style={{ justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ fontWeight: 900 }}>Saved subjects</div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            {subjectsCatalog.isLoading ? 'Loading…' : `${pageContent(subjectsCatalog.data).length} subjects`}
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <div className="muted" style={{ fontSize: 12 }}>
+              {subjectsCatalog.isLoading ? 'Loading…' : `${pageContent(subjectsCatalog.data).length} subjects`}
+            </div>
+            {!readOnly && (
+              <RowActionsMenu
+                ariaLabel="Subjects catalog actions"
+                actions={[
+                  {
+                    id: 'delete-all-subjects',
+                    label: 'Delete all subjects',
+                    danger: true,
+                    onSelect: () => setDeleteAllOpen(true),
+                  },
+                ]}
+              />
+            )}
           </div>
         </div>
 
@@ -268,23 +301,10 @@ export function SavedSubjectsCatalogPanel({ readOnly = false }: { readOnly?: boo
 
       <ConfirmDialog
         open={subjectDeleteModal.open}
-        title="Delete subject?"
-        description={
-          subjectDeleteModal.subjectId
-            ? `This will delete ${subjectDeleteModal.subjectName} (${subjectDeleteModal.subjectCode}).`
-            : undefined
-        }
-        details={
-          subjectDeleteModal.canDelete
-            ? ['This may affect academic structure and timetable.']
-            : [
-                'This subject cannot be deleted right now:',
-                ...(subjectDeleteModal.reasons.length ? subjectDeleteModal.reasons : ['Used in classes/timetable.']),
-              ]
-        }
+        title={`Delete ${subjectDeleteModal.subjectName || 'subject'}?`}
+        description={`This will delete ${subjectDeleteModal.subjectCode} and remove it from academic structure and timetable references.`}
         danger
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
+        confirmLabel={subjectDeleteModal.busy ? 'Deleting…' : 'Delete'}
         confirmDisabled={!subjectDeleteModal.canDelete || subjectDeleteModal.busy}
         onClose={() => setSubjectDeleteModal((p) => ({ ...p, open: false }))}
         onConfirm={async () => {
@@ -316,11 +336,23 @@ export function SavedSubjectsCatalogPanel({ readOnly = false }: { readOnly?: boo
       />
 
       <ConfirmDialog
+        open={deleteAllOpen}
+        title="Delete all subjects?"
+        description="This removes all subjects in the catalog and clears related academic structure and timetable references."
+        danger
+        confirmLabel={deleteAllSubjects.isPending ? 'Deleting…' : 'Delete all'}
+        confirmDisabled={deleteAllSubjects.isPending}
+        onClose={() => (deleteAllSubjects.isPending ? null : setDeleteAllOpen(false))}
+        onConfirm={async () => {
+          await deleteAllSubjects.mutateAsync();
+        }}
+      />
+
+      <ConfirmDialog
         open={subjectEditModal.open}
         title="Edit subject"
         description="Name and code are used across academic structure, staff teachables, and timetables. Code must stay unique in your school."
-        confirmLabel="Save"
-        cancelLabel="Cancel"
+        confirmLabel={subjectEditModal.busy ? 'Saving…' : 'Save'}
         confirmDisabled={
           subjectEditModal.busy ||
           !subjectEditModal.name.trim() ||

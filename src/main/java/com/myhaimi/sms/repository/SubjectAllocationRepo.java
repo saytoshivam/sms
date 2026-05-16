@@ -28,6 +28,10 @@ public interface SubjectAllocationRepo extends JpaRepository<SubjectAllocation, 
     int clearStaffBySchool_IdAndStaff_Id(@Param("schoolId") Integer schoolId, @Param("staffId") Integer staffId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update SubjectAllocation a set a.staff = null where a.school.id = :schoolId")
+    int clearStaffBySchool_Id(@Param("schoolId") Integer schoolId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from SubjectAllocation a where a.school.id = :schoolId")
     void deleteBySchool_Id(@Param("schoolId") Integer schoolId);
 
