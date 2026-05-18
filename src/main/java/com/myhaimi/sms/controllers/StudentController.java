@@ -76,7 +76,8 @@ public class StudentController {
         }
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/{id:[0-9]+}")
+    public ResponseEntity<?> getOne(@PathVariable Integer id) {
         try {
             return ResponseEntity.ok(studentService.getProfile(id));
         } catch (IllegalArgumentException ex) {
