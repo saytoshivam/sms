@@ -639,12 +639,18 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
   classGroups: ClassGroup[];
   onEditProfile?: () => void;
 }) {
-  const subjectMap = new Map(subjects.map(s => [s.id, s]));
-  // Code → subject lookup for teachable subjects display
-  const subjectByCode = new Map(subjects.map(s => [s.code, s]));
-  const cgMap = new Map(classGroups.map(cg => [cg.id, cg]));
+  // Defensive: ensure subjects / classGroups are always arrays even if cache is stale/corrupt
+  const safeSubjects     = Array.isArray(subjects)    ? subjects    : [];
+  const safeClassGroups  = Array.isArray(classGroups) ? classGroups : [];
+  const safeRoles        = Array.isArray(profile.roles)               ? profile.roles               : [];
+  const safeTeachCodes   = Array.isArray(profile.teachableSubjectCodes) ? profile.teachableSubjectCodes : [];
+  const safePrefCGs      = Array.isArray(profile.preferredClassGroupIds)  ? profile.preferredClassGroupIds  : [];
+  const safeRestCGs      = Array.isArray(profile.restrictedClassGroupIds) ? profile.restrictedClassGroupIds : [];
 
-  // Find allocations assigned to this staff
+  const subjectMap    = new Map(safeSubjects.map(s => [s.id, s]));
+  const subjectByCode = new Map(safeSubjects.map(s => [s.code, s]));
+  const cgMap         = new Map(safeClassGroups.map(cg => [cg.id, cg]));
+
   const myAllocations = (structure?.allocations ?? []).filter(a => a.staffId === profile.id);
 
   // Group by class group
@@ -668,7 +674,7 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
     return cg.code ?? `#${cg.id}`;
   }
 
-  const isTeacher = profile.roles.includes('TEACHER');
+  const isTeacher = safeRoles.includes('TEACHER');
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -715,13 +721,13 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
 
       {/* ── B. Staff Roles (from StaffRoleMapping) ───────────────────────────── */}
       <SectionCard title="Staff Roles">
-        {profile.roles.length === 0 ? (
+        {safeRoles.length === 0 ? (
           <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.4)' }}>
             No roles assigned. Assign at least one role to enable portal access and timetable scheduling.
           </div>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {profile.roles.map(r => {
+            {safeRoles.map(r => {
               const rc = roleColor(r);
               const label: Record<string, string> = {
                 TEACHER: 'Teacher',
@@ -743,7 +749,7 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
 
       {/* ── C. Teachable Subjects ────────────────────────────────────────────── */}
       <SectionCard title="Teachable Subjects">
-        {profile.teachableSubjectCodes.length === 0 ? (
+        {safeTeachCodes.length === 0 ? (
           <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.4)' }}>
             No teachable subjects assigned.
             {isTeacher && (
@@ -752,20 +758,17 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
-            {profile.teachableSubjectCodes.map(code => {
+            {safeTeachCodes.map(code => {
               const subj = subjectByCode.get(code);
               return (
                 <div key={code}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'rgba(5,150,105,0.04)', borderRadius: 9, border: '1px solid rgba(5,150,105,0.12)', flexWrap: 'wrap' }}>
-                  {/* Subject code */}
                   <span style={{ ...B, background: 'rgba(5,150,105,0.1)', color: '#065f46', fontSize: 12, fontFamily: 'monospace', letterSpacing: '0.04em', flexShrink: 0 }}>
                     {code}
                   </span>
-                  {/* Subject name */}
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(15,23,42,0.78)', flex: 1, minWidth: 100 }}>
                     {subj?.name ?? <span style={{ color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Name not found</span>}
                   </span>
-                  {/* Subject type */}
                   {subj?.type && (
                     <span style={{ ...B, ...subjectTypeColor(subj.type), fontSize: 11, flexShrink: 0 }}>
                       {subj.type}
@@ -875,15 +878,15 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
         </div>
 
         {/* Preferred class groups */}
-        <div style={{ marginBottom: (profile.restrictedClassGroupIds ?? []).length > 0 ? 12 : 0 }}>
+        <div style={{ marginBottom: safeRestCGs.length > 0 ? 12 : 0 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: '#0e7490', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
             Preferred Class Groups
           </div>
-          {(profile.preferredClassGroupIds ?? []).length === 0 ? (
+          {safePrefCGs.length === 0 ? (
             <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>None specified — scheduler treats all classes equally.</div>
           ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-              {(profile.preferredClassGroupIds ?? []).map(id => (
+              {safePrefCGs.map(id => (
                 <span key={id} style={{ ...B, background: 'rgba(8,145,178,0.1)', color: '#0e7490', fontSize: 12 }}>⭐ {cgLabel(id)}</span>
               ))}
             </div>
@@ -891,13 +894,13 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
         </div>
 
         {/* Restricted class groups */}
-        {(profile.restrictedClassGroupIds ?? []).length > 0 && (
+        {safeRestCGs.length > 0 && (
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
               Restricted Class Groups (Hard Block)
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-              {(profile.restrictedClassGroupIds ?? []).map(id => (
+              {safeRestCGs.map(id => (
                 <span key={id} style={{ ...B, background: 'rgba(220,38,38,0.1)', color: '#991b1b', fontSize: 12 }}>🚫 {cgLabel(id)}</span>
               ))}
             </div>
@@ -2140,10 +2143,14 @@ export function StaffProfilePage() {
 
   const subjectsQ = useQuery({
     queryKey: ['subjects-catalog'],
-    queryFn: async () => {
-      const res = await api.get<{ content: Subject[] } | Subject[]>('/api/subjects?size=1000&sort=name,asc');
-      const d = res.data;
-      return Array.isArray(d) ? d : (d as { content: Subject[] }).content ?? [];
+    queryFn: async () => (await api.get('/api/subjects?size=1000&sort=name,asc')).data,
+    // Multiple pages share this cache key. Some store the raw Page object; others store
+    // Subject[]. The select fn normalises the cached value to Subject[] every time.
+    select: (data: unknown): Subject[] => {
+      if (Array.isArray(data)) return data as Subject[];
+      const page = data as { content?: unknown };
+      if (page && Array.isArray(page.content)) return page.content as Subject[];
+      return [];
     },
     staleTime: 120_000,
   });
