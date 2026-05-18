@@ -785,11 +785,12 @@ export function TeachersModulePage() {
       {/* Delete confirm */}
       <ConfirmDialog
         open={delConfirm.open}
-        title={`Remove ${delConfirm.fullName ?? 'staff member'}?`}
-        description="This removes the staff record and login account. Academic structure references are cleared. Timetable entries block deletion."
-        confirmLabel="Remove" danger
+        title={`Delete ${delConfirm.fullName ?? 'staff member'}?`}
+        description="This permanently removes the staff record, login account, and clears any timetable entries assigned to them. Academic structure references are also cleared."
+        confirmLabel={deleteMut.isPending ? 'Deleting…' : 'Delete'} danger
+        confirmDisabled={deleteMut.isPending}
         onConfirm={() => { if (delConfirm.staffId != null) deleteMut.mutate(delConfirm.staffId); }}
-        onClose={() => setDelConfirm({ open: false })}
+        onClose={() => (deleteMut.isPending ? null : setDelConfirm({ open: false }))}
       />
 
       <ConfirmDialog

@@ -814,9 +814,10 @@ public class SchoolOnboardingService {
         if (alloc > 0) reasons.add("Assigned in academic structure (" + alloc + " allocation(s)) — will be cleared on delete.");
 
         long tt = timetableEntryRepo.countBySchool_IdAndStaff_Id(schoolId, st.getId());
-        if (tt > 0) reasons.add("Used in timetable (" + tt + " entry/entries).");
+        if (tt > 0) reasons.add("Used in timetable (" + tt + " entry/entries) — entries will be removed on delete.");
 
-        boolean canDelete = tt == 0;
+        // Deletion is always allowed; timetable entries are cascade-deleted
+        boolean canDelete = true;
         return new StaffDeleteInfoDTO(canDelete, reasons);
     }
 
@@ -824,14 +825,13 @@ public class SchoolOnboardingService {
     public void deleteStaff(Integer staffId) {
         Integer schoolId = requireSchoolId();
         Staff st = staffRepo.findByIdAndSchool_IdAndIsDeletedFalse(staffId, schoolId).orElseThrow();
-        StaffDeleteInfoDTO info = staffDeleteInfo(staffId);
-        if (!info.canDelete()) {
-            throw new IllegalStateException(String.join(" ", info.reasons()));
-        }
 
+        // Clear all FK references to this staff member before soft-deleting
         subjectAllocationRepo.clearStaffBySchool_IdAndStaff_Id(schoolId, st.getId());
         classSubjectConfigRepo.clearStaffBySchool_IdAndStaff_Id(schoolId, st.getId());
         subjectSectionOverrideRepo.clearStaffBySchool_IdAndStaff_Id(schoolId, st.getId());
+        // staff_id is NOT NULL on timetable_entries — delete affected entries instead of nullifying
+        timetableEntryRepo.deleteBySchool_IdAndStaff_Id(schoolId, st.getId());
 
         userRepo.findFirstBySchool_IdAndLinkedStaff_Id(schoolId, st.getId()).ifPresent(userRepo::delete);
         staffTeachableSubjectRepository.deleteByStaff_Id(st.getId());

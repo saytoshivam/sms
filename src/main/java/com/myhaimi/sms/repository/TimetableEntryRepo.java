@@ -67,6 +67,10 @@ public interface TimetableEntryRepo extends JpaRepository<TimetableEntry, Intege
     void deleteBySchool_Id(@Param("schoolId") Integer schoolId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from TimetableEntry e where e.school.id = :schoolId and e.staff.id = :staffId")
+    int deleteBySchool_IdAndStaff_Id(@Param("schoolId") Integer schoolId, @Param("staffId") Integer staffId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from TimetableEntry e where e.school.id = :schoolId and e.classGroup.id = :classGroupId")
     int deleteBySchool_IdAndClassGroup_Id(@Param("schoolId") Integer schoolId, @Param("classGroupId") Integer classGroupId);
 

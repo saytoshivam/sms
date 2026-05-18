@@ -114,9 +114,13 @@ public class StaffController {
 
     @DeleteMapping("/{id:[0-9]+}")
     @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
-    public ResponseEntity<Void> deleteStaff(@PathVariable Integer id) {
-        schoolOnboardingService.deleteStaff(id);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<?> deleteStaff(@PathVariable Integer id) {
+        try {
+            schoolOnboardingService.deleteStaff(id);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        }
     }
 
     // ── Document checklist ────────────────────────────────────────────────────
