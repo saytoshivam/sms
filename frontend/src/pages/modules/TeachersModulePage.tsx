@@ -142,7 +142,7 @@ function FSelect({ label, value, onChange, options }: { label: string; value: st
 
 // ─── Row kebab menu ───────────────────────────────────────���───────────────────
 
-function RowMenu({ canEdit, staffId, onEdit, onDelete }: { canEdit: boolean; staffId: number; onEdit: () => void; onDelete: () => void }) {
+function RowMenu({ canEdit, onDelete }: { canEdit: boolean; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -153,19 +153,7 @@ function RowMenu({ canEdit, staffId, onEdit, onDelete }: { canEdit: boolean; sta
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
 
-  const Btn = ({ onClick, danger = false, children }: { onClick: () => void; danger?: boolean; children: React.ReactNode }) => (
-    <button type="button" onClick={onClick}
-      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', color: danger ? '#991b1b' : 'rgba(15,23,42,0.8)' }}
-      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = danger ? 'rgba(220,38,38,0.06)' : 'rgba(15,23,42,0.04)'; }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; }}
-    >{children}</button>
-  );
-
-  const Stub = ({ label, reason }: { label: string; reason: string }) => (
-    <button type="button" disabled title={reason} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'not-allowed', color: 'rgba(15,23,42,0.3)' }}>
-      {label} <span style={{ fontSize: 10 }}>· coming soon</span>
-    </button>
-  );
+  if (!canEdit) return null;
 
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
@@ -173,15 +161,12 @@ function RowMenu({ canEdit, staffId, onEdit, onDelete }: { canEdit: boolean; sta
         style={{ width: 30, height: 30, border: '1px solid rgba(15,23,42,0.13)', borderRadius: 6, background: 'none', cursor: 'pointer', color: 'rgba(15,23,42,0.5)', fontSize: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>
       {open && (
         <div style={{ position: 'absolute', right: 0, bottom: '100%', marginBottom: 4, zIndex: 9999, background: '#fff', border: '1px solid rgba(15,23,42,0.11)', borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.15)', minWidth: 190, padding: '4px 0' }}>
-            <Link to={`/app/teachers/${staffId}`} style={{ display: 'block', textDecoration: 'none' }}>
-              <Btn onClick={() => setOpen(false)}>👤 View Profile</Btn>
-            </Link>
-            {canEdit && <Btn onClick={() => { setOpen(false); onEdit(); }}>✏️ Edit</Btn>}
-            {canEdit && <Btn onClick={() => { setOpen(false); onDelete(); }} danger>🗑 Delete</Btn>}
-          <div style={{ borderTop: '1px solid rgba(15,23,42,0.07)', margin: '4px 0' }} />
-          <Stub label="📋 Documents" reason="Staff document module not yet implemented" />
-          <Stub label="💰 Payroll"   reason="Payroll module not yet implemented" />
-          <Stub label="📅 Leave"     reason="Leave management not yet implemented" />
+          <button type="button" onClick={() => { setOpen(false); onDelete(); }}
+            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(220,38,38,0.06)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; }}>
+            🗑 Delete staff
+          </button>
         </div>
       )}
     </div>
@@ -628,7 +613,9 @@ export function TeachersModulePage() {
                   const status = effectiveStatus(row);
 
                   return (
-                    <tr key={row.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.055)' }}
+                    <tr key={row.id}
+                      style={{ borderBottom: '1px solid rgba(15,23,42,0.055)', cursor: 'pointer' }}
+                      onClick={() => navigate(`/app/teachers/${row.id}`)}
                       onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(15,23,42,0.018)'}
                       onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = ''}>
 
@@ -636,7 +623,7 @@ export function TeachersModulePage() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <Avatar name={row.fullName} size={36} />
                           <div style={{ minWidth: 0 }}>
-                            <Link to={`/app/teachers/${row.id}`} style={{ fontWeight: 700, color: 'rgba(15,23,42,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textDecoration: 'none' }}>{row.fullName}</Link>
+                            <div style={{ fontWeight: 700, color: 'rgba(15,23,42,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.fullName}</div>
                             <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>{row.employeeNo ?? '—'}</div>
                           </div>
                         </div>
@@ -685,8 +672,8 @@ export function TeachersModulePage() {
                         <span style={statusBadge(status)}>{fmtStatus(status)}</span>
                       </td>
 
-                      <td style={{ padding: '10px 12px', verticalAlign: 'middle', textAlign: 'right' }}>
-                        <RowMenu canEdit={canEdit} staffId={row.id} onEdit={() => openEdit(row)} onDelete={() => setDelConfirm({ open: true, staffId: row.id, fullName: row.fullName })} />
+                      <td style={{ padding: '10px 12px', verticalAlign: 'middle', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                        <RowMenu canEdit={canEdit} onDelete={() => setDelConfirm({ open: true, staffId: row.id, fullName: row.fullName })} />
                       </td>
                     </tr>
                   );
@@ -708,17 +695,22 @@ export function TeachersModulePage() {
             const status = effectiveStatus(row);
 
             return (
-              <div key={row.id} className="card" style={{ padding: '14px 16px', display: 'grid', gap: 10, backdropFilter: 'none' }}>
+              <div key={row.id} className="card"
+                style={{ padding: '14px 16px', display: 'grid', gap: 10, backdropFilter: 'none', cursor: 'pointer' }}
+                onClick={() => navigate(`/app/teachers/${row.id}`)}>
+
                 {/* Name row */}
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                   <Avatar name={row.fullName} size={46} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <Link to={`/app/teachers/${row.id}`} style={{ fontWeight: 800, fontSize: 15, color: 'rgba(15,23,42,0.88)', textDecoration: 'none', display: 'block' }}>{row.fullName}</Link>
+                    <div style={{ fontWeight: 800, fontSize: 15, color: 'rgba(15,23,42,0.88)' }}>{row.fullName}</div>
                     {row.designation && <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', fontWeight: 600 }}>{row.designation}</div>}
                     {row.employeeNo && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', fontWeight: 600 }}>Emp # {row.employeeNo}</div>}
                     {row.department && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', fontWeight: 500 }}>{row.department}</div>}
                   </div>
-                  <RowMenu canEdit={canEdit} staffId={row.id} onEdit={() => openEdit(row)} onDelete={() => setDelConfirm({ open: true, staffId: row.id, fullName: row.fullName })} />
+                  <div onClick={e => e.stopPropagation()}>
+                    <RowMenu canEdit={canEdit} onDelete={() => setDelConfirm({ open: true, staffId: row.id, fullName: row.fullName })} />
+                  </div>
                 </div>
 
                 {/* Status row with labels */}
