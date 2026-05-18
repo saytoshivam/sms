@@ -20,7 +20,7 @@ import { buildEffectiveAllocRows, type ClassSubjectConfigRow, type SectionSubjec
 import { isWorkspaceReadOnly } from '../../lib/workspaceViewMode';
 import { SelectKeeper } from '../../components/SelectKeeper';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ─────────────────���──────────────────────────────────────────────────
 
 type StaffRow = {
   id: number;                    // StaffSummaryDTO.id  (was staffId in legacy endpoint)
@@ -129,7 +129,7 @@ function Tile({ label, value, color, note }: { label: string; value: number | st
   );
 }
 
-// ─── Filter select ────────────────────────────────────────────────────────────
+// ─── Filter select ─��──────────────────────────────────────────────────────────
 
 function FSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
   return (
@@ -137,39 +137,6 @@ function FSelect({ label, value, onChange, options }: { label: string; value: st
       <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
       <SelectKeeper value={value} onChange={onChange} options={options} />
     </label>
-  );
-}
-
-// ─── Row kebab menu ───────────────────────────────────────���───────────────────
-
-function RowMenu({ canEdit, onDelete }: { canEdit: boolean; onDelete: () => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
-
-  if (!canEdit) return null;
-
-  return (
-    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
-      <button type="button" onClick={() => setOpen(v => !v)} title="More actions"
-        style={{ width: 30, height: 30, border: '1px solid rgba(15,23,42,0.13)', borderRadius: 6, background: 'none', cursor: 'pointer', color: 'rgba(15,23,42,0.5)', fontSize: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>⋯</button>
-      {open && (
-        <div style={{ position: 'absolute', right: 0, bottom: '100%', marginBottom: 4, zIndex: 9999, background: '#fff', border: '1px solid rgba(15,23,42,0.11)', borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.15)', minWidth: 190, padding: '4px 0' }}>
-          <button type="button" onClick={() => { setOpen(false); onDelete(); }}
-            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', fontSize: 13, fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(220,38,38,0.06)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none'; }}>
-            🗑 Delete staff
-          </button>
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -597,7 +564,7 @@ export function TeachersModulePage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr>
-                  {['Staff', 'Type / Designation', 'Roles', 'Subjects', 'Workload', 'Login', 'Status', ''].map(col => (
+                  {['Staff', 'Type / Designation', 'Roles', 'Subjects', 'Workload', 'Login', 'Status'].map(col => (
                     <th key={col} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.45)', whiteSpace: 'nowrap', background: 'rgba(250,250,249,0.98)', borderBottom: '1px solid rgba(15,23,42,0.07)', position: 'sticky', top: 0 }}>
                       {col}
                     </th>
@@ -671,10 +638,6 @@ export function TeachersModulePage() {
                       <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
                         <span style={statusBadge(status)}>{fmtStatus(status)}</span>
                       </td>
-
-                      <td style={{ padding: '10px 12px', verticalAlign: 'middle', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                        <RowMenu canEdit={canEdit} onDelete={() => setDelConfirm({ open: true, staffId: row.id, fullName: row.fullName })} />
-                      </td>
                     </tr>
                   );
                 })}
@@ -707,9 +670,6 @@ export function TeachersModulePage() {
                     {row.designation && <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', fontWeight: 600 }}>{row.designation}</div>}
                     {row.employeeNo && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', fontWeight: 600 }}>Emp # {row.employeeNo}</div>}
                     {row.department && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', fontWeight: 500 }}>{row.department}</div>}
-                  </div>
-                  <div onClick={e => e.stopPropagation()}>
-                    <RowMenu canEdit={canEdit} onDelete={() => setDelConfirm({ open: true, staffId: row.id, fullName: row.fullName })} />
                   </div>
                 </div>
 
