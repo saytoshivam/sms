@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { toast } from '../lib/toast';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -216,7 +217,7 @@ type TabId = typeof TABS[number]['id'];
 
 // ─── More menu ────────────────────────────────────────────────────────────────
 
-function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMarkExited, onRefresh: _onRefresh, onDocuments }: {
+function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMarkExited, onRefresh: _onRefresh, onDocuments, onDelete }: {
   staffId: number;
   profile: StaffProfile;
   onResetLogin: () => void;
@@ -224,6 +225,7 @@ function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMa
   onMarkExited: () => void;
   onRefresh: () => void;
   onDocuments?: () => void;
+  onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -258,6 +260,8 @@ function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMa
           <div style={{ height: 1, background: 'rgba(15,23,42,0.07)', margin: '4px 0' }} />
           {item('Deactivate', '⏸', onDeactivate, true, profile.status === 'INACTIVE')}
           {item('Mark Exited', '🚪', onMarkExited, true, profile.status === 'EXITED')}
+          <div style={{ height: 1, background: 'rgba(15,23,42,0.07)', margin: '4px 0' }} />
+          {item('Delete Staff', '🗑', onDelete, true)}
           <div style={{ height: 1, background: 'rgba(15,23,42,0.07)', margin: '4px 0' }} />
           {item('View Timetable Grid', '🗓', () => navigate('/app/timetable/grid'))}
           {item('Staff Directory', '👥', () => navigate('/app/teachers'))}
@@ -1686,6 +1690,17 @@ export function StaffProfilePage() {
     onError: (e) => toast.error('Could not update status', formatApiError(e)),
   });
 
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const deleteMut = useMutation({
+    mutationFn: async () => { await api.delete(`/api/staff/${id}`); },
+    onSuccess: () => {
+      toast.success('Staff deleted', `${profile?.fullName ?? 'Staff'} has been deleted.`);
+      qc.invalidateQueries({ queryKey: ['staff'] });
+      navigate('/app/teachers');
+    },
+    onError: (e) => toast.error('Could not delete staff', formatApiError(e)),
+  });
+
   const profile = profileQ.data;
 
   function setTab(t: TabId) {
@@ -1809,6 +1824,7 @@ export function StaffProfilePage() {
               onMarkExited={() => statusMut.mutate('EXITED')}
               onRefresh={refreshProfile}
               onDocuments={() => setTab('documents')}
+              onDelete={() => setDeleteConfirmOpen(true)}
             />
           </div>
         </div>
@@ -1877,6 +1893,17 @@ export function StaffProfilePage() {
         )}
         {activeTab === 'activity'   && <TabActivity   profile={profile} />}
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title={`Delete ${profile?.fullName ?? 'staff member'}?`}
+        description="This permanently deletes the staff record, login account, and any timetable entries assigned to them. Academic structure references are also cleared. This cannot be undone."
+        danger
+        confirmLabel={deleteMut.isPending ? 'Deleting…' : 'Delete staff'}
+        confirmDisabled={deleteMut.isPending}
+        onClose={() => (deleteMut.isPending ? null : setDeleteConfirmOpen(false))}
+        onConfirm={async () => { await deleteMut.mutateAsync(); }}
+      />
     </div>
   );
 }
