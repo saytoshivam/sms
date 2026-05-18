@@ -81,7 +81,7 @@ function dayShort(d: string): string {
   return m[d] ?? d.slice(0, 3);
 }
 
-function TeacherPublishedWeekGrid({ data }: { data: PublishedTeacherWeekly }) {
+export function TeacherPublishedWeekGrid({ data }: { data: PublishedTeacherWeekly }) {
   if (data.versionNumber == null && data.periods.length === 0) {
     return (
       <p className="muted" style={{ margin: 0, fontSize: 14 }}>

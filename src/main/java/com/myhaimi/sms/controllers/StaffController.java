@@ -4,11 +4,14 @@ import com.myhaimi.sms.DTO.StaffDeleteInfoDTO;
 import com.myhaimi.sms.DTO.staff.*;
 import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingRequest;
 import com.myhaimi.sms.DTO.staff.onboarding.StaffOnboardingResult;
+import com.myhaimi.sms.DTO.timetable.PublishedTeacherWeeklyTimetableDTO;
+import com.myhaimi.sms.service.impl.PublishedTimetableCalendarService;
 import com.myhaimi.sms.service.impl.SchoolOnboardingService;
 import com.myhaimi.sms.service.impl.StaffAccessService;
 import com.myhaimi.sms.service.impl.StaffDocumentService;
 import com.myhaimi.sms.service.impl.StaffReadinessService;
 import com.myhaimi.sms.service.impl.StaffService;
+import com.myhaimi.sms.utils.TenantContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -29,11 +32,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class StaffController {
 
-    private final StaffService             staffService;
-    private final StaffDocumentService     staffDocumentService;
-    private final StaffAccessService       staffAccessService;
-    private final StaffReadinessService    staffReadinessService;
-    private final SchoolOnboardingService  schoolOnboardingService;
+    private final StaffService                        staffService;
+    private final StaffDocumentService                staffDocumentService;
+    private final StaffAccessService                  staffAccessService;
+    private final StaffReadinessService               staffReadinessService;
+    private final SchoolOnboardingService             schoolOnboardingService;
+    private final PublishedTimetableCalendarService   publishedTimetableCalendarService;
 
     // ── Core CRUD ─────────────────────────────────────────────────────────────
 
@@ -258,6 +262,29 @@ public class StaffController {
     public ResponseEntity<?> enableLogin(@PathVariable Integer staffId) {
         try { return ResponseEntity.ok(staffAccessService.enableLogin(staffId)); }
         catch (IllegalArgumentException ex) { return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage())); }
+    }
+
+    // ── Timetable (per-staff weekly view for admin) ───────────────────────────
+
+    /**
+     * GET /api/staff/{id}/timetable/weekly
+     * Returns the published weekly timetable grid for a specific staff member.
+     * Accessible by school leadership without requiring a login account for the teacher.
+     */
+    @GetMapping("/{id:[0-9]+}/timetable/weekly")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
+    public ResponseEntity<?> staffWeeklyTimetable(@PathVariable Integer id) {
+        Integer schoolId = TenantContext.getTenantId();
+        if (schoolId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Tenant context required"));
+        }
+        try {
+            PublishedTeacherWeeklyTimetableDTO dto =
+                    publishedTimetableCalendarService.teacherWeeklyGrid(schoolId, id);
+            return ResponseEntity.ok(dto);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        }
     }
 
     // ── Readiness dashboard ───────────────────────────────────────────────────
