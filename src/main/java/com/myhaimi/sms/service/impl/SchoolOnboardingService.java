@@ -1085,7 +1085,8 @@ public class SchoolOnboardingService {
                 && staff.getJoiningDate() == null)
             throw new IllegalArgumentException("Joining date is required before activating staff.");
 
-        // EmployeeNo update        String empNo = id.getEmployeeNo() == null ? "" : id.getEmployeeNo().trim();
+        // EmployeeNo update
+        String empNo = id.getEmployeeNo() == null ? "" : id.getEmployeeNo().trim();
         if (!empNo.isBlank() && !empNo.equalsIgnoreCase(staff.getEmployeeNo())) {
             if (staffRepo.countBySchool_IdAndEmployeeNoIgnoreCaseAndIsDeletedFalse(schoolId, empNo) > 0)
                 throw new IllegalArgumentException("Employee No already exists: " + empNo);
