@@ -110,6 +110,26 @@ public class StudentService {
         studentRepo.deleteBySchool_Id(schoolId);
     }
 
+    @Transactional
+    public void deleteStudent(Integer studentId) {
+        Integer schoolId = requireSchoolId();
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found."));
+
+        List<Integer> ids = List.of(student.getId());
+
+        attendanceRepo.deleteByStudent_IdIn(ids);
+        markRepo.deleteByStudent_IdIn(ids);
+        documentRepo.deleteByStudent_IdIn(ids);
+        enrollmentRepo.deleteByStudent_IdIn(ids);
+        medicalRepo.deleteByStudent_IdIn(ids);
+        feePaymentRepo.deleteByInvoice_Student_IdIn(ids);
+        feeInvoiceRepo.deleteByStudent_IdIn(ids);
+        studentGuardianRepo.deleteByStudent_IdIn(ids);
+        userRepo.deleteByLinkedStudent_IdIn(ids);
+        studentRepo.delete(student);
+    }
+
     public Page<StudentViewDTO> list(
             Pageable pageable,
             Integer classGroupId,

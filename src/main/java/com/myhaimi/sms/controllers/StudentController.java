@@ -65,6 +65,17 @@ public class StudentController {
         return ResponseEntity.noContent().build();
     }
 
+    @DeleteMapping("/{id:[0-9]+}")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<?> deleteStudent(@PathVariable Integer id) {
+        try {
+            studentService.deleteStudent(id);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
     @GetMapping("/{id}")
         try {
             return ResponseEntity.ok(studentService.getProfile(id));

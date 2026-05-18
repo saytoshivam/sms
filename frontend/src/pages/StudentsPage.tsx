@@ -494,8 +494,12 @@ export function StudentsPage() {
               onToggleRow={toggleRow}
               onSelectAll={selectAllPage}
               onClearAll={clearSelection}
+              onRefetch={() => { listQuery.refetch(); healthQuery.refetch(); }}
             />
-            <StudentListCards rows={rows} />
+            <StudentListCards
+              rows={rows}
+              onRefetch={() => { listQuery.refetch(); healthQuery.refetch(); }}
+            />
             <footer className="sw-footer">
               <div className="muted" style={{ fontSize: 12 }}>
                 {listQuery.data && (

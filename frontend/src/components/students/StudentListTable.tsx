@@ -12,9 +12,10 @@ type Props = {
   onToggleRow: (id: number) => void;
   onSelectAll: () => void;
   onClearAll: () => void;
+  onRefetch?: () => void;
 };
 
-export function StudentListTable({ rows, selectedIds, onToggleRow, onSelectAll, onClearAll }: Props) {
+export function StudentListTable({ rows, selectedIds, onToggleRow, onSelectAll, onClearAll, onRefetch }: Props) {
   const navigate = useNavigate();
   const allSelected = rows.length > 0 && rows.every((r) => selectedIds.has(r.id));
   const someSelected = !allSelected && rows.some((r) => selectedIds.has(r.id));
@@ -80,7 +81,11 @@ export function StudentListTable({ rows, selectedIds, onToggleRow, onSelectAll, 
                 <td><StudentStatusBadge status={row.status ?? undefined} /></td>
                 <td><StudentDocumentsCell row={row} /></td>
                 <td className="sw-td-actions" onClick={(e) => e.stopPropagation()}>
-                  <StudentRowActions studentId={row.id} />
+                  <StudentRowActions
+                    studentId={row.id}
+                    studentName={studentFullName(row)}
+                    onDeleted={onRefetch}
+                  />
                 </td>
               </tr>
             );
