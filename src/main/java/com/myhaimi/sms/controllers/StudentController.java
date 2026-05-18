@@ -14,6 +14,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
@@ -57,8 +58,14 @@ public class StudentController {
         }
     }
 
+    @DeleteMapping("/delete-all")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL')")
+    public ResponseEntity<Void> deleteAllStudents() {
+        studentService.deleteAllStudentsForSchool();
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/{id}")
-    public ResponseEntity<?> getOne(@PathVariable Integer id) {
         try {
             return ResponseEntity.ok(studentService.getProfile(id));
         } catch (IllegalArgumentException ex) {

@@ -2,9 +2,11 @@ package com.myhaimi.sms.repository;
 
 import com.myhaimi.sms.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,4 +44,8 @@ public interface UserRepo extends JpaRepository<User, Integer> {
     Optional<User> findFirstByLinkedStudent_Id(Integer studentId);
 
     Optional<User> findFirstBySchool_IdAndLinkedStudent_Id(Integer schoolId, Integer studentId);
+
+    @Modifying
+    @Query("DELETE FROM User u WHERE u.linkedStudent.id IN :ids")
+    void deleteByLinkedStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

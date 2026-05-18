@@ -2,6 +2,7 @@ package com.myhaimi.sms.repository;
 
 import com.myhaimi.sms.entity.StudentGuardian;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -25,4 +26,8 @@ public interface StudentGuardianRepo extends JpaRepository<StudentGuardian, Inte
             WHERE sg.primaryGuardian = true AND sg.student.id IN :ids
             """)
     List<StudentGuardian> findPrimaryLinksWithGuardianForStudentIds(@Param("ids") Collection<Integer> ids);
+
+    @Modifying
+    @Query("DELETE FROM StudentGuardian sg WHERE sg.student.id IN :ids")
+    void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

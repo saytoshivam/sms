@@ -19,6 +19,8 @@ import com.myhaimi.sms.entity.enums.FileVisibility;
 import com.myhaimi.sms.modules.files.FileObjectDTO;
 import com.myhaimi.sms.modules.files.FileService;
 import com.myhaimi.sms.repository.*;
+import com.myhaimi.sms.repository.FeeInvoiceRepo;
+import com.myhaimi.sms.repository.FeePaymentRepo;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -64,6 +66,10 @@ public class StudentService {
     private final FileService fileService;
     private final SchoolDocumentRequirementRepo requirementRepo;
     private final DocumentTypeRepo documentTypeRepo;
+    private final StudentAttendanceRepo attendanceRepo;
+    private final StudentMarkRepo markRepo;
+    private final FeeInvoiceRepo feeInvoiceRepo;
+    private final FeePaymentRepo feePaymentRepo;
 
     /**
      * Fallback document codes used when a school has not yet configured any document requirements.
@@ -82,6 +88,26 @@ public class StudentService {
         Integer schoolId = TenantContext.getSchoolId();
         if (schoolId == null) throw new IllegalStateException("Missing school context");
         return schoolId;
+    }
+
+    @Transactional
+    public void deleteAllStudentsForSchool() {
+        Integer schoolId = requireSchoolId();
+        List<Student> all = studentRepo.findBySchool_IdOrderByIdAsc(schoolId);
+        if (all.isEmpty()) return;
+
+        List<Integer> ids = all.stream().map(Student::getId).toList();
+
+        attendanceRepo.deleteByStudent_IdIn(ids);
+        markRepo.deleteByStudent_IdIn(ids);
+        documentRepo.deleteByStudent_IdIn(ids);
+        enrollmentRepo.deleteByStudent_IdIn(ids);
+        medicalRepo.deleteByStudent_IdIn(ids);
+        feePaymentRepo.deleteByInvoice_Student_IdIn(ids);
+        feeInvoiceRepo.deleteByStudent_IdIn(ids);
+        studentGuardianRepo.deleteByStudent_IdIn(ids);
+        userRepo.deleteByLinkedStudent_IdIn(ids);
+        studentRepo.deleteBySchool_Id(schoolId);
     }
 
     public Page<StudentViewDTO> list(

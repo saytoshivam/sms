@@ -4,10 +4,12 @@ import com.myhaimi.sms.entity.FeeInvoice;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,9 +28,12 @@ public interface FeeInvoiceRepo extends JpaRepository<FeeInvoice, Integer> {
     @Query("SELECT COUNT(i) FROM FeeInvoice i WHERE i.school.id = :schoolId AND i.status <> 'VOID'")
     long countInvoicesBySchoolId(@Param("schoolId") Integer schoolId);
 
-    @Query(
-            "SELECT COUNT(i) FROM FeeInvoice i WHERE i.school.id = :schoolId AND (i.status = 'DUE' OR i.status ="
+    @Query("SELECT COUNT(i) FROM FeeInvoice i WHERE i.school.id = :schoolId AND (i.status = 'DUE' OR i.status ="
                     + " 'PARTIAL')")
     long countOpenInvoicesBySchoolId(@Param("schoolId") Integer schoolId);
+
+    @Modifying
+    @Query("DELETE FROM FeeInvoice i WHERE i.student.id IN :ids")
+    void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }
 

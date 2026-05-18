@@ -4,6 +4,7 @@ import com.myhaimi.sms.entity.StudentAcademicEnrollment;
 import com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
@@ -44,4 +45,8 @@ public interface StudentAcademicEnrollmentRepo extends JpaRepository<StudentAcad
     Set<String> findRollNosForClassAndYear(
             @Param("classGroupId") Integer classGroupId,
             @Param("academicYearId") Integer academicYearId);
+
+    @Modifying
+    @Query("DELETE FROM StudentAcademicEnrollment e WHERE e.student.id IN :ids")
+    void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

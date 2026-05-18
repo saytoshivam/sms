@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
@@ -18,6 +18,8 @@ import {
   StudentModuleSummaryCards,
   type RosterMetric,
 } from '../components/students/StudentModuleSummaryCards';
+import { RowActionsMenu } from '../components/RowActionsMenu';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import '../components/students/studentsWorkspace.css';
 
 // ─── Roster health type ───────────────────────────────────────────────────────
@@ -154,6 +156,17 @@ export function StudentsPage() {
   // Bulk modals
   const [bulkModal, setBulkModal] = useState<BulkModal>(null);
   const [bulkStatus, setBulkStatus] = useState<{ done: number; errors: number } | null>(null);
+
+  // Delete all
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const deleteAllMut = useMutation({
+    mutationFn: async () => { await api.delete('/api/students/delete-all'); },
+    onSuccess: () => {
+      setDeleteAllOpen(false);
+      listQuery.refetch();
+      healthQuery.refetch();
+    },
+  });
 
   // Derive effective status from quick filter
   const effectiveStatus = useMemo(() => {
@@ -360,6 +373,19 @@ export function StudentsPage() {
           </button>
           <Link className="btn secondary" to="/app/students/bulk-import">Bulk import</Link>
           <Link className="btn" to="/app/students/add">+ Add student</Link>
+          {!readOnly && (
+            <RowActionsMenu
+              ariaLabel="Students page actions"
+              actions={[
+                {
+                  id: 'delete-all-students',
+                  label: 'Delete all students',
+                  danger: true,
+                  onSelect: () => setDeleteAllOpen(true),
+                },
+              ]}
+            />
+          )}
         </div>
       </header>
 
@@ -519,6 +545,18 @@ export function StudentsPage() {
           onConfirm={handleBulkChangeStatus}
         />
       )}
+
+      {/* Delete all students confirmation */}
+      <ConfirmDialog
+        open={deleteAllOpen}
+        title="Delete all students?"
+        description="This will permanently delete all students, their guardians links, enrollments, documents, attendance, marks, and fee records. This action cannot be undone."
+        danger
+        confirmLabel={deleteAllMut.isPending ? 'Deleting…' : 'Delete all'}
+        confirmDisabled={deleteAllMut.isPending}
+        onClose={() => (deleteAllMut.isPending ? null : setDeleteAllOpen(false))}
+        onConfirm={async () => { await deleteAllMut.mutateAsync(); }}
+      />
     </div>
   );
 }
