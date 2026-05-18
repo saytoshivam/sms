@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { formatApiError } from '../../lib/errors';
 import { toast } from '../../lib/toast';
@@ -66,6 +66,26 @@ export function SavedRoomsCatalogPanel() {
     busy: boolean;
   }>({ roomId: null, type: 'STANDARD_CLASSROOM', labType: 'PHYSICS', capacity: '', isSchedulable: true, busy: false });
 
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+
+  const deleteAllRooms = useMutation({
+    mutationFn: async () => api.delete('/api/rooms/delete-all'),
+    onSuccess: async () => {
+      setDeleteAllOpen(false);
+      setRoomDeleteInfoCache({});
+      recordChange({
+        id: 'rooms:delete-all',
+        scope: 'rooms',
+        severity: 'hard',
+        message: 'Deleted all rooms',
+        refs: {},
+      });
+      await invalidate(['rooms']);
+      toast.success('Deleted', 'All rooms were deleted.');
+    },
+    onError: (e) => toast.error('Delete failed', formatApiError(e)),
+  });
+
   const roomsSaved = useQuery({
     queryKey: ['rooms-saved-onboarding'],
     queryFn: async () =>
@@ -122,8 +142,21 @@ export function SavedRoomsCatalogPanel() {
               Refresh
             </button>
           </div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            {roomsSaved.isLoading ? 'Loading…' : `${pageContent(roomsSaved.data).length} room(s)`}
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <div className="muted" style={{ fontSize: 12 }}>
+              {roomsSaved.isLoading ? 'Loading…' : `${pageContent(roomsSaved.data).length} room(s)`}
+            </div>
+            <RowActionsMenu
+              ariaLabel="Rooms catalog actions"
+              actions={[
+                {
+                  id: 'delete-all-rooms',
+                  label: 'Delete all rooms',
+                  danger: true,
+                  onSelect: () => setDeleteAllOpen(true),
+                },
+              ]}
+            />
           </div>
         </div>
 
@@ -417,6 +450,19 @@ export function SavedRoomsCatalogPanel() {
             toast.error('Delete failed', formatApiError(e));
             setRoomDeleteModal((p) => ({ ...p, busy: false }));
           }
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteAllOpen}
+        title="Delete all rooms?"
+        description="This removes all rooms in the catalog. Rooms in use by the timetable or class assignments will also be removed."
+        danger
+        confirmLabel={deleteAllRooms.isPending ? 'Deleting…' : 'Delete all'}
+        confirmDisabled={deleteAllRooms.isPending}
+        onClose={() => (deleteAllRooms.isPending ? null : setDeleteAllOpen(false))}
+        onConfirm={async () => {
+          await deleteAllRooms.mutateAsync();
         }}
       />
 
