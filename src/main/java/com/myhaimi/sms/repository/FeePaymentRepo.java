@@ -23,7 +23,7 @@ public interface FeePaymentRepo extends JpaRepository<FeePayment, Integer> {
                     + " i.status <> 'VOID' AND (p.gatewayStatus IS NULL OR UPPER(p.gatewayStatus) = 'SUCCEEDED')")
     BigDecimal sumConfirmedPaymentsBySchoolId(@Param("schoolId") Integer schoolId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM FeePayment p WHERE p.invoice.id IN (SELECT i.id FROM FeeInvoice i WHERE i.student.id IN :ids)")
     void deleteByInvoice_Student_IdIn(@Param("ids") Collection<Integer> ids);
 }

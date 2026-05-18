@@ -106,7 +106,9 @@ public class StudentService {
         feePaymentRepo.deleteByInvoice_Student_IdIn(ids);
         feeInvoiceRepo.deleteByStudent_IdIn(ids);
         studentGuardianRepo.deleteByStudent_IdIn(ids);
-        userRepo.deleteByLinkedStudent_IdIn(ids);
+        // Entity-based delete to trigger Hibernate cascade on user_roles join table
+        List<User> linkedUsers = userRepo.findByLinkedStudent_IdIn(ids);
+        if (!linkedUsers.isEmpty()) userRepo.deleteAll(linkedUsers);
         studentRepo.deleteBySchool_Id(schoolId);
     }
 
@@ -126,7 +128,9 @@ public class StudentService {
         feePaymentRepo.deleteByInvoice_Student_IdIn(ids);
         feeInvoiceRepo.deleteByStudent_IdIn(ids);
         studentGuardianRepo.deleteByStudent_IdIn(ids);
-        userRepo.deleteByLinkedStudent_IdIn(ids);
+        // Entity-based delete to trigger Hibernate cascade on user_roles join table
+        List<User> linkedUsers = userRepo.findByLinkedStudent_IdIn(ids);
+        if (!linkedUsers.isEmpty()) userRepo.deleteAll(linkedUsers);
         studentRepo.delete(student);
     }
 

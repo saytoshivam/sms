@@ -19,7 +19,7 @@ public interface StudentMarkRepo extends JpaRepository<StudentMark, Integer> {
     Optional<StudentMark> findBySchool_IdAndStudent_IdAndAssessmentKey(
             Integer schoolId, Integer studentId, String assessmentKey);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM StudentMark m WHERE m.student.id IN :ids")
     void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

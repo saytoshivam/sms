@@ -32,7 +32,7 @@ public interface FeeInvoiceRepo extends JpaRepository<FeeInvoice, Integer> {
                     + " 'PARTIAL')")
     long countOpenInvoicesBySchoolId(@Param("schoolId") Integer schoolId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM FeeInvoice i WHERE i.student.id IN :ids")
     void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

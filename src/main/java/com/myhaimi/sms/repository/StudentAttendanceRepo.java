@@ -19,7 +19,7 @@ public interface StudentAttendanceRepo extends JpaRepository<StudentAttendance, 
 
     List<StudentAttendance> findByStudent_IdIn(Collection<Integer> studentIds);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM StudentAttendance a WHERE a.student.id IN :ids")
     void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

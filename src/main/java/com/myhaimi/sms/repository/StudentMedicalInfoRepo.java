@@ -12,7 +12,7 @@ import java.util.Optional;
 public interface StudentMedicalInfoRepo extends JpaRepository<StudentMedicalInfo, Integer> {
     Optional<StudentMedicalInfo> findByStudent_Id(Integer studentId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM StudentMedicalInfo m WHERE m.student.id IN :ids")
     void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

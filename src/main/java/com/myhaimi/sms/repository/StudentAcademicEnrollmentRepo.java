@@ -46,7 +46,7 @@ public interface StudentAcademicEnrollmentRepo extends JpaRepository<StudentAcad
             @Param("classGroupId") Integer classGroupId,
             @Param("academicYearId") Integer academicYearId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM StudentAcademicEnrollment e WHERE e.student.id IN :ids")
     void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

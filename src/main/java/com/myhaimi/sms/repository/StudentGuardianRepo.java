@@ -27,7 +27,7 @@ public interface StudentGuardianRepo extends JpaRepository<StudentGuardian, Inte
             """)
     List<StudentGuardian> findPrimaryLinksWithGuardianForStudentIds(@Param("ids") Collection<Integer> ids);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM StudentGuardian sg WHERE sg.student.id IN :ids")
     void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }

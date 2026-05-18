@@ -14,7 +14,7 @@ public interface StudentDocumentRepo extends JpaRepository<StudentDocument, Inte
 
     List<StudentDocument> findByStudent_IdIn(Collection<Integer> studentIds);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM StudentDocument d WHERE d.student.id IN :ids")
     void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 }
