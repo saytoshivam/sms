@@ -14,7 +14,7 @@ import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import { toast } from '../lib/toast';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { TeacherPublishedWeekGrid, type PublishedTeacherWeekly } from './TeacherTimetablePage';
+import { TeacherWeeklyTimetableEmbed } from '../components/timetable/TeacherWeeklyTimetableEmbed';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -616,128 +616,17 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
 // ─── Tab: Timetable ───────────────────────────────────────────────────────────
 
 function TabTimetable({ profile }: { profile: StaffProfile }) {
-  const navigate = useNavigate();
-
-  // Always fetch — even for non-eligible staff, to show a consistent status.
-  const weeklyQ = useQuery({
-    queryKey: ['staff-weekly-timetable', profile.id],
-    queryFn: async () =>
-      (await api.get<PublishedTeacherWeekly>(`/api/staff/${profile.id}/timetable/weekly`)).data,
-    // Only fetch when staff is timetable-eligible; otherwise we show ineligibility reasons.
-    enabled: profile.timetableEligible,
-    retry: 1,
-  });
-
-  // ── Not eligible ────────────────────────────────────────────────────────────
-  if (!profile.timetableEligible) {
-    const reasons = profile.timetableEligibilityReasons ?? profile.missingRequiredItems ?? [];
-    return (
-      <div style={{ display: 'grid', gap: 14 }}>
-        <div style={{ padding: '18px 20px', background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.18)', borderRadius: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: reasons.length > 0 ? 12 : 0 }}>
-            <div style={{ fontSize: 28 }}>📚</div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: '#b91c1c', marginBottom: 3 }}>Not timetable eligible</div>
-              <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.55)' }}>
-                This staff member cannot be included in the timetable. Resolve the items below to make them eligible.
-              </div>
-            </div>
-          </div>
-          {reasons.length > 0 && (
-            <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
-              {reasons.map((r, i) => (
-                <li key={i} style={{ fontSize: 13, color: '#b91c1c', fontWeight: 600, marginBottom: 4 }}>• {r}</li>
-              ))}
-            </ul>
-          )}
-          {reasons.length === 0 && (
-            <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.45)', marginTop: 8 }}>
-              Requires: ACTIVE status + TEACHER role + at least one teachable subject + max weekly load set.
-            </div>
-          )}
-        </div>
-
-        <SectionCard title="Timetable Assignment Summary">
-          <InfoRow label="Timetable Eligible"  value="No" />
-          <InfoRow label="Teachable Subjects"  value={profile.teachableSubjectCodes.join(', ') || '—'} />
-          <InfoRow label="Max Weekly Load"     value={profile.maxWeeklyLectureLoad != null ? `${profile.maxWeeklyLectureLoad} periods/wk` : 'Not set'} />
-          <InfoRow label="Max Daily Load"      value={profile.maxDailyLectureLoad != null ? `${profile.maxDailyLectureLoad} periods/day` : 'No cap'} />
-        </SectionCard>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button type="button" onClick={() => navigate(`/app/teachers?edit=${profile.id}`)}
-            style={{ padding: '9px 18px', borderRadius: 9, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            ✏ Fix in Edit Profile
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Loading ──────────────────────────────────────────────────────────────────
-  if (weeklyQ.isLoading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 200, color: 'rgba(15,23,42,0.4)', fontSize: 14 }}>
-        Loading timetable…
-      </div>
-    );
-  }
-
-  // ── Error ────────────────────────────────────────────────────────────────────
-  if (weeklyQ.isError) {
-    return (
-      <div style={{ display: 'grid', gap: 14 }}>
-        <div style={{ padding: '14px 18px', background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.18)', borderRadius: 12, fontSize: 13, color: '#b91c1c', fontWeight: 600 }}>
-          ⚠ Could not load timetable. {formatApiError(weeklyQ.error)}
-        </div>
-      </div>
-    );
-  }
-
-  const weekly = weeklyQ.data;
-  const hasPublished = weekly != null && (weekly.versionNumber != null || weekly.periods.length > 0);
+  const reasons = [
+    ...(profile.timetableEligibilityReasons ?? []),
+    ...(profile.missingRequiredItems ?? []),
+  ].filter(Boolean);
 
   return (
-    <div style={{ display: 'grid', gap: 14 }}>
-
-      {/* Summary strip */}
-      <SectionCard title="Timetable Assignment Summary">
-        <InfoRow label="Timetable Eligible"  value="Yes" />
-        <InfoRow label="Teachable Subjects"  value={profile.teachableSubjectCodes.join(', ') || '—'} />
-        <InfoRow label="Max Weekly Load"     value={profile.maxWeeklyLectureLoad != null ? `${profile.maxWeeklyLectureLoad} periods/wk` : 'School default'} />
-        <InfoRow label="Max Daily Load"      value={profile.maxDailyLectureLoad != null ? `${profile.maxDailyLectureLoad} periods/day` : 'No cap'} />
-        <InfoRow label="Can Take Sub."       value={profile.canTakeSubstitution ? 'Yes' : 'No'} />
-        <InfoRow label="Class Teacher Cap."  value={profile.canBeClassTeacher ? 'Yes' : 'No'} />
-        {weekly && hasPublished && (
-          <>
-            <InfoRow label="Teaching Periods/wk" value={String(weekly.weeklyTeachingPeriods)} />
-            <InfoRow label="Free Periods (grid)"  value={String(weekly.freePeriodsTotal)} />
-          </>
-        )}
-      </SectionCard>
-
-      {/* Weekly grid */}
-      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', padding: '16px 18px' }}>
-        <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.38)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 14 }}>
-          Weekly Timetable
-        </div>
-        {!hasPublished ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '32px 16px', textAlign: 'center' }}>
-            <div style={{ fontSize: 32 }}>🗓</div>
-            <div style={{ fontWeight: 700, fontSize: 15, color: 'rgba(15,23,42,0.55)' }}>No published timetable is available for this staff member.</div>
-            <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.4)', maxWidth: 380 }}>
-              A timetable must be created and published by the school admin before periods appear here.
-            </div>
-            <button type="button" onClick={() => navigate('/app/timetable/grid')}
-              style={{ marginTop: 8, padding: '9px 18px', borderRadius: 9, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-              Open Timetable Grid →
-            </button>
-          </div>
-        ) : (
-          <TeacherPublishedWeekGrid data={weekly} />
-        )}
-      </div>
-    </div>
+    <TeacherWeeklyTimetableEmbed
+      staffId={profile.id}
+      timetableEligible={profile.timetableEligible}
+      eligibilityReasons={reasons}
+    />
   );
 }
 

@@ -81,7 +81,17 @@ function dayShort(d: string): string {
   return m[d] ?? d.slice(0, 3);
 }
 
-export function TeacherPublishedWeekGrid({ data }: { data: PublishedTeacherWeekly }) {
+export function TeacherPublishedWeekGrid({
+  data,
+  hideStats = false,
+  hideTodaySummary = false,
+}: {
+  data: PublishedTeacherWeekly;
+  /** If true, the "Published v… Teaching load… Free periods…" strip is not rendered. */
+  hideStats?: boolean;
+  /** If true, the "Today's summary" card at the bottom is not rendered. */
+  hideTodaySummary?: boolean;
+}) {
   if (data.versionNumber == null && data.periods.length === 0) {
     return (
       <p className="muted" style={{ margin: 0, fontSize: 14 }}>
@@ -98,6 +108,7 @@ export function TeacherPublishedWeekGrid({ data }: { data: PublishedTeacherWeekl
 
   return (
     <div className="stack" style={{ gap: 12 }}>
+      {!hideStats && (
       <div className="row" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'baseline' }}>
         <span className="muted" style={{ fontSize: 13 }}>
           Published v{data.versionNumber ?? '?'}
@@ -110,6 +121,7 @@ export function TeacherPublishedWeekGrid({ data }: { data: PublishedTeacherWeekl
           Free periods (grid): {data.freePeriodsTotal}
         </span>
       </div>
+      )}
 
       <div className="teacher-tt-table-wrap" style={{ overflowX: 'auto' }}>
         <table className="data-table teacher-tt-table" style={{ minWidth: 520 }} aria-label="Weekly published timetable">
@@ -168,30 +180,32 @@ export function TeacherPublishedWeekGrid({ data }: { data: PublishedTeacherWeekl
         </table>
       </div>
 
-      <div className="card stack" style={{ gap: 8, padding: 12 }}>
-        <div style={{ fontWeight: 900 }}>Today’s summary</div>
-        {data.todayCells.length === 0 ? (
-          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            No school today or no periods configured.
-          </p>
-        ) : (
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-            {data.todayCells.map((c, i) => (
-              <li key={`${c.timeSlotId}-${i}`}>
-                {c.breakSlot ? (
-                  <span>Break</span>
-                ) : c.free ? (
-                  <span className="muted">Free period</span>
-                ) : (
-                  <span>
-                    <strong>{c.subject}</strong> · {c.classGroupDisplayName} · {c.room?.trim() ? c.room : '—'}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {!hideTodaySummary && (
+        <div className="card stack" style={{ gap: 8, padding: 12 }}>
+          <div style={{ fontWeight: 900 }}>Today's summary</div>
+          {data.todayCells.length === 0 ? (
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              No school today or no periods configured.
+            </p>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+              {data.todayCells.map((c, i) => (
+                <li key={`${c.timeSlotId}-${i}`}>
+                  {c.breakSlot ? (
+                    <span>Break</span>
+                  ) : c.free ? (
+                    <span className="muted">Free period</span>
+                  ) : (
+                    <span>
+                      <strong>{c.subject}</strong> · {c.classGroupDisplayName} · {c.room?.trim() ? c.room : '—'}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
