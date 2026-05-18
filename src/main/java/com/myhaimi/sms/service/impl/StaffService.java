@@ -3,13 +3,19 @@ package com.myhaimi.sms.service.impl;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.myhaimi.sms.DTO.staff.StaffProfileDTO;
+import com.myhaimi.sms.DTO.staff.StaffProfileDTO.ProfileCompleteness;
+import com.myhaimi.sms.DTO.staff.StaffProfileDTO.ProfileCompleteness.CategoryScore;
 import com.myhaimi.sms.DTO.staff.StaffSummaryDTO;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.entity.Staff;
+import com.myhaimi.sms.entity.StaffDocument;
 import com.myhaimi.sms.entity.StaffRoleMapping;
+import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
+import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
 import com.myhaimi.sms.entity.enums.StaffStatus;
 import com.myhaimi.sms.entity.enums.StaffType;
 import com.myhaimi.sms.repository.SchoolRepo;
+import com.myhaimi.sms.repository.StaffDocumentRepo;
 import com.myhaimi.sms.repository.StaffRepo;
 import com.myhaimi.sms.repository.StaffRoleMappingRepository;
 import com.myhaimi.sms.repository.StaffTeachableSubjectRepository;
@@ -41,6 +47,7 @@ public class StaffService {
     private final UserRepo                      userRepo;
     private final StaffTeachableSubjectRepository staffTeachableSubjectRepository;
     private final StaffRoleMappingRepository    staffRoleMappingRepository;
+    private final StaffDocumentRepo             staffDocumentRepo;
     private final ObjectMapper                  objectMapper;
 
     // ── Tenant helper ──────────────────────────────────────────────────────────
@@ -219,12 +226,30 @@ public class StaffService {
         dto.setTimetableEligible(ineligReasons.isEmpty());
         dto.setTimetableEligibilityReasons(ineligReasons);
 
-        dto.setMissingRequiredItems(computeMissingItems(s, roles, subjects, schoolDefaultWeeklyLoad));
+        List<String> missingItems = computeMissingItems(s, roles, subjects, schoolDefaultWeeklyLoad);
+        dto.setMissingRequiredItems(missingItems);
+        dto.setActivationInconsistent(isActivationInconsistent(s, roles));
         dto.setCreatedAt(s.getCreatedAt());
         dto.setUpdatedAt(s.getUpdatedAt());
     }
 
     // ── Computed helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Returns true when the staff record is ACTIVE but is missing one or more
+     * fields that are required for activation: fullName, phone, staffType,
+     * designation, joiningDate, or at least one role.
+     * This is an inconsistent state the UI must surface prominently.
+     */
+    private static boolean isActivationInconsistent(Staff s, List<String> roles) {
+        if (s.getStatus() != StaffStatus.ACTIVE) return false;
+        return (s.getFullName()    == null || s.getFullName().isBlank())
+            || (s.getPhone()       == null || s.getPhone().isBlank())
+            ||  s.getStaffType()   == null
+            || (s.getDesignation() == null || s.getDesignation().isBlank())
+            ||  s.getJoiningDate() == null
+            ||  roles.isEmpty();
+    }
 
     /**
      * Returns human-readable reasons why a staff member is not timetable eligible.
@@ -261,8 +286,13 @@ public class StaffService {
             missing.add("Staff type is required.");
         if (roles.isEmpty())
             missing.add("At least one role must be assigned.");
-        if (s.getJoiningDate() == null && s.getStatus() == StaffStatus.ACTIVE)
-            missing.add("Joining date is required before staff can be activated.");
+        // Joining date: tailor the message to current status
+        if (s.getJoiningDate() == null) {
+            if (s.getStatus() == StaffStatus.ACTIVE)
+                missing.add("Joining date is missing — status should not be ACTIVE without it.");
+            else
+                missing.add("Joining date is required to activate this staff member.");
+        }
         if (s.getStaffType() == StaffType.TEACHING) {
             boolean hasTeacherRole = roles.stream().anyMatch(r -> RoleNames.TEACHER.equalsIgnoreCase(r));
             if (!hasTeacherRole) {
@@ -279,28 +309,127 @@ public class StaffService {
         return missing;
     }
 
-    private StaffProfileDTO.ProfileCompleteness computeProfileCompleteness(Staff s) {
-        record Section(String name, boolean filled) {}
-        List<Section> sections = List.of(
-                new Section("Contact & Address",
-                        s.getCurrentAddressLine1() != null && !s.getCurrentAddressLine1().isBlank()),
-                new Section("Emergency Contact",
-                        s.getEmergencyContactName() != null && !s.getEmergencyContactName().isBlank()),
-                new Section("Qualification",
-                        s.getHighestQualification() != null && !s.getHighestQualification().isBlank()),
-                new Section("Payroll Setup",
-                        s.isPayrollEnabled() || (s.getBankAccountNumber() != null && !s.getBankAccountNumber().isBlank())),
-                new Section("Joining Date",
-                        s.getJoiningDate() != null),
-                new Section("Department",
-                        s.getDepartment() != null && !s.getDepartment().isBlank())
-        );
-        int filled = (int) sections.stream().filter(Section::filled).count();
-        int total  = sections.size();
-        int pct    = total == 0 ? 100 : (filled * 100 / total);
-        List<String> empty = sections.stream()
-                .filter(sec -> !sec.filled()).map(Section::name).toList();
-        return new StaffProfileDTO.ProfileCompleteness(filled, total, pct, empty);
+    private StaffProfileDTO.ProfileCompleteness computeProfileCompleteness(
+            Staff s, List<String> roles, List<String> subjects, User user, Integer schoolDefaultWeeklyLoad) {
+
+        List<CategoryScore> cats = new ArrayList<>();
+
+        // ── 1. Identity (20%) ─────────────────────────────────────────────────
+        {
+            List<String> miss = new ArrayList<>();
+            int score = 0;
+            if (s.getFullName() != null && !s.getFullName().isBlank())       score += 35; else miss.add("Full name is required");
+            if (s.getPhone()    != null && !s.getPhone().isBlank())           score += 35; else miss.add("Phone number is required");
+            if (s.getEmail()    != null && !s.getEmail().isBlank())           score += 20; else miss.add("Email not provided (needed for login)");
+            if (s.getEmployeeNo() != null && !s.getEmployeeNo().isBlank())    score += 10; else miss.add("Employee number not set");
+            cats.add(new CategoryScore("identity", "Identity", "👤", 20, Math.min(score, 100), miss));
+        }
+
+        // ── 2. Employment (25%) ───────────────────────────────────────────────
+        {
+            List<String> miss = new ArrayList<>();
+            int score = 0;
+            if (s.getStaffType()      != null)                                           score += 15; else miss.add("Staff type not set");
+            if (s.getDesignation()    != null && !s.getDesignation().isBlank())          score += 15; else miss.add("Designation not set");
+            if (s.getJoiningDate()    != null)                                           score += 25; else miss.add("Joining date not set");
+            if (s.getStatus()         != null && s.getStatus() != StaffStatus.DRAFT)     score += 20; else miss.add("Status still DRAFT — activate when ready");
+            if (s.getEmploymentType() != null)                                           score += 15; else miss.add("Employment type not set");
+            if (s.getDepartment()     != null && !s.getDepartment().isBlank())           score += 10; else miss.add("Department not set");
+            cats.add(new CategoryScore("employment", "Employment", "💼", 25, Math.min(score, 100), miss));
+        }
+
+        // ── 3. Academics (20%) ────────────────────────────────────────────────
+        {
+            List<String> miss = new ArrayList<>();
+            int score;
+            if (s.getStaffType() == StaffType.TEACHING) {
+                score = 0;
+                boolean hasTeacherRole = roles.stream().anyMatch(r -> RoleNames.TEACHER.equalsIgnoreCase(r));
+                boolean hasLoad        = s.getMaxWeeklyLectureLoad() != null || schoolDefaultWeeklyLoad != null;
+                if (hasTeacherRole)        score += 40; else miss.add("TEACHER role not assigned");
+                if (!subjects.isEmpty())   score += 35; else miss.add("No teachable subjects assigned");
+                if (hasLoad)               score += 25; else miss.add("Max weekly lecture load not set");
+            } else {
+                // Non-teaching staff: academic section not applicable — full marks
+                score = 100;
+                miss.add("Not applicable for non-teaching staff");
+                // Clear "not applicable" info message so the UI doesn't show it as a blocker
+                miss.clear();
+            }
+            cats.add(new CategoryScore("academics", "Academics", "📚", 20, Math.min(score, 100), miss));
+        }
+
+        // ── 4. Documents (15%) ────────────────────────────────────────────────
+        {
+            List<String> miss = new ArrayList<>();
+            int score;
+            List<StaffDocument> docs = staffDocumentRepo.findByStaff_IdOrderByCreatedAtAsc(s.getId());
+            // Exclude NOT_REQUIRED rows from denominator — they are not real work items
+            List<StaffDocument> required = docs.stream()
+                    .filter(d -> d.getCollectionStatus() != DocumentCollectionStatus.NOT_REQUIRED)
+                    .toList();
+            if (required.isEmpty()) {
+                score = 100; // no documents configured yet — not penalised
+            } else {
+                long done = required.stream().filter(d ->
+                        d.getCollectionStatus() == DocumentCollectionStatus.COLLECTED_PHYSICAL
+                        || d.getVerificationStatus() == DocumentVerificationStatus.VERIFIED
+                        || (d.getUploadStatus() != null && "UPLOADED".equals(d.getUploadStatus().name()))
+                ).count();
+                score = (int) (done * 100L / required.size());
+                if (score < 100) miss.add(String.format("%d of %d required documents collected or verified", done, required.size()));
+            }
+            cats.add(new CategoryScore("documents", "Documents", "📄", 15, score, miss));
+        }
+
+        // ── 5. Access (10%) ───────────────────────────────────────────────────
+        {
+            List<String> miss = new ArrayList<>();
+            int score = 0;
+            if (user != null) {
+                score += 60;
+                if (user.isEnabled()) score += 40; else miss.add("Login account is disabled");
+            } else {
+                miss.add("No login account created");
+            }
+            cats.add(new CategoryScore("access", "Access", "🔐", 10, score, miss));
+        }
+
+        // ── 6. Payroll Prep (10%) ─────────────────────────────────────────────
+        {
+            List<String> miss = new ArrayList<>();
+            int score = 0;
+            boolean hasAnyBankData = (s.getBankAccountNumber() != null && !s.getBankAccountNumber().isBlank())
+                    || (s.getBankName() != null && !s.getBankName().isBlank());
+            if (!s.isPayrollEnabled() && !hasAnyBankData) {
+                // Payroll deliberately not set up — treat as "not applicable", give neutral partial score
+                score = 30;
+                miss.add("Payroll not enabled (optional — enable if school uses payroll)");
+            } else {
+                if (s.isPayrollEnabled())                                         score += 20; else miss.add("Payroll not enabled");
+                if (s.getSalaryType() != null)                                    score += 20; else miss.add("Salary type not set");
+                if (s.getBankName()    != null && !s.getBankName().isBlank())     score += 20; else miss.add("Bank name missing");
+                String acct = s.getBankAccountNumber();
+                if (acct != null && !acct.isBlank())                              score += 25; else miss.add("Bank account number missing");
+                if (s.getIfsc()        != null && !s.getIfsc().isBlank())         score += 15; else miss.add("IFSC code missing");
+            }
+            cats.add(new CategoryScore("payroll", "Payroll Prep", "💰", 10, Math.min(score, 100), miss));
+        }
+
+        // ── Overall weighted score ─────────────────────────────────────────────
+        int overall = cats.stream()
+                .mapToInt(c -> c.score() * c.weight() / 100)
+                .sum();
+
+        // Legacy backward-compat fields
+        int filledSections = (int) cats.stream().filter(c -> c.score() >= 50).count();
+        int totalSections  = cats.size();
+        List<String> emptySections = cats.stream()
+                .filter(c -> c.score() < 50)
+                .map(ProfileCompleteness.CategoryScore::name)
+                .toList();
+
+        return new ProfileCompleteness(overall, cats, filledSections, totalSections, emptySections);
     }
 
     public StaffSummaryDTO toSummaryDTO(Staff s,
@@ -348,7 +477,10 @@ public class StaffService {
         dto.setIfsc(s.getIfsc());
         dto.setPanNumberMasked(StaffProfileDTO.maskPan(s.getPanNumber()));
 
-        dto.setProfileCompleteness(computeProfileCompleteness(s));
+        List<String> roles    = rolesMap.getOrDefault(s.getId(), List.of());
+        List<String> subjects = subjectsMap.getOrDefault(s.getId(), List.of());
+        User         user     = loginMap.get(s.getId());
+        dto.setProfileCompleteness(computeProfileCompleteness(s, roles, subjects, user, schoolDefaultWeeklyLoad));
 
         return dto;
     }

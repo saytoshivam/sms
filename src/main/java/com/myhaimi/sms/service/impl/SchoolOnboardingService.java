@@ -914,6 +914,10 @@ public class SchoolOnboardingService {
                     .orElseThrow(() -> new IllegalArgumentException("Unknown role: " + name)));
         }
 
+        // Additional activation guard: roles must not be empty
+        if (emp.getStatus() == com.myhaimi.sms.entity.enums.StaffStatus.ACTIVE && roleEntities.isEmpty())
+            throw new IllegalArgumentException("At least one role must be assigned before a staff member can be activated.");
+
         // ── 4. Build warnings (non-fatal) ──────────────────────────────────────
         List<String> warnings = new ArrayList<>();
         boolean isTeaching   = emp.getStaffType() == StaffType.TEACHING;
@@ -1081,8 +1085,7 @@ public class SchoolOnboardingService {
                 && staff.getJoiningDate() == null)
             throw new IllegalArgumentException("Joining date is required before activating staff.");
 
-        // EmployeeNo update
-        String empNo = id.getEmployeeNo() == null ? "" : id.getEmployeeNo().trim();
+        // EmployeeNo update        String empNo = id.getEmployeeNo() == null ? "" : id.getEmployeeNo().trim();
         if (!empNo.isBlank() && !empNo.equalsIgnoreCase(staff.getEmployeeNo())) {
             if (staffRepo.countBySchool_IdAndEmployeeNoIgnoreCaseAndIsDeletedFalse(schoolId, empNo) > 0)
                 throw new IllegalArgumentException("Employee No already exists: " + empNo);
@@ -1107,6 +1110,10 @@ public class SchoolOnboardingService {
             roleEntities.add(roleRepo.findByName(name).stream().findFirst()
                     .orElseThrow(() -> new IllegalArgumentException("Unknown role: " + name)));
         }
+
+        // Activation guard: at least one role required when setting status to ACTIVE
+        if (emp.getStatus() == com.myhaimi.sms.entity.enums.StaffStatus.ACTIVE && roleEntities.isEmpty())
+            throw new IllegalArgumentException("At least one role must be assigned before a staff member can be activated.");
 
         // Save roles as first-class StaffRoleMapping (authoritative; independent of login account)
         staffRoleMappingRepository.deleteByStaff_Id(staff.getId());

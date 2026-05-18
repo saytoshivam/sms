@@ -78,6 +78,13 @@ public class StaffSummaryDTO {
      */
     private List<String> missingRequiredItems;
 
+    /**
+     * True when status = ACTIVE but one or more required activation fields are missing:
+     * fullName, phone, staffType, designation, joiningDate, or at least one role.
+     * The UI should show a prominent "Status is inconsistent" warning and offer to fix or deactivate.
+     */
+    private boolean activationInconsistent;
+
     private java.time.Instant createdAt;
     private java.time.Instant updatedAt;
 }

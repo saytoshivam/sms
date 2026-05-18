@@ -49,6 +49,12 @@ interface StaffProfile {
   lastInviteSentAt: string | null;
   timetableEligible: boolean;
   missingRequiredItems: string[];
+  /**
+   * True when status = ACTIVE but required activation fields are missing
+   * (fullName, phone, staffType, designation, joiningDate, or no roles).
+   * The UI should show a prominent "Status is inconsistent" warning.
+   */
+  activationInconsistent: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 
@@ -87,10 +93,18 @@ interface StaffProfile {
 
   // completeness
   profileCompleteness: {
+    percentComplete: number;
     filledSections: number;
     totalSections: number;
-    percentComplete: number;
     emptySections: string[];
+    categories: {
+      id: string;
+      name: string;
+      icon: string;
+      weight: number;
+      score: number;
+      missing: string[];
+    }[];
   } | null;
 }
 
@@ -274,104 +288,251 @@ function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMa
 
 // ─── Tab: Overview ─────────────────────────────────────────────────────────────
 
+// ─── Tab: Overview ──────────────────────────────────────────────────────────���──
+
+function ReadinessGroup({
+  title, icon, items, color, bg, border,
+}: {
+  title: string; icon: string; items: string[];
+  color: string; bg: string; border: string;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div style={{ padding: '12px 14px', background: bg, border: `1px solid ${border}`, borderRadius: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 14 }}>{icon}</span>
+        <span style={{ fontSize: 12, fontWeight: 800, color }}>{title}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 20, background: color + '22', color }}>{items.length}</span>
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18 }}>
+        {items.map((item, i) => (
+          <li key={i} style={{ fontSize: 12, color, fontWeight: 600, marginBottom: 2 }}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ReadinessCard({
+  icon, label, value, sub, ok, warn,
+}: {
+  icon: string; label: string; value: string; sub?: string;
+  ok?: boolean; warn?: boolean;
+}) {
+  const color  = ok ? '#166534' : warn ? '#92400e' : '#475569';
+  const bg     = ok ? 'rgba(22,163,74,0.07)' : warn ? 'rgba(234,179,8,0.07)' : 'rgba(15,23,42,0.04)';
+  const border = ok ? 'rgba(22,163,74,0.2)' : warn ? 'rgba(234,179,8,0.2)' : 'rgba(15,23,42,0.1)';
+  return (
+    <div style={{ padding: '12px 14px', background: bg, border: `1px solid ${border}`, borderRadius: 10, flex: '1 1 140px', minWidth: 130 }}>
+      <div style={{ fontSize: 20, marginBottom: 4 }}>{icon}</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 900, color }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.45)', marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
 function TabOverview({ profile }: { profile: StaffProfile }) {
   const tc = typeColor(profile.staffType);
   const sc = statusColor(profile.status);
+  const navigate = useNavigate();
+
+  // ── A. Readiness blockers ────────────────────────────────────────────────────
+
+  // Activation blockers — what's needed to set status = ACTIVE
+  const activationBlockers: string[] = [];
+  if (!profile.fullName?.trim())     activationBlockers.push('Full name missing');
+  if (!profile.phone?.trim())        activationBlockers.push('Phone number missing');
+  if (!profile.staffType)            activationBlockers.push('Staff type not set');
+  if (!profile.designation?.trim())  activationBlockers.push('Designation not set');
+  if (!profile.joiningDate)          activationBlockers.push('Joining date not set');
+  if ((profile.roles?.length ?? 0) === 0) activationBlockers.push('No roles assigned');
+
+  // Timetable blockers — from backend computed field
+  const timetableBlockers = (profile.timetableEligibilityReasons ?? [])
+    .filter(r => r !== 'Staff not ACTIVE'); // shown separately as activation blocker
+
+  // Portal blockers — what's needed for login
+  const portalBlockers: string[] = [];
+  if (!profile.email?.trim())         portalBlockers.push('Email address required to create a login');
+  if (!profile.hasLoginAccount)       portalBlockers.push('Login account not created');
+  else if (profile.loginStatus === 'DISABLED') portalBlockers.push('Login account is disabled');
+
+  // Document blockers — from completeness categories
+  const docCat = profile.profileCompleteness?.categories?.find(c => c.id === 'documents');
+  const documentBlockers = (docCat?.missing ?? []).filter(m => !m.includes('no documents configured'));
+
+  const allClear = activationBlockers.length === 0 && timetableBlockers.length === 0
+                  && portalBlockers.length === 0 && documentBlockers.length === 0;
+
+  // ── Login status display ─────────────────────────────────────────────────────
+  const loginLabel =
+    profile.loginStatus === 'ACTIVE'      ? 'Active'
+  : profile.loginStatus === 'DISABLED'    ? 'Disabled'
+  : profile.loginStatus === 'NOT_CREATED' ? 'Not created'
+  : '—';
+  const loginOk   = profile.loginStatus === 'ACTIVE';
+  const loginWarn = profile.loginStatus === 'DISABLED';
+
+  // ── Document progress ─────────────────────────────────────────────────────────
+  const docsScore = docCat?.score ?? null;
+  const docsMissing = docCat?.missing.find(m => m.match(/\d+ of \d+/));
+  const docsLabel = docsScore === null ? '—'
+    : docsScore >= 100 ? '✓ Complete'
+    : `${docsScore}%`;
+
+  // ── Weekly load ──────────────────────────────────────────────────────────────
+  const weeklyLoadLabel = profile.maxWeeklyLectureLoad != null
+    ? `${profile.maxWeeklyLectureLoad} /wk`
+    : 'School default';
 
   return (
-    <div style={{ display: 'grid', gap: 14 }}>
-      {/* Missing items alert */}
-      {profile.missingRequiredItems && profile.missingRequiredItems.length > 0 && (
-        <div style={{ padding: '12px 16px', background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.18)', borderRadius: 10 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: '#991b1b', marginBottom: 6 }}>⚠ Profile incomplete</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {profile.missingRequiredItems.map(m => (
-              <li key={m} style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600, marginBottom: 2 }}>{m}</li>
-            ))}
-          </ul>
+    <div style={{ display: 'grid', gap: 16 }}>
+
+      {/* ── A. Readiness blockers ───────────────────────────────────────────── */}
+      {allClear ? (
+        <div style={{ padding: '12px 16px', background: 'rgba(22,163,74,0.07)', border: '1px solid rgba(22,163,74,0.2)', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 18 }}>✅</span>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>All readiness checks passed — profile is operational.</div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.38)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>
+            Readiness Blockers
+          </div>
+          <ReadinessGroup title="Activation Blockers"  icon="⚡" items={activationBlockers}  color="#b91c1c" bg="rgba(220,38,38,0.04)" border="rgba(220,38,38,0.18)" />
+          <ReadinessGroup title="Timetable Blockers"   icon="📅" items={timetableBlockers}   color="#92400e" bg="rgba(234,179,8,0.05)"  border="rgba(234,179,8,0.2)"  />
+          <ReadinessGroup title="Portal Blockers"      icon="🔐" items={portalBlockers}       color="#1e40af" bg="rgba(37,99,235,0.04)"  border="rgba(37,99,235,0.18)" />
+          <ReadinessGroup title="Document Blockers"    icon="📄" items={documentBlockers}     color="#0e7490" bg="rgba(8,145,178,0.04)"  border="rgba(8,145,178,0.18)" />
         </div>
       )}
 
-      {/* Profile completeness */}
+      {/* ── B. Profile completeness ──────────────────────────────────────────── */}
       {profile.profileCompleteness && (
-        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid rgba(15,23,42,0.08)', padding: '12px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Profile Completeness</div>
-            <div style={{ fontSize: 14, fontWeight: 900, color: profile.profileCompleteness.percentComplete >= 80 ? '#166534' : '#92400e' }}>
-              {profile.profileCompleteness.percentComplete}%
+        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', padding: '16px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.38)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Profile Completeness
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ height: 8, width: 160, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', borderRadius: 999, transition: 'width 0.4s',
+                  width: `${profile.profileCompleteness.percentComplete}%`,
+                  background: profile.profileCompleteness.percentComplete >= 80
+                    ? '#16a34a' : profile.profileCompleteness.percentComplete >= 50
+                    ? '#f59e0b' : '#dc2626',
+                }} />
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: profile.profileCompleteness.percentComplete >= 80 ? '#166534' : profile.profileCompleteness.percentComplete >= 50 ? '#92400e' : '#b91c1c' }}>
+                {profile.profileCompleteness.percentComplete}%
+              </div>
             </div>
           </div>
-          <div style={{ height: 6, borderRadius: 999, background: 'rgba(15,23,42,0.08)', overflow: 'hidden' }}>
-            <div style={{ height: '100%', borderRadius: 999, background: profile.profileCompleteness.percentComplete >= 80 ? '#16a34a' : '#f59e0b', width: `${profile.profileCompleteness.percentComplete}%`, transition: 'width 0.4s' }} />
-          </div>
-          {profile.profileCompleteness.emptySections.length > 0 && (
-            <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', marginTop: 6, fontWeight: 600 }}>
-              Unfilled: {profile.profileCompleteness.emptySections.join(', ')}
+          {(profile.profileCompleteness.categories ?? []).map(cat => (
+            <div key={cat.id} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 14 }}>{cat.icon}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(15,23,42,0.7)' }}>{cat.name}</span>
+                  <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.35)', fontWeight: 600 }}>({cat.weight}%)</span>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 800, padding: '1px 8px', borderRadius: 20, background: cat.score >= 80 ? 'rgba(22,163,74,0.1)' : cat.score >= 50 ? 'rgba(234,179,8,0.1)' : 'rgba(220,38,38,0.08)', color: cat.score >= 80 ? '#166534' : cat.score >= 50 ? '#92400e' : '#b91c1c' }}>
+                  {cat.score}%
+                </span>
+              </div>
+              <div style={{ height: 5, borderRadius: 999, background: 'rgba(15,23,42,0.06)', overflow: 'hidden', marginBottom: cat.missing.length > 0 ? 4 : 0 }}>
+                <div style={{ height: '100%', borderRadius: 999, transition: 'width 0.4s', width: `${cat.score}%`, background: cat.score >= 80 ? '#16a34a' : cat.score >= 50 ? '#f59e0b' : '#ef4444' }} />
+              </div>
+              {cat.missing.length > 0 && (
+                <div style={{ paddingLeft: 20 }}>
+                  {cat.missing.map((m, i) => (
+                    <div key={i} style={{ fontSize: 11, color: 'rgba(15,23,42,0.5)', fontWeight: 600, lineHeight: 1.7 }}>· {m}</div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+          ))}
         </div>
       )}
 
+      {/* ── E. Operational readiness cards ──────────────────────────────────── */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        <ReadinessCard
+          icon={profile.timetableEligible ? '📅' : '📅'}
+          label="Timetable"
+          value={profile.timetableEligible ? '✓ Eligible' : '✗ Not Eligible'}
+          sub={profile.timetableEligible ? `${profile.teachableSubjectCodes.length} subject${profile.teachableSubjectCodes.length !== 1 ? 's' : ''}` : (profile.timetableEligibilityReasons?.length ?? 0) + ' blocker(s)'}
+          ok={profile.timetableEligible}
+          warn={!profile.timetableEligible}
+        />
+        <ReadinessCard
+          icon="🔐"
+          label="Login"
+          value={loginLabel}
+          sub={profile.username ? `@${profile.username}` : undefined}
+          ok={loginOk}
+          warn={loginWarn}
+        />
+        <ReadinessCard
+          icon="📄"
+          label="Documents"
+          value={docsLabel}
+          sub={docsMissing ?? undefined}
+          ok={docsScore !== null && docsScore >= 100}
+          warn={docsScore !== null && docsScore > 0 && docsScore < 100}
+        />
+        <ReadinessCard
+          icon="📖"
+          label="Subjects"
+          value={profile.teachableSubjectCodes.length > 0 ? String(profile.teachableSubjectCodes.length) : 'None'}
+          sub={profile.teachableSubjectCodes.slice(0, 3).join(', ') || (profile.staffType !== 'TEACHING' ? 'N/A' : 'Not assigned')}
+          ok={profile.teachableSubjectCodes.length > 0}
+          warn={profile.staffType === 'TEACHING' && profile.teachableSubjectCodes.length === 0}
+        />
+        <ReadinessCard
+          icon="⚡"
+          label="Weekly Load"
+          value={weeklyLoadLabel}
+          sub={profile.maxDailyLectureLoad != null ? `Max ${profile.maxDailyLectureLoad}/day` : undefined}
+          ok={profile.maxWeeklyLectureLoad != null}
+        />
+      </div>
+
+      {/* ── C. Identity summary ──────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
         <SectionCard title="Identity">
-          <InfoRow label="Full Name"   value={profile.fullName} />
-          <InfoRow label="Employee No" value={profile.employeeNo} mono />
-          <InfoRow label="Phone"       value={profile.phone} />
-          <InfoRow label="Email"       value={profile.email} />
-          <InfoRow label="Gender"      value={profile.gender} />
+          <InfoRow label="Full Name"     value={profile.fullName} />
+          <InfoRow label="Employee No"   value={profile.employeeNo} mono />
+          <InfoRow label="Phone"         value={profile.phone} />
+          <InfoRow label="Email"         value={profile.email} />
+          <InfoRow label="Gender"        value={profile.gender} />
           <InfoRow label="Date of Birth" value={fmtDate(profile.dateOfBirth)} />
         </SectionCard>
 
-        <SectionCard title="Employment Summary">
-          <div style={{ marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {/* ── D. Employment summary ─────────────────────────────────────────── */}
+        <SectionCard title="Employment">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 }}>
             <span style={{ ...B, ...tc }}>{profile.staffType ?? '—'}</span>
             <span style={{ ...B, ...sc }}>{profile.status ?? '—'}</span>
+            {profile.roles.map(r => { const rc = roleColor(r); return <span key={r} style={{ ...B, ...rc }}>{r}</span>; })}
           </div>
           <InfoRow label="Designation"      value={profile.designation} />
           <InfoRow label="Department"       value={profile.department} />
           <InfoRow label="Employment Type"  value={profile.employmentType} />
           <InfoRow label="Joining Date"     value={fmtDate(profile.joiningDate)} />
+          <InfoRow label="Reporting Mgr"    value={profile.reportingManagerStaffId ? `Staff #${profile.reportingManagerStaffId}` : null} />
         </SectionCard>
       </div>
 
-      <SectionCard title="Roles">
-        {profile.roles.length === 0
-          ? <span style={{ fontSize: 13, color: 'rgba(15,23,42,0.35)' }}>No roles assigned</span>
-          : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {profile.roles.map(r => {
-                const rc = roleColor(r);
-                return <span key={r} style={{ ...B, ...rc }}>{r}</span>;
-              })}
-            </div>}
-      </SectionCard>
+      {/* Edit shortcut */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button type="button" onClick={() => navigate(`/app/teachers?edit=${profile.id}`)}
+          style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(37,99,235,0.25)', background: 'rgba(37,99,235,0.05)', color: '#1d4ed8', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+          ✏ Edit Profile
+        </button>
+      </div>
 
-      <SectionCard title="Timetable Eligibility">
-        {profile.timetableEligible ? (
-          <div>
-            <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534' }}>✓ Timetable Eligible</span>
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', marginTop: 8 }}>
-              This teacher has an active TEACHER role, at least one teachable subject, and a configured load capacity. They can be assigned in the timetable.
-            </div>
-            {profile.teachableSubjectCodes.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
-                {profile.teachableSubjectCodes.map(c => (
-                  <span key={c} style={{ ...B, background: 'rgba(5,150,105,0.09)', color: '#065f46' }}>{c}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div>
-            <span style={{ ...B, background: 'rgba(15,23,42,0.07)', color: '#475569' }}>Not Eligible</span>
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', marginTop: 8 }}>
-              Requires: ACTIVE status + TEACHER role + at least one teachable subject + max weekly load set.
-              {(profile.timetableEligibilityReasons ?? []).map((r, i) => (
-                <span key={i} style={{ color: '#b91c1c', display: 'block', marginTop: 4 }}>• {r}</span>
-              ))}
-            </div>
-          </div>
-        )}
-      </SectionCard>
     </div>
   );
 }
@@ -379,42 +540,77 @@ function TabOverview({ profile }: { profile: StaffProfile }) {
 // ─── Tab: Employment ──────────────────────────────────────────────────────────
 
 function TabEmployment({ profile }: { profile: StaffProfile }) {
+  const tc = typeColor(profile.staffType);
+  const sc = statusColor(profile.status);
+
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      <SectionCard title="Job Details">
-        <InfoRow label="Staff Type"        value={profile.staffType} />
-        <InfoRow label="Designation"       value={profile.designation} />
-        <InfoRow label="Department"        value={profile.department} />
-        <InfoRow label="Employment Type"   value={profile.employmentType} />
-        <InfoRow label="Joining Date"      value={fmtDate(profile.joiningDate)} />
-        <InfoRow label="Status"            value={profile.status} />
-        <InfoRow label="Work Location"     value={profile.workLocation} />
-        <InfoRow label="Reporting Manager" value={profile.reportingManagerStaffId ? `Staff #${profile.reportingManagerStaffId}` : null} />
+
+      {/* ── Employment Record ────────────────────────────────────────────────── */}
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', padding: '16px 18px', marginBottom: 0 }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.38)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+          Employment Record
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 14 }}>
+          {profile.staffType && <span style={{ ...B, ...tc }}>{profile.staffType}</span>}
+          {profile.status    && <span style={{ ...B, ...sc }}>{profile.status}</span>}
+          {profile.roles.map(r => { const rc = roleColor(r); return <span key={r} style={{ ...B, ...rc }}>{r}</span>; })}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 0 }}>
+          <div>
+            <InfoRow label="Employee No"       value={profile.employeeNo} mono />
+            <InfoRow label="Designation"       value={profile.designation} />
+            <InfoRow label="Department"        value={profile.department} />
+            <InfoRow label="Employment Type"   value={profile.employmentType} />
+            <InfoRow label="Joining Date"      value={fmtDate(profile.joiningDate)} />
+          </div>
+          <div>
+            <InfoRow label="Status"            value={profile.status} />
+            <InfoRow label="Work Location"     value={profile.workLocation} />
+            <InfoRow label="Reporting Manager" value={profile.reportingManagerStaffId ? `Staff #${profile.reportingManagerStaffId}` : null} />
+            <InfoRow label="Max Weekly Load"   value={profile.maxWeeklyLectureLoad != null ? `${profile.maxWeeklyLectureLoad} periods/wk` : null} />
+            <InfoRow label="Max Daily Load"    value={profile.maxDailyLectureLoad  != null ? `${profile.maxDailyLectureLoad} periods/day`   : null} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Contact ──────────────────────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+        <SectionCard title="Contact">
+          <InfoRow label="Phone"           value={profile.phone} />
+          <InfoRow label="Alternate Phone" value={profile.alternatePhone} />
+          <InfoRow label="Email"           value={profile.email} />
+          <InfoRow label="Address Line 1"  value={profile.currentAddressLine1} />
+          <InfoRow label="Address Line 2"  value={profile.currentAddressLine2} />
+          <InfoRow label="City"            value={profile.city} />
+          <InfoRow label="State"           value={profile.state} />
+          <InfoRow label="Pincode"         value={profile.pincode} mono />
+        </SectionCard>
+
+        <SectionCard title="Emergency Contact">
+          <InfoRow label="Name"     value={profile.emergencyContactName} />
+          <InfoRow label="Phone"    value={profile.emergencyContactPhone} />
+          <InfoRow label="Relation" value={profile.emergencyContactRelation} />
+        </SectionCard>
+      </div>
+
+      {/* ── Qualifications ───────────────────────────────────────────────────── */}
+      <SectionCard title="Qualifications & Background">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 0 }}>
+          <div>
+            <InfoRow label="Highest Qualification"      value={profile.highestQualification} />
+            <InfoRow label="Professional Qualification" value={profile.professionalQualification} />
+            <InfoRow label="Specialization"             value={profile.specialization} />
+          </div>
+          <div>
+            <InfoRow label="Years of Experience"        value={profile.yearsOfExperience != null ? `${profile.yearsOfExperience} yr${profile.yearsOfExperience !== 1 ? 's' : ''}` : null} />
+            <InfoRow label="Previous Institution"       value={profile.previousInstitution} />
+          </div>
+        </div>
       </SectionCard>
 
-      <SectionCard title="Address">
-        <InfoRow label="Address Line 1" value={profile.currentAddressLine1} />
-        <InfoRow label="Address Line 2" value={profile.currentAddressLine2} />
-        <InfoRow label="City"           value={profile.city} />
-        <InfoRow label="State"          value={profile.state} />
-        <InfoRow label="Pincode"        value={profile.pincode} mono />
-      </SectionCard>
-
-      <SectionCard title="Emergency Contact">
-        <InfoRow label="Name"     value={profile.emergencyContactName} />
-        <InfoRow label="Phone"    value={profile.emergencyContactPhone} />
-        <InfoRow label="Relation" value={profile.emergencyContactRelation} />
-      </SectionCard>
-
-      <SectionCard title="Qualifications">
-        <InfoRow label="Highest Qualification"     value={profile.highestQualification} />
-        <InfoRow label="Professional Qualification" value={profile.professionalQualification} />
-        <InfoRow label="Specialization"            value={profile.specialization} />
-        <InfoRow label="Years of Experience"       value={profile.yearsOfExperience != null ? String(profile.yearsOfExperience) : null} />
-        <InfoRow label="Previous Institution"      value={profile.previousInstitution} />
-      </SectionCard>
-
-      <div style={{ padding: '12px 16px', background: 'rgba(15,23,42,0.03)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.07)' }}>
+      {/* ── No audit log note ────────────────────────────────────────────────── */}
+      <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.02)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)' }}>
         <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
           📋 HR status history and employment event log are not enabled for this school.
         </div>
@@ -425,6 +621,17 @@ function TabEmployment({ profile }: { profile: StaffProfile }) {
 
 // ─── Tab: Academics ───────────────────────────────────────────────────────────
 
+function subjectTypeColor(type: string | null | undefined): React.CSSProperties {
+  switch (type) {
+    case 'CORE':     return { background: 'rgba(37,99,235,0.1)',  color: '#1e40af' };
+    case 'ELECTIVE': return { background: 'rgba(124,58,237,0.1)', color: '#6d28d9' };
+    case 'OPTIONAL': return { background: 'rgba(8,145,178,0.1)',  color: '#0e7490' };
+    case 'LAB':      return { background: 'rgba(5,150,105,0.1)',  color: '#065f46' };
+    case 'ACTIVITY': return { background: 'rgba(234,179,8,0.1)',  color: '#92400e' };
+    default:         return { background: 'rgba(15,23,42,0.06)',  color: '#475569' };
+  }
+}
+
 function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile }: {
   profile: StaffProfile;
   subjects: Subject[];
@@ -433,6 +640,8 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
   onEditProfile?: () => void;
 }) {
   const subjectMap = new Map(subjects.map(s => [s.id, s]));
+  // Code → subject lookup for teachable subjects display
+  const subjectByCode = new Map(subjects.map(s => [s.code, s]));
   const cgMap = new Map(classGroups.map(cg => [cg.id, cg]));
 
   // Find allocations assigned to this staff
@@ -448,6 +657,8 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
   }
 
   const totalAssigned = myAllocations.reduce((s, a) => s + a.weeklyFrequency, 0);
+  const maxWeekly = profile.maxWeeklyLectureLoad;
+  const remainingCapacity = maxWeekly != null ? maxWeekly - totalAssigned : null;
 
   function cgLabel(id: number): string {
     const cg = cgMap.get(id);
@@ -456,6 +667,8 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
     if (cg.grade != null) return `Grade ${cg.grade}${cg.section ? ` ${cg.section}` : ''}`;
     return cg.code ?? `#${cg.id}`;
   }
+
+  const isTeacher = profile.roles.includes('TEACHER');
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -470,57 +683,226 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
         </button>
       </div>
 
+      {/* ── A. Timetable Eligibility ─────────────────────────────────────────── */}
+      <SectionCard title="Timetable Eligibility">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          {profile.timetableEligible ? (
+            <span style={{ ...B, background: 'rgba(22,163,74,0.12)', color: '#166534', fontSize: 13, padding: '4px 14px' }}>✓ Eligible</span>
+          ) : (
+            <span style={{ ...B, background: 'rgba(220,38,38,0.09)', color: '#b91c1c', fontSize: 13, padding: '4px 14px' }}>✗ Not Eligible</span>
+          )}
+        </div>
+        {profile.timetableEligible ? (
+          <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', lineHeight: 1.6 }}>
+            This teacher has an active TEACHER role, at least one teachable subject, and a configured load capacity.
+          </div>
+        ) : (
+          <div>
+            {((profile.timetableEligibilityReasons ?? []).length > 0) ? (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {(profile.timetableEligibilityReasons ?? []).map((r, i) => (
+                  <li key={i} style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600, marginBottom: 4 }}>{r}</li>
+                ))}
+              </ul>
+            ) : (
+              <div style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600 }}>
+                Eligibility check pending — save profile to refresh.
+              </div>
+            )}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── B. Staff Roles (from StaffRoleMapping) ───────────────────────────── */}
+      <SectionCard title="Staff Roles">
+        {profile.roles.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.4)' }}>
+            No roles assigned. Assign at least one role to enable portal access and timetable scheduling.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {profile.roles.map(r => {
+              const rc = roleColor(r);
+              const label: Record<string, string> = {
+                TEACHER: 'Teacher',
+                CLASS_TEACHER: 'Class Teacher',
+                HOD: 'Head of Department',
+                PRINCIPAL: 'Principal',
+                VICE_PRINCIPAL: 'Vice Principal',
+                ACCOUNTANT: 'Accountant',
+              };
+              return (
+                <span key={r} style={{ ...B, ...rc, fontSize: 12, padding: '4px 12px' }}>
+                  {label[r] ?? r}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── C. Teachable Subjects ────────────────────────────────────────────── */}
       <SectionCard title="Teachable Subjects">
         {profile.teachableSubjectCodes.length === 0 ? (
           <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.4)' }}>
             No teachable subjects assigned.
-            {profile.roles.includes('TEACHER') && (
+            {isTeacher && (
               <span style={{ color: '#b91c1c', marginLeft: 6, fontWeight: 600 }}>Required for timetable eligibility.</span>
             )}
           </div>
         ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {profile.teachableSubjectCodes.map(c => (
-              <span key={c} style={{ ...B, background: 'rgba(5,150,105,0.1)', color: '#065f46', fontSize: 12 }}>{c}</span>
-            ))}
+          <div style={{ display: 'grid', gap: 8 }}>
+            {profile.teachableSubjectCodes.map(code => {
+              const subj = subjectByCode.get(code);
+              return (
+                <div key={code}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'rgba(5,150,105,0.04)', borderRadius: 9, border: '1px solid rgba(5,150,105,0.12)', flexWrap: 'wrap' }}>
+                  {/* Subject code */}
+                  <span style={{ ...B, background: 'rgba(5,150,105,0.1)', color: '#065f46', fontSize: 12, fontFamily: 'monospace', letterSpacing: '0.04em', flexShrink: 0 }}>
+                    {code}
+                  </span>
+                  {/* Subject name */}
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(15,23,42,0.78)', flex: 1, minWidth: 100 }}>
+                    {subj?.name ?? <span style={{ color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>Name not found</span>}
+                  </span>
+                  {/* Subject type */}
+                  {subj?.type && (
+                    <span style={{ ...B, ...subjectTypeColor(subj.type), fontSize: 11, flexShrink: 0 }}>
+                      {subj.type}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </SectionCard>
 
-      <SectionCard title="Workload Capacity">
-        {profile.roles.includes('TEACHER') && profile.maxWeeklyLectureLoad == null && (
+      {/* ── D. Workload ─────────────────────────────────────────────────────── */}
+      <SectionCard title="Workload">
+        {isTeacher && maxWeekly == null && (
           <div style={{ fontSize: 12, color: '#92400e', fontWeight: 600, marginBottom: 10, padding: '6px 10px', background: 'rgba(234,179,8,0.08)', borderRadius: 7, border: '1px solid rgba(234,179,8,0.18)' }}>
             ⚠ Max weekly lecture load is not set. A school default is required when this is absent — without either, this teacher is not timetable eligible.
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-          {[
-            { label: 'Max Weekly Periods', value: profile.maxWeeklyLectureLoad != null ? String(profile.maxWeeklyLectureLoad) : 'Not set (school default applies)' },
-            { label: 'Max Daily Periods',  value: profile.maxDailyLectureLoad != null ? String(profile.maxDailyLectureLoad) : 'No daily cap' },
-            { label: 'Assigned (Academic Structure)', value: totalAssigned > 0 ? `${totalAssigned} p/wk` : 'None' },
-          ].map(({ label, value }) => (
-            <div key={label} style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.025)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.4)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 16, fontWeight: 900, color: 'rgba(15,23,42,0.8)' }}>{value}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: 10 }}>
+          {/* Max weekly */}
+          <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.025)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.4)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Max Weekly Periods</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: 'rgba(15,23,42,0.8)' }}>
+              {maxWeekly != null ? maxWeekly : <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(15,23,42,0.4)' }}>Not set</span>}
             </div>
-          ))}
+            {maxWeekly == null && (
+              <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.35)', marginTop: 3 }}>School default applies</div>
+            )}
+          </div>
+          {/* Max daily */}
+          <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.025)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.4)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Max Daily Periods</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: 'rgba(15,23,42,0.8)' }}>
+              {profile.maxDailyLectureLoad != null ? profile.maxDailyLectureLoad : <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(15,23,42,0.4)' }}>No cap</span>}
+            </div>
+          </div>
+          {/* Assigned weekly load */}
+          <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.025)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.4)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Assigned (This Week)</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: totalAssigned > 0 ? 'rgba(15,23,42,0.8)' : 'rgba(15,23,42,0.35)' }}>
+              {totalAssigned > 0 ? `${totalAssigned} p/wk` : 'None'}
+            </div>
+          </div>
+          {/* Remaining capacity */}
+          <div style={{
+            padding: '10px 14px', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)',
+            background: remainingCapacity != null
+              ? remainingCapacity < 0 ? 'rgba(220,38,38,0.06)' : remainingCapacity === 0 ? 'rgba(234,179,8,0.06)' : 'rgba(22,163,74,0.06)'
+              : 'rgba(15,23,42,0.025)',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.4)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Remaining Capacity</div>
+            <div style={{
+              fontSize: 16, fontWeight: 900,
+              color: remainingCapacity != null
+                ? remainingCapacity < 0
+                  ? '#b91c1c' : remainingCapacity === 0 ? '#92400e' : '#166534'
+                : 'rgba(15,23,42,0.35)',
+            }}>
+              {remainingCapacity != null
+                ? remainingCapacity < 0
+                  ? `${remainingCapacity} (over)`
+                  : `${remainingCapacity} p/wk free`
+                : '—'}
+            </div>
+          </div>
         </div>
-        {profile.maxWeeklyLectureLoad != null && totalAssigned > profile.maxWeeklyLectureLoad && (
+        {maxWeekly != null && totalAssigned > maxWeekly && (
           <div style={{ marginTop: 10, fontSize: 12, color: '#b91c1c', fontWeight: 700, padding: '6px 10px', background: 'rgba(220,38,38,0.08)', borderRadius: 7 }}>
-            ⚠ Over weekly capacity: {totalAssigned} assigned vs. {profile.maxWeeklyLectureLoad} max.
+            ⚠ Over weekly capacity: {totalAssigned} assigned vs. {maxWeekly} max.
           </div>
         )}
       </SectionCard>
 
-      <SectionCard title="Assignment Flags">
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ ...B, ...(profile.canBeClassTeacher ? { background: 'rgba(37,99,235,0.1)', color: '#1e40af' } : { background: 'rgba(15,23,42,0.06)', color: '#94a3b8' }) }}>
-            {profile.canBeClassTeacher ? '✓ Class Teacher Eligible' : '✗ Not Class Teacher Eligible'}
-          </span>
-          <span style={{ ...B, ...(profile.canTakeSubstitution ? { background: 'rgba(8,145,178,0.1)', color: '#0e7490' } : { background: 'rgba(15,23,42,0.06)', color: '#94a3b8' }) }}>
-            {profile.canTakeSubstitution ? '✓ Substitution Eligible' : '✗ No Substitutions'}
-          </span>
+      {/* ── E. Teacher Capabilities ─────────────────────────────────────────── */}
+      <SectionCard title="Teacher Capabilities">
+        {/* canBeClassTeacher + canTakeSubstitution */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
+            borderRadius: 9, border: `1px solid ${profile.canBeClassTeacher ? 'rgba(37,99,235,0.2)' : 'rgba(15,23,42,0.08)'}`,
+            background: profile.canBeClassTeacher ? 'rgba(37,99,235,0.05)' : 'rgba(15,23,42,0.025)',
+            flex: '1 1 180px',
+          }}>
+            <span style={{ fontSize: 18 }}>{profile.canBeClassTeacher ? '✅' : '⬜'}</span>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: profile.canBeClassTeacher ? '#1e40af' : 'rgba(15,23,42,0.45)' }}>
+                {profile.canBeClassTeacher ? 'Class Teacher Eligible' : 'Not a Class Teacher'}
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', marginTop: 2 }}>canBeClassTeacher</div>
+            </div>
+          </div>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px',
+            borderRadius: 9, border: `1px solid ${profile.canTakeSubstitution ? 'rgba(8,145,178,0.2)' : 'rgba(15,23,42,0.08)'}`,
+            background: profile.canTakeSubstitution ? 'rgba(8,145,178,0.05)' : 'rgba(15,23,42,0.025)',
+            flex: '1 1 180px',
+          }}>
+            <span style={{ fontSize: 18 }}>{profile.canTakeSubstitution ? '✅' : '⬜'}</span>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: profile.canTakeSubstitution ? '#0e7490' : 'rgba(15,23,42,0.45)' }}>
+                {profile.canTakeSubstitution ? 'Substitution Available' : 'No Substitutions'}
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', marginTop: 2 }}>canTakeSubstitution</div>
+            </div>
+          </div>
         </div>
+
+        {/* Preferred class groups */}
+        <div style={{ marginBottom: (profile.restrictedClassGroupIds ?? []).length > 0 ? 12 : 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#0e7490', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+            Preferred Class Groups
+          </div>
+          {(profile.preferredClassGroupIds ?? []).length === 0 ? (
+            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.35)', fontStyle: 'italic' }}>None specified — scheduler treats all classes equally.</div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {(profile.preferredClassGroupIds ?? []).map(id => (
+                <span key={id} style={{ ...B, background: 'rgba(8,145,178,0.1)', color: '#0e7490', fontSize: 12 }}>⭐ {cgLabel(id)}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Restricted class groups */}
+        {(profile.restrictedClassGroupIds ?? []).length > 0 && (
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+              Restricted Class Groups (Hard Block)
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {(profile.restrictedClassGroupIds ?? []).map(id => (
+                <span key={id} style={{ ...B, background: 'rgba(220,38,38,0.1)', color: '#991b1b', fontSize: 12 }}>🚫 {cgLabel(id)}</span>
+              ))}
+            </div>
+          </div>
+        )}
       </SectionCard>
 
       {/* Assigned sections from academic structure */}
@@ -541,71 +923,6 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
                 </div>
               </div>
             ))}
-          </div>
-        )}
-      </SectionCard>
-
-      {/* Preferred / Restricted */}
-      {((profile.preferredClassGroupIds ?? []).length > 0 || (profile.restrictedClassGroupIds ?? []).length > 0) && (
-        <SectionCard title="Class Preferences">
-          {(profile.preferredClassGroupIds ?? []).length > 0 && (
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#0e7490', marginBottom: 5 }}>Preferred</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {(profile.preferredClassGroupIds ?? []).map(id => (
-                  <span key={id} style={{ ...B, background: 'rgba(8,145,178,0.1)', color: '#0e7490' }}>{cgLabel(id)}</span>
-                ))}
-              </div>
-            </div>
-          )}
-          {(profile.restrictedClassGroupIds ?? []).length > 0 && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#991b1b', marginBottom: 5 }}>Restricted (hard block)</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {(profile.restrictedClassGroupIds ?? []).map(id => (
-                  <span key={id} style={{ ...B, background: 'rgba(220,38,38,0.1)', color: '#991b1b' }}>🚫 {cgLabel(id)}</span>
-                ))}
-              </div>
-            </div>
-          )}
-        </SectionCard>
-      )}
-
-      {/* Unavailable periods */}
-      <SectionCard title="Unavailable Periods">
-        {(profile.unavailablePeriods ?? []).length === 0 ? (
-          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.4)' }}>No unavailable periods configured. Scheduler will treat all periods as available.</div>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {(profile.unavailablePeriods ?? []).map((p, i) => (
-              <span key={i} style={{ ...B, background: 'rgba(234,179,8,0.1)', color: '#92400e', fontSize: 12 }}>
-                {p.dayOfWeek} · Period {p.periodNumber}
-              </span>
-            ))}
-          </div>
-        )}
-      </SectionCard>
-
-      {/* Timetable eligibility reasons */}
-      <SectionCard title="Timetable Eligibility">
-        {profile.timetableEligible ? (
-          <div>
-            <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534', marginBottom: 8, display: 'inline-block' }}>✓ Eligible</span>
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.5)', marginTop: 6 }}>
-              This teacher has an active TEACHER role, at least one teachable subject, and a configured load capacity.
-            </div>
-          </div>
-        ) : (
-          <div>
-            <span style={{ ...B, background: 'rgba(220,38,38,0.09)', color: '#b91c1c', marginBottom: 8, display: 'inline-block' }}>✗ Not Eligible</span>
-            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-              {((profile.timetableEligibilityReasons ?? []).length > 0)
-                ? (profile.timetableEligibilityReasons ?? []).map((r, i) => (
-                    <li key={i} style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600, marginBottom: 3 }}>{r}</li>
-                  ))
-                : <li style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600 }}>Eligibility check pending — save profile to refresh.</li>
-              }
-            </ul>
           </div>
         )}
       </SectionCard>
@@ -666,7 +983,7 @@ function docDisplayLabel(code: string): string {
 }
 
 function DocStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; bg: string; color: string }> = {
+  const map: Record<string, { label: string; bg: string; color: string; icon: string }> = {
     VERIFIED:          { label: '✓ Verified',        bg: 'rgba(22,163,74,0.1)',   color: '#166534' },
     COLLECTED_PHYSICAL:{ label: '📥 Collected',       bg: 'rgba(37,99,235,0.1)',   color: '#1e40af' },
     UPLOADED:          { label: '📎 Uploaded',         bg: 'rgba(37,99,235,0.08)', color: '#1e40af' },
@@ -934,11 +1251,12 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {pa && (
                 <button type="button" className={pa.isPrimary ? 'btn' : 'btn secondary'} disabled={busy || uploading} onClick={pa.onClick}
-                  style={{ fontSize: 12, padding: '5px 14px' }}>{pa.label}</button>
+                  style={{ fontSize: 12, padding: '5px 14px', whiteSpace: 'nowrap' }}>{pa.label}</button>
               )}
               {showUpload && (
                 <button type="button" className="btn secondary" disabled={uploading} onClick={() => fileInputRef.current?.click()}
-                  style={{ fontSize: 12, padding: '5px 12px' }}>
+                  title={isUploaded ? 'Replace uploaded file' : 'Upload document (PDF, JPG, PNG — max 10 MB)'}
+                  style={{ fontSize: 12, padding: '5px 12px', whiteSpace: 'nowrap' }}>
                   {uploading ? 'Uploading…' : isUploaded ? '↑ Re-upload' : '↑ Upload'}
                 </button>
               )}
@@ -1348,6 +1666,8 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
   const hasTeacherRole = profile.roles.includes('TEACHER') || profile.roles.includes('CLASS_TEACHER');
   const teacherNoLogin = hasTeacherRole && !hasLogin;
   const teacherDisabled = hasTeacherRole && isDisabled;
+  const hasRoles = profile.roles.length > 0;
+  const noRolesBlocked = !hasLogin && !hasRoles;
 
   function refresh() { qc.invalidateQueries({ queryKey: ['staff-profile', staffId] }); onRefresh(); }
 
@@ -1363,6 +1683,10 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
   }
 
   async function doCreateLogin() {
+    if (profile.roles.length === 0) {
+      toast.error('Role required', 'Assign a staff role before creating a login. Go to Edit Profile → Roles & Access.');
+      return;
+    }
     if (!profile.email) { toast.error('Email required', 'Add an email address in the Employment tab first.'); return; }
     setBusy(true); setTempPwd(null);
     try {
@@ -1377,8 +1701,24 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
   return (
     <div style={{ display: 'grid', gap: 14 }}>
 
+      {/* No-roles blocker — must be top-most warning */}
+      {noRolesBlocked && (
+        <div style={{ padding: '14px 16px', background: 'rgba(220,38,38,0.06)', border: '1.5px solid rgba(220,38,38,0.2)', borderRadius: 10, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>🚫</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: '#b91c1c', marginBottom: 4 }}>
+              Assign a staff role before creating a login.
+            </div>
+            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', fontWeight: 600 }}>
+              Portal access requires at least one role from the staff profile (e.g. TEACHER, PRINCIPAL).
+              Go to <strong>Edit Profile → Roles &amp; Access</strong> to assign a role first.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Integrity warnings */}
-      {teacherNoLogin && (
+      {teacherNoLogin && hasRoles && (
         <div style={{ padding: '10px 14px', background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.18)', borderRadius: 9, fontSize: 12, color: '#b91c1c', fontWeight: 700 }}>
           ⚠ This staff member has the TEACHER role but no portal login — they cannot access the teacher dashboard until a login is created.
         </div>
@@ -1402,19 +1742,17 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
             <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)' }}>{profile.email}</span>
           )}
         </div>
+        {/* Lifecycle detail rows */}
+        <div style={{ display: 'grid', gap: 0 }}>
+          <InfoRow label="Login Status"    value={loginStatus.replace('_', ' ')} />
+          <InfoRow label="Username"        value={profile.username ? `@${profile.username}` : null} />
+          <InfoRow label="Linked User ID"  value={profile.userId ? `#${profile.userId}` : null} />
+          <InfoRow label="Last Invite"     value={profile.lastInviteSentAt ? fmtInstant(profile.lastInviteSentAt) : null} />
+          <InfoRow label="Roles (from profile)" value={profile.roles.length > 0 ? profile.roles.join(', ') : '—'} />
+        </div>
         {!profile.email && (
-          <div style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600 }}>
+          <div style={{ marginTop: 8, fontSize: 12, color: '#b91c1c', fontWeight: 600 }}>
             ⚠ No email set. Add one in the Employment tab before creating a login.
-          </div>
-        )}
-        {profile.lastInviteSentAt && (
-          <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-            📨 Invite last recorded: {new Date(profile.lastInviteSentAt).toLocaleString()}
-          </div>
-        )}
-        {profile.userId && (
-          <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.35)', marginTop: 4, fontWeight: 600 }}>
-            User ID #{profile.userId} · Roles: {profile.roles.join(', ') || '—'}
           </div>
         )}
       </SectionCard>
@@ -1430,11 +1768,16 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
           {!hasLogin && (
             <ActionRow
               title="Create Portal Login"
-              desc={profile.email
-                ? `Creates a login for ${profile.email} with the staff member's current roles.`
-                : 'Email address required — add one in the Employment tab.'}
+              desc={
+                !hasRoles
+                  ? '⚠ Assign a staff role before creating a login.'
+                  : profile.email
+                    ? `Creates a login for ${profile.email} with the staff member's current roles (${profile.roles.join(', ')}).`
+                    : 'Email address required — add one in the Employment tab.'
+              }
+              danger={!hasRoles}
             >
-              <Btn label="Create Login" busy={busy} disabled={!profile.email} onClick={doCreateLogin} variant="primary" />
+              <Btn label="Create Login" busy={busy} disabled={!profile.email || !hasRoles} onClick={doCreateLogin} variant="primary" />
             </ActionRow>
           )}
 
@@ -1487,10 +1830,11 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
             </ActionRow>
           )}
 
-          {/* Update roles (always visible when login exists) */}
+          {/* Update roles info — roles always come from StaffRoleMapping, never set here */}
           {hasLogin && (
-            <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.02)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)', fontSize: 12, color: 'rgba(15,23,42,0.45)', fontWeight: 600 }}>
-              💡 To change roles, use the Wizard — Edit Profile → Roles &amp; Access step.
+            <div style={{ padding: '12px 14px', background: 'rgba(37,99,235,0.03)', borderRadius: 9, border: '1px solid rgba(37,99,235,0.12)', fontSize: 12, color: 'rgba(15,23,42,0.5)', fontWeight: 600 }}>
+              💡 Portal roles are automatically derived from the staff member's <strong>StaffRoleMapping</strong> (assigned in Edit Profile → Roles &amp; Access).
+              Role changes must be made there — they are reflected here on next login.
             </div>
           )}
         </div>
@@ -1543,33 +1887,233 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
   );
 }
 
-// ─── Tab: Activity Log ────────────────────────────────────────────────────────
+// ─── Tab: Leave ───────────────────────────────────────────────────────────────
 
-function TabActivity({ profile }: { profile: StaffProfile }) {
+function TabLeave() {
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      <SectionCard title="Record Timeline">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+      {/* Disabled state banner */}
+      <div style={{
+        padding: '20px 22px',
+        background: 'rgba(15,23,42,0.02)',
+        border: '1.5px dashed rgba(15,23,42,0.12)',
+        borderRadius: 14,
+        display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap',
+      }}>
+        <div style={{ fontSize: 36, flexShrink: 0 }}>🏖</div>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontWeight: 900, fontSize: 15, color: 'rgba(15,23,42,0.6)', marginBottom: 6 }}>
+            Leave Management is not enabled yet for this school.
+          </div>
+          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.42)', lineHeight: 1.6, fontWeight: 500 }}>
+            Individual leave balances, leave requests, approval workflows, and timetable impact tracking
+            are not active. Contact your administrator to enable leave management.
+          </div>
+        </div>
+      </div>
+
+      {/* Forward-looking capability preview — clearly marked as coming soon */}
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', padding: '16px 18px' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>
+          When Leave Management is enabled, this tab will show:
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
           {[
-            { label: 'Last updated',   value: fmtInstant(profile.updatedAt), icon: '✏️' },
-            { label: 'Record created', value: fmtInstant(profile.createdAt), icon: '🎉' },
-          ].map(({ label, value, icon }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0', borderBottom: '1px solid rgba(15,23,42,0.05)' }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 14 }}>{icon}</div>
+            { icon: '📊', title: 'Leave Balance',     desc: 'Available, used, and pending leave for each leave type (e.g. Casual, Sick, Earned).' },
+            { icon: '📋', title: 'Leave History',      desc: 'All past leave records with dates, type, status, and approver.' },
+            { icon: '📅', title: 'Upcoming Leave',     desc: 'Approved future leave and pending requests awaiting approval.' },
+            { icon: '🗓', title: 'Timetable Impact',   desc: 'Which periods are affected by leave and whether a substitute has been assigned.' },
+          ].map(item => (
+            <div key={item.title} style={{ display: 'flex', gap: 12, padding: '10px 12px', borderRadius: 9, background: 'rgba(15,23,42,0.02)', border: '1px solid rgba(15,23,42,0.06)' }}>
+              <span style={{ fontSize: 18, opacity: 0.45, flexShrink: 0, marginTop: 1 }}>{item.icon}</span>
               <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(15,23,42,0.6)' }}>{label}</div>
-                <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.75)', fontWeight: 600 }}>{value}</div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: 'rgba(15,23,42,0.45)', marginBottom: 2 }}>{item.title}</div>
+                <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.38)', lineHeight: 1.5, fontWeight: 500 }}>{item.desc}</div>
               </div>
             </div>
           ))}
         </div>
-      </SectionCard>
+      </div>
 
-      <div style={{ padding: '12px 16px', background: 'rgba(15,23,42,0.02)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.07)' }}>
-        <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-          📋 Detailed staff activity log — status transitions, role updates, login events, and document actions — is not enabled for this school.
+    </div>
+  );
+}
+
+// ─── Tab: Payroll ─────────────────────────────────────────────────────────────
+
+function TabPayroll({ profile }: { profile: StaffProfile }) {
+  const hasAnyData =
+    profile.salaryType ||
+    profile.bankName ||
+    profile.bankAccountHolderName ||
+    profile.bankAccountNumberMasked ||
+    profile.ifsc ||
+    profile.panNumberMasked;
+
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+
+      {/* Payroll-prep status banner (always shown) */}
+      <div style={{
+        padding: '12px 16px',
+        background: 'rgba(234,179,8,0.07)',
+        border: '1px solid rgba(234,179,8,0.22)',
+        borderRadius: 10,
+        display: 'flex', gap: 10, alignItems: 'flex-start',
+      }}>
+        <span style={{ fontSize: 18, flexShrink: 0 }}>ℹ️</span>
+        <div style={{ fontSize: 13, color: '#92400e', fontWeight: 700 }}>
+          Payroll details are stored for staff records. Salary processing is not enabled for this school.
         </div>
       </div>
+
+      {/* Payroll enabled status */}
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', padding: '16px 18px' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.38)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 14 }}>
+          Payroll Configuration
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'rgba(15,23,42,0.5)' }}>Payroll Enabled</span>
+          {profile.payrollEnabled ? (
+            <span style={{ fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 20, background: 'rgba(22,163,74,0.1)', color: '#166534' }}>✓ Yes</span>
+          ) : (
+            <span style={{ fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 20, background: 'rgba(15,23,42,0.07)', color: '#475569' }}>Not Enabled</span>
+          )}
+        </div>
+        <InfoRow label="Salary Type" value={profile.salaryType ?? null} />
+      </div>
+
+      {/* Bank & Tax details */}
+      {profile.payrollEnabled || hasAnyData ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+          <SectionCard title="Bank Details">
+            <InfoRow label="Account Holder" value={profile.bankAccountHolderName} />
+            <InfoRow label="Bank Name"       value={profile.bankName} />
+            <InfoRow label="Account No."     value={profile.bankAccountNumberMasked} mono />
+            <InfoRow label="IFSC"            value={profile.ifsc} mono />
+          </SectionCard>
+          <SectionCard title="Tax Details">
+            <InfoRow label="PAN (masked)" value={profile.panNumberMasked} mono />
+          </SectionCard>
+        </div>
+      ) : (
+        <div style={{ padding: '16px 18px', background: 'rgba(15,23,42,0.02)', borderRadius: 12, border: '1px dashed rgba(15,23,42,0.1)', textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.38)', fontWeight: 600 }}>
+            No payroll details on record for this staff member.
+          </div>
+          <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.3)', marginTop: 4 }}>
+            Add bank and tax details via <strong>Edit Profile → Payroll Setup</strong>.
+          </div>
+        </div>
+      )}
+
+      {/* Explicit "not coming" note — no fake payslips */}
+      <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.02)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)', fontSize: 12, color: 'rgba(15,23,42,0.38)', fontWeight: 600 }}>
+        📋 Payslips, deductions, tax forms, and payroll runs are not available — salary processing is not active for this school.
+      </div>
+
+    </div>
+  );
+}
+
+// ─── Tab: Activity Log ────────────────────────────────────────────────────────
+
+/** Single entry in the system timeline (createdAt / updatedAt only — no full audit yet). */
+function TimelineEntry({ icon, iconBg, label, value, sub }: {
+  icon: string; iconBg: string; label: string; value: string; sub?: string;
+}) {
+  return (
+    <div style={{ display: 'flex', gap: 14, padding: '12px 0', borderBottom: '1px solid rgba(15,23,42,0.05)' }}>
+      <div style={{ width: 34, height: 34, borderRadius: '50%', background: iconBg, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{icon}</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(15,23,42,0.78)' }}>{label}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(15,23,42,0.55)', marginTop: 1 }}>{value}</div>
+        {sub && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.35)', marginTop: 2 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function TabActivity({ profile }: { profile: StaffProfile }) {
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+
+      {/* Audit disabled banner */}
+      <div style={{
+        padding: '14px 18px',
+        background: 'rgba(15,23,42,0.02)',
+        border: '1.5px dashed rgba(15,23,42,0.12)',
+        borderRadius: 12,
+        display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap',
+      }}>
+        <div style={{ fontSize: 30, flexShrink: 0 }}>📋</div>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontWeight: 900, fontSize: 14, color: 'rgba(15,23,42,0.55)', marginBottom: 4 }}>
+            Activity log will appear after audit tracking is enabled.
+          </div>
+          <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', lineHeight: 1.6, fontWeight: 500 }}>
+            Detailed event tracking — status transitions, role changes, login events, document actions —
+            is not active for this school. The system timestamps below are always available.
+          </div>
+        </div>
+      </div>
+
+      {/* System timestamps — always available from entity */}
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', padding: '16px 18px' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.38)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+          System Record
+        </div>
+        <TimelineEntry
+          icon="✏️" iconBg="rgba(37,99,235,0.08)"
+          label="Last Updated"
+          value={fmtInstant(profile.updatedAt)}
+          sub="Most recent change to any profile field"
+        />
+        <TimelineEntry
+          icon="🎉" iconBg="rgba(22,163,74,0.08)"
+          label="Record Created"
+          value={fmtInstant(profile.createdAt)}
+          sub="When this staff member was first added to the system"
+        />
+      </div>
+
+      {/* Forward-looking event types */}
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.08)', padding: '16px 18px' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>
+          When audit tracking is enabled, each log entry will show:
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8, marginBottom: 16 }}>
+          {[
+            { icon: '🕐', label: 'Timestamp' },
+            { icon: '👤', label: 'Actor (who made the change)' },
+            { icon: '🔧', label: 'Action' },
+            { icon: '⬅️', label: 'Old value' },
+            { icon: '➡️', label: 'New value' },
+            { icon: '💬', label: 'Reason / note' },
+          ].map(f => (
+            <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600, padding: '4px 0' }}>
+              <span style={{ opacity: 0.5 }}>{f.icon}</span> {f.label}
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+          Events tracked:
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {[
+            'Profile Created', 'Employment Updated', 'Role Changed',
+            'Subject Added', 'Document Verified', 'Login Created',
+            'Status Changed', 'Payroll Updated',
+          ].map(ev => (
+            <span key={ev} style={{
+              fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+              background: 'rgba(15,23,42,0.05)', color: 'rgba(15,23,42,0.38)',
+            }}>{ev}</span>
+          ))}
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -1704,68 +2248,91 @@ export function StaffProfilePage() {
         <span style={{ color: 'rgba(15,23,42,0.7)' }}>{profile.fullName}</span>
       </div>
 
-      {/* ── Profile header card ──────────────────────────────────────────────── */}
-      <div style={{ background: '#fff', borderRadius: 16, border: '1px solid rgba(15,23,42,0.1)', padding: '24px 28px', marginBottom: 20, boxShadow: '0 2px 12px rgba(15,23,42,0.06)' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }}>
+      {/* ── Profile header card — compact ────────────────────────────────────── */}
+      <div style={{ background: '#fff', borderRadius: 14, border: '1px solid rgba(15,23,42,0.1)', padding: '16px 20px', marginBottom: 14, boxShadow: '0 1px 8px rgba(15,23,42,0.05)' }}>
 
-          {/* Avatar */}
-          <div style={{ width: 72, height: 72, borderRadius: '50%', background: bg, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 900, fontSize: 26, userSelect: 'none' }}>
+        {/* Row 1: avatar, name, status, eligibility + actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+
+          {/* Avatar — compact 52px */}
+          <div style={{ width: 52, height: 52, borderRadius: '50%', background: bg, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 900, fontSize: 19, userSelect: 'none' }}>
             {initials(profile.fullName)}
           </div>
 
-          {/* Main info */}
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
-              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 950, letterSpacing: '-0.025em', color: 'rgba(15,23,42,0.92)' }}>
+          {/* Name + primary badges */}
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+              <h1 style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: '-0.02em', color: 'rgba(15,23,42,0.92)' }}>
                 {profile.fullName}
               </h1>
-              <span style={{ ...B, ...sc, fontSize: 12, marginTop: 4 }}>{profile.status ?? '—'}</span>
-              {profile.timetableEligible ? (
-                <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534', fontSize: 11, marginTop: 4 }}>📚 Timetable Eligible</span>
+              {/* Status badge — red with ⚠ when inconsistent */}
+              {profile.activationInconsistent ? (
+                <span style={{ ...B, background: 'rgba(220,38,38,0.12)', color: '#b91c1c', fontSize: 11 }}>
+                  {profile.status ?? '—'} ⚠
+                </span>
               ) : (
-                <span style={{ ...B, background: 'rgba(15,23,42,0.07)', color: '#64748b', fontSize: 11, marginTop: 4 }}>📚 Not Timetable Eligible</span>
+                <span style={{ ...B, ...sc, fontSize: 11 }}>{profile.status ?? '—'}</span>
+              )}
+              {/* Timetable eligibility — include first reason if not eligible */}
+              {profile.timetableEligible ? (
+                <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534', fontSize: 10 }}>
+                  📚 Eligible
+                </span>
+              ) : (
+                <span
+                  style={{ ...B, background: 'rgba(15,23,42,0.07)', color: '#64748b', fontSize: 10 }}
+                  title={(profile.timetableEligibilityReasons ?? []).join(' · ')}
+                >
+                  📚 Not Eligible
+                  {(profile.timetableEligibilityReasons?.length ?? 0) > 0 && (
+                    <span style={{ marginLeft: 4, opacity: 0.7 }}>
+                      — {profile.timetableEligibilityReasons![0]}
+                    </span>
+                  )}
+                </span>
               )}
             </div>
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+            {/* Row 2: emp no · designation · department */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 5 }}>
               {profile.employeeNo && (
-                <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.45)', fontFamily: 'monospace', fontWeight: 700, background: 'rgba(15,23,42,0.05)', padding: '1px 8px', borderRadius: 6 }}>
+                <span style={{ fontSize: 11, color: 'rgba(15,23,42,0.45)', fontFamily: 'monospace', fontWeight: 700, background: 'rgba(15,23,42,0.05)', padding: '1px 7px', borderRadius: 5 }}>
                   {profile.employeeNo}
                 </span>
               )}
               {profile.designation && (
-                <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', fontWeight: 600 }}>{profile.designation}</span>
+                <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.6)', fontWeight: 600 }}>{profile.designation}</span>
               )}
               {profile.department && (
-                <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 500 }}>· {profile.department}</span>
+                <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.38)', fontWeight: 500 }}>· {profile.department}</span>
               )}
             </div>
 
-            {/* Type + roles */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
-              <span style={{ ...B, ...tc }}>{profile.staffType ?? 'STAFF'}</span>
+            {/* Row 3: staff type + roles */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 5 }}>
+              <span style={{ ...B, ...tc, fontSize: 10 }}>{profile.staffType ?? 'STAFF'}</span>
               {profile.roles.map(r => {
                 const rc = roleColor(r);
-                return <span key={r} style={{ ...B, ...rc }}>{r}</span>;
+                return <span key={r} style={{ ...B, ...rc, fontSize: 10 }}>{r}</span>;
               })}
             </div>
 
-            {/* Contact */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, color: 'rgba(15,23,42,0.5)', fontWeight: 600 }}>
+            {/* Row 4: contact */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 11, color: 'rgba(15,23,42,0.5)', fontWeight: 600 }}>
               {profile.phone && <span>📞 {profile.phone}</span>}
               {profile.email && <span>✉ {profile.email}</span>}
             </div>
           </div>
 
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', flexShrink: 0 }}>
+          {/* Actions — compact */}
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
             <button type="button" onClick={() => navigate(`/app/teachers?edit=${id}`)}
-              style={{ padding: '9px 18px', borderRadius: 9, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              style={{ padding: '7px 15px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
               ✏ Edit Profile
             </button>
             <button type="button" onClick={() => setTab('access')}
-              style={{ padding: '9px 18px', borderRadius: 9, border: '1.5px solid rgba(15,23,42,0.18)', background: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-              🔐 Manage Access
+              style={{ padding: '7px 14px', borderRadius: 8, border: '1.5px solid rgba(15,23,42,0.18)', background: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              🔐 Access
             </button>
             <MoreMenu
               staffId={id}
@@ -1780,6 +2347,48 @@ export function StaffProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* ── Activation inconsistency banner ──────────────────────────────────── */}
+      {profile.activationInconsistent && (
+        <div style={{
+          padding: '14px 18px', marginBottom: 16,
+          background: 'rgba(220,38,38,0.06)',
+          border: '1.5px solid rgba(220,38,38,0.25)',
+          borderRadius: 12,
+          display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap',
+        }}>
+          <div style={{ fontSize: 24, flexShrink: 0 }}>⚠️</div>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontWeight: 900, fontSize: 14, color: '#b91c1c', marginBottom: 6 }}>
+              Status is inconsistent — required activation fields are missing
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.65)', marginBottom: 8 }}>
+              This staff member is marked <strong>ACTIVE</strong> but does not meet the activation
+              requirements. Complete the missing fields or change the status to DRAFT / INACTIVE.
+            </div>
+            {(profile.missingRequiredItems ?? []).filter(m =>
+              m.includes('Joining date') || m.includes('role') || m.includes('Designation') ||
+              m.includes('Staff type') || m.includes('Full name') || m.includes('Phone')
+            ).map((m, i) => (
+              <div key={i} style={{ fontSize: 12, color: '#b91c1c', fontWeight: 600, marginBottom: 3 }}>
+                • {m}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button type="button" onClick={() => navigate(`/app/teachers?edit=${id}`)}
+              style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#dc2626', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              ✏ Fix Required Fields
+            </button>
+            <button type="button"
+              disabled={statusMut.isPending}
+              onClick={() => statusMut.mutate('INACTIVE')}
+              style={{ padding: '8px 14px', borderRadius: 8, border: '1.5px solid rgba(220,38,38,0.35)', background: '#fff', color: '#b91c1c', fontWeight: 700, fontSize: 12, cursor: statusMut.isPending ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+              {statusMut.isPending ? '…' : 'Deactivate'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Tab nav ──────────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 0, overflowX: 'auto', background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.09)', marginBottom: 18, padding: '4px 6px' }}>
@@ -1812,36 +2421,8 @@ export function StaffProfilePage() {
         {activeTab === 'timetable'  && <TabTimetable  profile={profile} />}
         {activeTab === 'documents'  && <TabDocuments staffId={id} />}
         {activeTab === 'access'     && <TabAccess profile={profile} staffId={id} onRefresh={refreshProfile} />}
-        {activeTab === 'leave'      && (
-          <ModuleDisabledTab
-            icon="🏖"
-            name="Leave Management"
-            reason="Leave tracking is not enabled for this school. Individual leave balances, leave requests, and approval workflows are not active."
-          />
-        )}
-        {activeTab === 'payroll'    && (
-          profile.payrollEnabled ? (
-            <div style={{ display: 'grid', gap: 14 }}>
-              <SectionCard title="Payroll Setup">
-                <InfoRow label="Salary Type"       value={profile.salaryType} />
-                <InfoRow label="Bank Name"          value={profile.bankName} />
-                <InfoRow label="Account Holder"     value={profile.bankAccountHolderName} />
-                <InfoRow label="Account No."        value={profile.bankAccountNumberMasked} mono />
-                <InfoRow label="IFSC"               value={profile.ifsc} mono />
-                <InfoRow label="PAN"                value={profile.panNumberMasked} mono />
-              </SectionCard>
-              <div style={{ padding: '12px 16px', background: 'rgba(234,179,8,0.08)', borderRadius: 10, border: '1px solid rgba(234,179,8,0.2)', fontSize: 12, color: '#92400e', fontWeight: 600 }}>
-                ℹ️ Payroll setup is captured. Salary processing is not enabled for this school.
-              </div>
-            </div>
-          ) : (
-            <ModuleDisabledTab
-              icon="💰"
-              name="Payroll"
-              reason="Payroll details have not been set up for this staff member. Salary processing is not enabled for this school."
-            />
-          )
-        )}
+        {activeTab === 'leave'      && <TabLeave />}
+        {activeTab === 'payroll'    && <TabPayroll profile={profile} />}
         {activeTab === 'activity'   && <TabActivity   profile={profile} />}
       </div>
 
@@ -1858,9 +2439,5 @@ export function StaffProfilePage() {
     </div>
   );
 }
-
-
-
-
 
 

@@ -64,19 +64,45 @@ public class StaffProfileDTO extends StaffSummaryDTO {
     // ── Profile completeness summary ───────────────────────────────────────────
 
     /**
-     * Quick summary of how complete the staff profile is.
-     * Driven by the count of optional sections that have been filled in.
+     * Weighted profile completeness breakdown.
+     * {@code percentComplete} is the weighted sum across all categories.
+     * {@code categories} contains one entry per completeness dimension.
+     * Legacy flat fields kept for backward compatibility.
      */
     private ProfileCompleteness profileCompleteness;
 
-    /** Snapshot of profile-completeness at time of DTO construction. */
+    /** Weighted profile-completeness snapshot. */
     public record ProfileCompleteness(
-            int filledSections,
-            int totalSections,
+            /** Overall weighted percentage (0–100). */
             int percentComplete,
-            /** Sections that still have no data entered. */
+            /** Per-category breakdown. */
+            List<CategoryScore> categories,
+            /** Legacy: number of categories whose score ≥ 50. */
+            int filledSections,
+            /** Legacy: total category count. */
+            int totalSections,
+            /** Legacy: names of categories with score < 50. */
             List<String> emptySections
-    ) {}
+    ) {
+        /**
+         * Score for a single completeness dimension.
+         *
+         * @param id      machine-readable identifier (e.g. "identity")
+         * @param name    human-readable label
+         * @param icon    emoji for the UI
+         * @param weight  weight out of 100 in the overall score
+         * @param score   category score 0–100
+         * @param missing human-readable list of missing / incomplete items
+         */
+        public record CategoryScore(
+                String id,
+                String name,
+                String icon,
+                int weight,
+                int score,
+                List<String> missing
+        ) {}
+    }
 
     // ── Masking helpers ────────────────────────────────────────────────────────
 
