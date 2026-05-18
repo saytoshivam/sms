@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import type { StudentListRow } from './studentListTypes';
 import { classSectionLabel, studentFullName } from './studentListTypes';
 import { StudentAvatar } from './StudentAvatar';
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export function StudentListTable({ rows, selectedIds, onToggleRow, onSelectAll, onClearAll }: Props) {
+  const navigate = useNavigate();
   const allSelected = rows.length > 0 && rows.every((r) => selectedIds.has(r.id));
   const someSelected = !allSelected && rows.some((r) => selectedIds.has(r.id));
 
@@ -44,8 +46,13 @@ export function StudentListTable({ rows, selectedIds, onToggleRow, onSelectAll, 
           {rows.map((row) => {
             const sel = selectedIds.has(row.id);
             return (
-              <tr key={row.id} className={sel ? 'sw-row-selected' : undefined}>
-                <td className="sw-td-check">
+              <tr
+                key={row.id}
+                className={`${sel ? 'sw-row-selected' : ''} sw-row-clickable`}
+                style={{ cursor: 'pointer' }}
+                onClick={() => navigate(`/app/students/${row.id}`)}
+              >
+                <td className="sw-td-check" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
                     aria-label={`Select ${studentFullName(row)}`}
@@ -72,7 +79,7 @@ export function StudentListTable({ rows, selectedIds, onToggleRow, onSelectAll, 
                 </td>
                 <td><StudentStatusBadge status={row.status ?? undefined} /></td>
                 <td><StudentDocumentsCell row={row} /></td>
-                <td className="sw-td-actions">
+                <td className="sw-td-actions" onClick={(e) => e.stopPropagation()}>
                   <StudentRowActions studentId={row.id} />
                 </td>
               </tr>
