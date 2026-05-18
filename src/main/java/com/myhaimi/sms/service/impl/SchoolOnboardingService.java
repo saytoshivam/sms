@@ -852,7 +852,8 @@ public class SchoolOnboardingService {
         subjectAllocationRepo.clearStaffBySchool_Id(schoolId);
         classSubjectConfigRepo.clearStaffBySchool_Id(schoolId);
         subjectSectionOverrideRepo.clearStaffBySchool_Id(schoolId);
-        timetableEntryRepo.clearStaffBySchool_Id(schoolId);
+        // staff_id is NOT NULL on timetable_entries — delete the entries instead of nullifying
+        timetableEntryRepo.deleteBySchool_Id(schoolId);
 
         for (Staff st : allStaff) {
             staffTeachableSubjectRepository.deleteByStaff_Id(st.getId());
