@@ -1,51 +1,77 @@
 package com.myhaimi.sms.entity;
 
+import com.myhaimi.sms.entity.enums.PaymentMode;
+import com.myhaimi.sms.entity.enums.PaymentStatus;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 
-@Data
+/**
+ * Offline/manual fee payment collected by an accountant or admin against
+ * one or more {@link StudentFeeDemand} records.
+ *
+ * <p>Allocations are stored separately in {@link FeePaymentAllocation}.</p>
+ */
+@Getter
+@Setter
 @Entity
-@Table(name = "fee_payments")
+@Table(
+        name = "fee_payments",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"school_id", "receipt_no"})
+)
 public class FeePayment {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Integer id;
+    private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "invoice_id", nullable = false)
-    private FeeInvoice invoice;
+    @JoinColumn(name = "school_id", nullable = false)
+    private School school;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "student_id", nullable = false)
+    private Student student;
+
+    /** School-scoped unique receipt number, e.g. RCPT-2026-000001. */
+    @Column(name = "receipt_no", nullable = false, length = 64)
+    private String receiptNo;
 
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
 
-    @Column(nullable = false)
-    private LocalDateTime paidAt;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_mode", nullable = false, length = 32)
+    private PaymentMode paymentMode;
 
-    @Column(length = 32)
-    private String method; // CASH, UPI, CARD, BANK, CHEQUE
+    @Column(name = "payment_date", nullable = false)
+    private LocalDate paymentDate;
 
-    @Column(length = 128)
-    private String reference;
+    @Column(name = "reference_no", length = 128)
+    private String referenceNo;
 
-    /** Payment microservice order id (e.g. pay_abc). */
-    @Column(name = "gateway_order_id", length = 128)
-    private String gatewayOrderId;
+    @Column(length = 512)
+    private String notes;
 
-    /** PENDING | SUCCEEDED | FAILED — online gateway lifecycle. */
-    @Column(name = "gateway_status", length = 32)
-    private String gatewayStatus;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private PaymentStatus status = PaymentStatus.SUCCESS;
 
-    /** Client-supplied idempotency key for create-intent (optional). */
-    @Column(name = "idempotency_key", length = 128, unique = true)
-    private String idempotencyKey;
+    /** User ID of the staff member who collected the payment. */
+    @Column(name = "collected_by_user_id")
+    private Integer collectedByUserId;
 
     @CreationTimestamp
-    @Column(nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
-}
 
+    @UpdateTimestamp
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+}

@@ -49,4 +49,61 @@ public interface StudentAcademicEnrollmentRepo extends JpaRepository<StudentAcad
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM StudentAcademicEnrollment e WHERE e.student.id IN :ids")
     void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
+
+    // ── Demand-generation scope queries ───────────────────────────────────────
+
+    /** All ACTIVE enrollments for a school in a given academic year (SCHOOL scope). */
+    @Query("""
+            SELECT e FROM StudentAcademicEnrollment e
+            JOIN FETCH e.student s
+            WHERE s.school.id = :schoolId
+              AND e.academicYear.id = :academicYearId
+              AND e.status = com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus.ACTIVE
+            """)
+    List<StudentAcademicEnrollment> findActiveEnrollmentsBySchoolAndYear(
+            @Param("schoolId") Integer schoolId,
+            @Param("academicYearId") Integer academicYearId);
+
+    /** ACTIVE enrollments for a specific classGroup (SECTION scope). */
+    @Query("""
+            SELECT e FROM StudentAcademicEnrollment e
+            JOIN FETCH e.student s
+            WHERE s.school.id = :schoolId
+              AND e.academicYear.id = :academicYearId
+              AND e.classGroup.id = :classGroupId
+              AND e.status = com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus.ACTIVE
+            """)
+    List<StudentAcademicEnrollment> findActiveEnrollmentsBySchoolYearAndClassGroup(
+            @Param("schoolId") Integer schoolId,
+            @Param("academicYearId") Integer academicYearId,
+            @Param("classGroupId") Integer classGroupId);
+
+    /** ACTIVE enrollments for all classGroups sharing the same gradeLevel (CLASS scope). */
+    @Query("""
+            SELECT e FROM StudentAcademicEnrollment e
+            JOIN FETCH e.student s
+            JOIN e.classGroup cg
+            WHERE s.school.id = :schoolId
+              AND e.academicYear.id = :academicYearId
+              AND cg.gradeLevel = :gradeLevel
+              AND e.status = com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus.ACTIVE
+            """)
+    List<StudentAcademicEnrollment> findActiveEnrollmentsBySchoolYearAndGradeLevel(
+            @Param("schoolId") Integer schoolId,
+            @Param("academicYearId") Integer academicYearId,
+            @Param("gradeLevel") Integer gradeLevel);
+
+    /** Single ACTIVE enrollment for a specific student in a given year (STUDENT scope). */
+    @Query("""
+            SELECT e FROM StudentAcademicEnrollment e
+            JOIN FETCH e.student s
+            WHERE s.school.id = :schoolId
+              AND s.id = :studentId
+              AND e.academicYear.id = :academicYearId
+              AND e.status = com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus.ACTIVE
+            """)
+    Optional<StudentAcademicEnrollment> findActiveEnrollmentForStudent(
+            @Param("schoolId") Integer schoolId,
+            @Param("studentId") Integer studentId,
+            @Param("academicYearId") Integer academicYearId);
 }

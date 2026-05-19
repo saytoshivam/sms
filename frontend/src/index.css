@@ -3869,3 +3869,119 @@ textarea:disabled {
   overflow: visible;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   FEE MODULE — Responsive table-to-card layout
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/*
+ * .fee-table-wrap — wraps a <table> for horizontal scroll on mid-width screens.
+ * The <table> stays visible. On mobile (<= 600px) the wrapper hides the table
+ * and shows sibling .fee-card-list instead; on wider screens the card list hides.
+ */
+.fee-table-wrap {
+  overflow-x: auto;
+}
+
+.fee-card-list {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .fee-table-wrap table {
+    display: none;
+  }
+
+  .fee-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+/* Fee card item — a single card representing one table row on mobile */
+.fee-card-item {
+  background: color-mix(in srgb, #ffffff 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 10%, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 1px 4px rgba(15,23,42,0.07);
+}
+
+.fee-card-item__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.fee-card-item__label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.fee-card-item__value {
+  text-align: right;
+  font-size: 13px;
+}
+
+.fee-card-item__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+  margin-top: 2px;
+}
+
+/* Empty state with CTA */
+.fee-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.fee-empty-state__icon {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.fee-empty-state__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.fee-empty-state__desc {
+  font-size: 13px;
+  color: #64748b;
+  max-width: 360px;
+  line-height: 1.6;
+}
+
+/* role badge shown on tabs for PRINCIPAL/VIEW-ONLY */
+.fee-role-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+

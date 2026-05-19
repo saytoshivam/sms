@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
 import type { StudentLifecycleStatus } from '../components/students/studentListTypes';
@@ -158,6 +158,19 @@ function fmtDate(d: string | null | undefined): string {
   } catch {
     return d;
   }
+}
+
+function fmtMoney(v: number | string | null | undefined): string {
+  if (v == null) return '—';
+  const n = typeof v === 'string' ? parseFloat(v) : v;
+  if (isNaN(n)) return '—';
+  return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function toNum(v: number | string | null | undefined): number {
+  if (v == null) return 0;
+  const n = typeof v === 'string' ? parseFloat(v) : v;
+  return isNaN(n) ? 0 : n;
 }
 
 function fmtFileSize(bytes: number | null | undefined): string {
@@ -1308,6 +1321,719 @@ function AccessTab({
   );
 }
 
+// ─── Fees tab ─────────────────────────────────────────────────────────────────
+
+type StudentFeeDemandStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'WAIVED' | 'CANCELLED';
+
+type StudentFeeDemand = {
+  id: number;
+  demandNo: string;
+  feeHeadName: string;
+  feeHeadCode: string;
+  installmentName: string;
+  dueDate: unknown;
+  payableAmount: number | string;
+  paidAmount: number | string;
+  balanceAmount: number | string;
+  status: StudentFeeDemandStatus;
+  feePlanName: string;
+  academicYearLabel: string;
+};
+
+type PaymentMode = 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE' | 'CARD' | 'DEMAND_DRAFT' | 'ADJUSTMENT';
+type SPPaymentStatus = 'SUCCESS' | 'PENDING' | 'FAILED' | 'CANCELLED';
+
+const SP_PAYMENT_MODES: PaymentMode[] = ['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE', 'CARD', 'DEMAND_DRAFT', 'ADJUSTMENT'];
+const SP_MODE_LABELS: Record<PaymentMode, string> = {
+  CASH: 'Cash', UPI: 'UPI', BANK_TRANSFER: 'Bank Transfer',
+  CHEQUE: 'Cheque', CARD: 'Card', DEMAND_DRAFT: 'Demand Draft', ADJUSTMENT: 'Adjustment',
+};
+const SP_REF_REQUIRED = new Set<PaymentMode>(['UPI', 'BANK_TRANSFER', 'CHEQUE', 'CARD']);
+
+type FeePaymentAllocation = {
+  id: number;
+  demandId: number;
+  demandNo: string;
+  allocatedAmount: number | string;
+  demandPayableAmount: number | string;
+  demandPaidAmount: number | string;
+  demandBalanceAmount: number | string;
+  demandStatus: StudentFeeDemandStatus;
+  createdAt: string;
+};
+
+type SPFeeReceipt = {
+  id: number;
+  receiptNo: string;
+  issuedAt: string;
+  pdfUrl?: string | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
+};
+
+type FeePayment = {
+  id: number;
+  schoolId: number;
+  studentId: number;
+  studentName: string;
+  receiptNo: string;
+  amount: number | string;
+  paymentMode: string;
+  paymentDate: string;
+  referenceNo?: string | null;
+  notes?: string | null;
+  status: SPPaymentStatus;
+  collectedByUserId?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  allocations?: FeePaymentAllocation[];
+  receipt?: SPFeeReceipt | null;
+};
+
+// ─── Fee Ledger types ─────────────────────────────────────────────────────────
+
+type LedgerEntryType =
+  | 'DEMAND'
+  | 'PAYMENT'
+  | 'PAYMENT_CANCELLED'
+  | 'CONCESSION'
+  | 'FINE'
+  | 'WAIVER'
+  | 'REFUND'
+  | 'ADJUSTMENT';
+
+type FeeLedgerEntry = {
+  date: string;
+  type: LedgerEntryType;
+  referenceNo?: string | null;
+  description?: string | null;
+  debit?: number | string | null;
+  credit?: number | string | null;
+  balanceAfter: number | string;
+  sourceType?: string | null;
+  sourceId?: number | null;
+};
+
+type FeeLedger = {
+  studentId: number;
+  studentName: string;
+  totalDebit: number | string;
+  totalCredit: number | string;
+  balance: number | string;
+  entries: FeeLedgerEntry[];
+};
+
+const LEDGER_TYPE_CONFIG: Record<LedgerEntryType, { label: string; bg: string; color: string; sign: 'debit' | 'credit' | 'neutral' }> = {
+  DEMAND:            { label: 'Demand',    bg: '#fef3c7', color: '#92400e', sign: 'debit'   },
+  PAYMENT:           { label: 'Payment',   bg: '#dcfce7', color: '#166534', sign: 'credit'  },
+  PAYMENT_CANCELLED: { label: 'Cancelled', bg: '#fee2e2', color: '#991b1b', sign: 'debit'   },
+  CONCESSION:        { label: 'Concession',bg: '#dbeafe', color: '#1e40af', sign: 'credit'  },
+  FINE:              { label: 'Fine',      bg: '#fce7f3', color: '#9d174d', sign: 'debit'   },
+  WAIVER:            { label: 'Waiver',    bg: '#e0f2fe', color: '#0369a1', sign: 'credit'  },
+  REFUND:            { label: 'Refund',    bg: '#f3e8ff', color: '#6b21a8', sign: 'debit'   },
+  ADJUSTMENT:        { label: 'Adjustment',bg: '#f1f5f9', color: '#475569', sign: 'neutral' },
+};
+
+const SP_STATUS_PILL: Record<SPPaymentStatus, { bg: string; color: string }> = {
+  SUCCESS:   { bg: '#dcfce7', color: '#166534' },
+  PENDING:   { bg: '#fef3c7', color: '#92400e' },
+  FAILED:    { bg: '#fee2e2', color: '#991b1b' },
+  CANCELLED: { bg: '#f1f5f9', color: '#94a3b8' },
+};
+
+const FEE_DEMAND_STATUS_PILL: Record<StudentFeeDemandStatus, { bg: string; color: string }> = {
+  UNPAID:    { bg: '#fef3c7', color: '#92400e' },
+  PARTIAL:   { bg: '#dbeafe', color: '#1e40af' },
+  PAID:      { bg: '#dcfce7', color: '#166534' },
+  WAIVED:    { bg: '#f0f9ff', color: '#0369a1' },
+  CANCELLED: { bg: '#f1f5f9', color: '#94a3b8' },
+};
+
+// ─── Inline Collect Payment Modal (for student profile) ───────────────────────
+
+function SPReceiptModal({ payment, onClose }: { payment: FeePayment; onClose: () => void }) {
+  const r = payment.receipt;
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+      onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 520, width: '100%', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 48px rgba(15,23,42,0.2)', maxHeight: '90vh', overflowY: 'auto' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ textAlign: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: 14 }}>
+          <div style={{ fontSize: 32, marginBottom: 4 }}>🧾</div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: '#166534' }}>Payment Successful</div>
+          {r && <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>Receipt: <strong style={{ fontFamily: 'monospace' }}>{r.receiptNo}</strong></div>}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: 13 }}>
+          {[
+            ['Amount', fmtMoney(payment.amount)],
+            ['Mode', SP_MODE_LABELS[payment.paymentMode as PaymentMode] ?? payment.paymentMode],
+            ['Date', payment.paymentDate],
+            ['Reference', payment.referenceNo ?? '—'],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</div>
+              <div style={{ fontWeight: 600, marginTop: 2 }}>{value}</div>
+            </div>
+          ))}
+        </div>
+        {payment.allocations && payment.allocations.length > 0 && (
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>Allocations</div>
+            {payment.allocations.map(a => (
+              <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid #f1f5f9' }}>
+                <span style={{ fontFamily: 'monospace', color: '#475569' }}>{a.demandNo}</span>
+                <span style={{ fontWeight: 700, color: '#166534' }}>{fmtMoney(a.allocatedAmount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
+          📄 Receipt PDF generation is not enabled yet.
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          <button type="button" disabled style={{ opacity: 0.5, cursor: 'not-allowed', padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13 }}>🖨 Print</button>
+          <button type="button" disabled style={{ opacity: 0.5, cursor: 'not-allowed', padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13 }}>⬇ Download</button>
+          <button type="button" onClick={onClose} style={{ padding: '8px 20px', borderRadius: 8, background: 'var(--color-primary, #4f46e5)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SPCollectModal({ studentId, studentName, demands, onClose, onSuccess }: {
+  studentId: number; studentName: string; demands: StudentFeeDemand[];
+  onClose: () => void; onSuccess: (p: FeePayment) => void;
+}) {
+  const today = new Date().toISOString().split('T')[0];
+  const [paymentDate, setPaymentDate] = useState(today);
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('CASH');
+  const [referenceNo, setReferenceNo] = useState('');
+  const [allocations, setAllocations] = useState<Record<number, string>>({});
+  const [submitErr, setSubmitErr] = useState('');
+
+  const outstanding = demands.filter(d => d.status === 'UNPAID' || d.status === 'PARTIAL');
+  const totalAllocated = Object.values(allocations).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+  const refRequired = SP_REF_REQUIRED.has(paymentMode);
+
+  let validErr = '';
+  if (totalAllocated <= 0) validErr = 'Total allocated must be > 0.';
+  else if (refRequired && !referenceNo.trim()) validErr = `Reference is required for ${SP_MODE_LABELS[paymentMode]}.`;
+  else {
+    for (const d of outstanding) {
+      const alloc = parseFloat(allocations[d.id] ?? '0') || 0;
+      if (alloc > toNum(d.balanceAmount)) { validErr = `Over-allocated for ${d.feeHeadName}.`; break; }
+    }
+  }
+
+  const submitMut = useMutation({
+    mutationFn: async () => {
+      const allocationsList = outstanding
+        .filter(d => (parseFloat(allocations[d.id] ?? '0') || 0) > 0)
+        .map(d => ({ demandId: d.id, amount: parseFloat(allocations[d.id]) }));
+      return (await api.post<FeePayment>('/api/fees/payments', {
+        studentId, paymentDate, paymentMode,
+        referenceNo: referenceNo || undefined,
+        allocations: allocationsList,
+      })).data;
+    },
+    onSuccess: (data) => onSuccess(data),
+    onError: (e) => setSubmitErr(formatApiError(e)),
+  });
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+      onClick={() => { if (!submitMut.isPending) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 640, width: '100%', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 48px rgba(15,23,42,0.2)', maxHeight: '90vh', overflowY: 'auto' }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>Collect Payment</div>
+            <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>Student: <strong>{studentName}</strong></div>
+          </div>
+          <button type="button" disabled={submitMut.isPending} onClick={onClose}
+            style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 12 }}>✕</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 130, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Payment Date *</label>
+            <input type="date" value={paymentDate} max={today} onChange={e => setPaymentDate(e.target.value)}
+              style={{ padding: '8px 10px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13 }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 150, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Payment Mode *</label>
+            <select value={paymentMode} onChange={e => setPaymentMode(e.target.value as PaymentMode)}
+              style={{ padding: '8px 10px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13 }}>
+              {SP_PAYMENT_MODES.map(m => <option key={m} value={m}>{SP_MODE_LABELS[m]}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: 2, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Reference {refRequired ? '*' : '(optional)'}</label>
+            <input value={referenceNo} onChange={e => setReferenceNo(e.target.value)}
+              style={{ padding: '8px 10px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13 }} placeholder="Ref no…" />
+          </div>
+        </div>
+
+        {outstanding.length === 0 ? (
+          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: 20, border: '1px dashed #e2e8f0', borderRadius: 8 }}>
+            No outstanding demands.
+          </div>
+        ) : (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>Outstanding Demands</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button type="button" onClick={() => { const a: Record<number, string> = {}; outstanding.forEach(d => { a[d.id] = String(toNum(d.balanceAmount)); }); setAllocations(a); }}
+                  style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11 }}>⚡ Auto-Allocate</button>
+                <button type="button" onClick={() => setAllocations({})}
+                  style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11 }}>✕ Clear</button>
+              </div>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
+                    {['Fee Head', 'Installment', 'Balance', 'Amount to Pay'].map(h => (
+                      <th key={h} style={{ padding: '7px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {outstanding.map(d => {
+                    const bal = toNum(d.balanceAmount);
+                    const alloc = parseFloat(allocations[d.id] ?? '') || 0;
+                    return (
+                      <tr key={d.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '7px 10px' }}>
+                          <div style={{ fontWeight: 600 }}>{d.feeHeadName}</div>
+                          <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{d.feeHeadCode}</div>
+                        </td>
+                        <td style={{ padding: '7px 10px', fontSize: 12 }}>{d.installmentName}</td>
+                        <td style={{ padding: '7px 10px', fontWeight: 700, color: '#b45309' }}>{fmtMoney(bal)}</td>
+                        <td style={{ padding: '7px 10px', minWidth: 120 }}>
+                          <input type="number" min="0" step="0.01" max={String(bal)}
+                            value={allocations[d.id] ?? ''}
+                            onChange={e => setAllocations(prev => ({ ...prev, [d.id]: e.target.value }))}
+                            style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: `1px solid ${alloc > bal ? '#dc2626' : '#e2e8f0'}`, fontSize: 13 }}
+                            placeholder="0.00" />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: '#64748b' }}>Total</span>
+          <span style={{ fontSize: 18, fontWeight: 800 }}>{fmtMoney(totalAllocated)}</span>
+        </div>
+
+        {(validErr || submitErr) && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#b91c1c', fontSize: 13 }}>
+            {validErr || submitErr}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button"
+            disabled={submitMut.isPending || !!validErr || outstanding.length === 0}
+            onClick={() => { setSubmitErr(''); submitMut.mutate(); }}
+            style={{ flex: 1, padding: '10px 0', borderRadius: 8, background: submitMut.isPending || !!validErr || outstanding.length === 0 ? '#94a3b8' : 'var(--color-primary, #4f46e5)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>
+            {submitMut.isPending ? 'Recording…' : `Record Payment — ${fmtMoney(totalAllocated)}`}
+          </button>
+          <button type="button" disabled={submitMut.isPending} onClick={onClose}
+            style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FeesTab({ studentId, studentName }: { studentId: number; studentName: string }) {
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [receiptPayment, setReceiptPayment] = useState<FeePayment | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<FeePayment | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelErr, setCancelErr] = useState('');
+  const qc = useQueryClient();
+  const feesQ = useQuery({
+    queryKey: ['student-fee-demands', studentId],
+    queryFn: async () => (await api.get<StudentFeeDemand[]>(`/api/students/${studentId}/fees/demands`)).data,
+    staleTime: 30_000,
+  });
+
+  const paymentsQ = useQuery({
+    queryKey: ['student-fee-payments', studentId],
+    queryFn: async () => (await api.get<FeePayment[]>(`/api/students/${studentId}/fees/payments`)).data,
+    staleTime: 30_000,
+  });
+
+  const ledgerQ = useQuery({
+    queryKey: ['student-fee-ledger', studentId],
+    queryFn: async () => (await api.get<FeeLedger>(`/api/students/${studentId}/fees/ledger`)).data,
+    staleTime: 30_000,
+  });
+
+  const cancelMut = useMutation({
+    mutationFn: async ({ id, reason }: { id: number; reason: string }) =>
+      (await api.post<FeePayment>(`/api/fees/payments/${id}/cancel`, { cancelReason: reason })).data,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['student-fee-payments', studentId] });
+      await qc.invalidateQueries({ queryKey: ['student-fee-demands', studentId] });
+      await qc.invalidateQueries({ queryKey: ['student-fee-ledger', studentId] });
+      setCancelTarget(null); setCancelReason(''); setCancelErr('');
+    },
+    onError: (e) => setCancelErr(formatApiError(e)),
+  });
+
+  const demands = feesQ.data ?? [];
+  const payments = paymentsQ.data ?? [];
+  const today = new Date().toISOString().split('T')[0];
+
+  const totalDue     = demands.reduce((s, d) => s + toNum(d.payableAmount), 0);
+  const totalPaid    = demands.reduce((s, d) => s + toNum(d.paidAmount), 0);
+  const totalBalance = demands.reduce((s, d) => s + toNum(d.balanceAmount), 0);
+  const overdueCount = demands.filter(d => {
+    const raw = String(d.dueDate ?? '');
+    return raw && raw < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
+  }).length;
+
+  const summaryCards = [
+    { label: 'Total Due',    value: fmtMoney(totalDue),     color: '#6366f1' },
+    { label: 'Paid',         value: fmtMoney(totalPaid),    color: '#16a34a' },
+    { label: 'Balance',      value: fmtMoney(totalBalance), color: '#f59e0b' },
+    { label: 'Overdue',      value: String(overdueCount),   color: '#dc2626' },
+  ];
+
+  if (feesQ.isLoading) {
+    return <div className="muted" style={{ textAlign: 'center', padding: 24 }}>Loading fees…</div>;
+  }
+
+  if (feesQ.error) {
+    return <div style={{ color: '#b91c1c', fontSize: 13, padding: 12 }}>{(feesQ.error as Error)?.message ?? 'Failed to load fees.'}</div>;
+  }
+
+  if (demands.length === 0) {
+    return (
+      <PlaceholderState icon="💰" title="No fee demands yet"
+        body="Fee demands will appear after a published fee plan is generated for this student." />
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      {/* Summary tiles */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
+        {summaryCards.map(c => (
+          <div key={c.label} style={{ background: 'rgba(15,23,42,0.03)', border: '1px solid rgba(15,23,42,0.07)', borderRadius: 10, borderTop: `3px solid ${c.color}`, padding: '10px 14px' }}>
+            <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>{c.label}</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: c.color, marginTop: 2 }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Collect Payment button */}
+      {demands.some(d => d.status === 'UNPAID' || d.status === 'PARTIAL') && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button type="button" onClick={() => setCollectOpen(true)}
+            style={{ padding: '9px 18px', borderRadius: 8, background: '#166534', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            💳 Collect Payment
+          </button>
+        </div>
+      )}
+
+      {/* Demands table */}
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '12px 14px 8px', fontWeight: 700, fontSize: 13, borderBottom: '1px solid rgba(15,23,42,0.07)' }}>Fee Demands</div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr>
+                {['Fee Head', 'Plan', 'Installment', 'Due Date', 'Payable', 'Paid', 'Balance', 'Status'].map(h => (
+                  <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.5)', borderBottom: '1px solid rgba(15,23,42,0.07)', background: 'rgba(250,250,249,0.98)', whiteSpace: 'nowrap' }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {demands.map(d => {
+                const sp = FEE_DEMAND_STATUS_PILL[d.status] ?? { bg: '#f1f5f9', color: '#64748b' };
+                const dueDateRaw = String(d.dueDate ?? '');
+                const isOverdue  = dueDateRaw && dueDateRaw < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
+                return (
+                  <tr key={d.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', background: isOverdue ? 'rgba(220,38,38,0.025)' : undefined }}>
+                    <td style={{ padding: '10px 12px' }}>
+                      <div style={{ fontWeight: 700 }}>{d.feeHeadName}</div>
+                      <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.4)', fontFamily: 'monospace' }}>{d.feeHeadCode}</div>
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.55)' }}>{d.feePlanName}</td>
+                    <td style={{ padding: '10px 12px', fontSize: 12 }}>{d.installmentName}</td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: isOverdue ? '#b91c1c' : 'rgba(15,23,42,0.65)', fontWeight: isOverdue ? 700 : 400 }}>
+                      {fmtDate(dueDateRaw)}{isOverdue ? ' ⚠' : ''}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontWeight: 700 }}>{fmtMoney(d.payableAmount)}</td>
+                    <td style={{ padding: '10px 12px', color: '#166534' }}>{fmtMoney(d.paidAmount)}</td>
+                    <td style={{ padding: '10px 12px', fontWeight: 700, color: toNum(d.balanceAmount) > 0 ? '#b45309' : '#166534' }}>{fmtMoney(d.balanceAmount)}</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: sp.bg, color: sp.color }}>
+                        {d.status}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* Payment History */}
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '12px 14px 8px', fontWeight: 700, fontSize: 13, borderBottom: '1px solid rgba(15,23,42,0.07)' }}>Payment History</div>
+        {paymentsQ.isLoading ? (
+          <div className="muted" style={{ textAlign: 'center', padding: 16 }}>Loading payments…</div>
+        ) : payments.length === 0 ? (
+          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>No payments recorded yet.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  {['Receipt No', 'Amount', 'Mode', 'Date', 'Reference', 'Status', 'Actions'].map(h => (
+                    <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.5)', borderBottom: '1px solid rgba(15,23,42,0.07)', background: 'rgba(250,250,249,0.98)', whiteSpace: 'nowrap' }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map(p => {
+                  const sp = SP_STATUS_PILL[p.status] ?? { bg: '#f1f5f9', color: '#94a3b8' };
+                  return (
+                    <tr key={p.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
+                      <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 700, color: '#4f46e5' }}>{p.receiptNo}</td>
+                      <td style={{ padding: '10px 12px', fontWeight: 700 }}>{fmtMoney(p.amount)}</td>
+                      <td style={{ padding: '10px 12px', fontSize: 12 }}>{SP_MODE_LABELS[p.paymentMode as PaymentMode] ?? p.paymentMode}</td>
+                      <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.65)' }}>{p.paymentDate}</td>
+                      <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.55)' }}>{p.referenceNo ?? '—'}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: sp.bg, color: sp.color }}>
+                          {p.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button type="button" onClick={() => setReceiptPayment(p)}
+                            style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11 }}>
+                            👁 View
+                          </button>
+                          {p.status === 'SUCCESS' && (
+                            <button type="button" onClick={() => { setCancelTarget(p); setCancelReason(''); setCancelErr(''); }}
+                              style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #fecaca', background: '#fef2f2', cursor: 'pointer', fontSize: 11, color: '#b91c1c' }}>
+                              ✕ Cancel
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* ─── Fee Ledger ────────────────────────────────────────────────────── */}
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
+        {/* Header with summary totals */}
+        <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid rgba(15,23,42,0.07)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>Fee Ledger</div>
+          {ledgerQ.data && (
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              {([
+                { label: 'Total Charged', value: fmtMoney(ledgerQ.data.totalDebit),  color: '#b45309' },
+                { label: 'Total Paid',    value: fmtMoney(ledgerQ.data.totalCredit), color: '#166534' },
+                { label: 'Balance',       value: fmtMoney(ledgerQ.data.balance),
+                  color: toNum(ledgerQ.data.balance) > 0 ? '#b91c1c' : '#166534' },
+              ] as {label:string;value:string;color:string}[]).map(s => (
+                <div key={s.label} style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.4)', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>{s.label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: s.color }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Body */}
+        {ledgerQ.isLoading ? (
+          <div className="muted" style={{ textAlign: 'center', padding: 20 }}>Loading ledger…</div>
+        ) : ledgerQ.error ? (
+          <div style={{ color: '#b91c1c', fontSize: 13, padding: '12px 16px' }}>
+            {(ledgerQ.error as Error)?.message ?? 'Failed to load ledger.'}
+          </div>
+        ) : !ledgerQ.data || ledgerQ.data.entries.length === 0 ? (
+          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '28px 0' }}>
+            No fee ledger entries yet.
+          </div>
+        ) : (
+          <div>
+            {/* Ledger entries */}
+            {ledgerQ.data.entries.map((entry, idx) => {
+              const cfg = LEDGER_TYPE_CONFIG[entry.type] ?? LEDGER_TYPE_CONFIG.ADJUSTMENT;
+              const balance = toNum(entry.balanceAfter);
+              const isLast = idx === ledgerQ.data!.entries.length - 1;
+              return (
+                <div key={idx} style={{
+                  borderBottom: isLast ? 'none' : '1px solid rgba(15,23,42,0.055)',
+                  padding: '11px 16px',
+                  display: 'grid',
+                  gridTemplateColumns: '90px 1fr auto',
+                  gap: '0 12px',
+                  alignItems: 'start',
+                }}>
+                  {/* Date + type badge */}
+                  <div>
+                    <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.45)', fontVariantNumeric: 'tabular-nums', marginBottom: 5 }}>
+                      {entry.date ?? '—'}
+                    </div>
+                    <span style={{
+                      display: 'inline-block', padding: '2px 7px', borderRadius: 999,
+                      fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color,
+                      textTransform: 'uppercase', letterSpacing: '0.03em',
+                    }}>
+                      {cfg.label}
+                    </span>
+                  </div>
+
+                  {/* Reference + description */}
+                  <div style={{ minWidth: 0 }}>
+                    {entry.referenceNo && (
+                      <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: '#4f46e5', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {entry.referenceNo}
+                      </div>
+                    )}
+                    {entry.description && (
+                      <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.6)', marginTop: entry.referenceNo ? 2 : 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {entry.description}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Debit / Credit / Balance */}
+                  <div style={{ textAlign: 'right', minWidth: 120 }}>
+                    {/* Debit — red / amber */}
+                    {entry.debit != null ? (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#b45309' }}>
+                        − {fmtMoney(entry.debit)}
+                      </div>
+                    ) : (
+                      /* Credit — green */
+                      entry.credit != null ? (
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>
+                          + {fmtMoney(entry.credit)}
+                        </div>
+                      ) : null
+                    )}
+                    {/* Running balance */}
+                    <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.38)', marginTop: 3 }}>
+                      Bal{' '}
+                      <span style={{ fontWeight: 700, color: balance > 0 ? '#b91c1c' : balance < 0 ? '#166534' : 'rgba(15,23,42,0.5)' }}>
+                        {fmtMoney(balance)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Totals footer */}
+            <div style={{
+              borderTop: '2px solid rgba(15,23,42,0.09)',
+              background: 'rgba(15,23,42,0.025)',
+              padding: '10px 16px',
+              display: 'grid',
+              gridTemplateColumns: '90px 1fr auto',
+              gap: '0 12px',
+              alignItems: 'center',
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.5)', textTransform: 'uppercase', letterSpacing: '.04em', gridColumn: '1 / 3' }}>
+                Totals
+              </div>
+              <div style={{ textAlign: 'right', minWidth: 120 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#b45309' }}>
+                  − {fmtMoney(ledgerQ.data.totalDebit)}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#166534', marginTop: 2 }}>
+                  + {fmtMoney(ledgerQ.data.totalCredit)}
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', marginTop: 4 }}>
+                  Net{' '}
+                  <span style={{ fontWeight: 800, color: toNum(ledgerQ.data.balance) > 0 ? '#b91c1c' : '#166534' }}>
+                    {fmtMoney(ledgerQ.data.balance)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Collect Payment Modal */}
+      {collectOpen && (
+        <SPCollectModal
+          studentId={studentId}
+          studentName={studentName}
+          demands={demands}
+          onClose={() => setCollectOpen(false)}
+          onSuccess={(payment) => {
+            setCollectOpen(false);
+            setReceiptPayment(payment);
+            qc.invalidateQueries({ queryKey: ['student-fee-demands', studentId] });
+            qc.invalidateQueries({ queryKey: ['student-fee-payments', studentId] });
+            qc.invalidateQueries({ queryKey: ['student-fee-ledger', studentId] });
+          }}
+        />
+      )}
+
+      {/* Receipt modal */}
+      {receiptPayment && <SPReceiptModal payment={receiptPayment} onClose={() => setReceiptPayment(null)} />}
+
+      {/* Cancel confirmation */}
+      {cancelTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          onClick={() => { if (!cancelMut.isPending) setCancelTarget(null); }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 440, width: '100%', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 48px rgba(15,23,42,0.2)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>Cancel Payment {cancelTarget.receiptNo}?</div>
+            <div style={{ fontSize: 13, color: '#64748b' }}>This will reverse all allocations and restore the demand balances.</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>Cancel Reason *</label>
+              <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={3}
+                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, resize: 'vertical' }} />
+            </div>
+            {cancelErr && <div style={{ color: '#b91c1c', fontSize: 13 }}>{cancelErr}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" disabled={cancelMut.isPending || !cancelReason.trim()}
+                onClick={() => cancelMut.mutate({ id: cancelTarget.id, reason: cancelReason })}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 8, background: '#dc2626', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+                {cancelMut.isPending ? 'Cancelling…' : 'Confirm Cancel'}
+              </button>
+              <button type="button" disabled={cancelMut.isPending} onClick={() => setCancelTarget(null)}
+                style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Back</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Profile Avatar ───────────────────────────────────────────────────────────
 
 function ProfileAvatar({
@@ -1749,7 +2475,7 @@ export function StudentProfilePage() {
             />
           )}
           {activeTab === 'fees' && (
-            <PlaceholderState icon="💰" title="Fee module not enabled" body="Fee statements and due amounts will appear here once the fee module is configured for this school." />
+            <FeesTab studentId={id} studentName={p ? `${p.firstName} ${p.lastName ?? ''}`.trim() : ''} />
           )}
           {activeTab === 'activity' && (
             <PlaceholderState icon="🕓" title="Activity log not yet available" body="A complete audit trail of changes to this student's profile will appear here once the activity log module is enabled." />

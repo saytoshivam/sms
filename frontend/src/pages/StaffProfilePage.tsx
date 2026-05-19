@@ -202,30 +202,18 @@ function SectionCard({ title, children }: { title: string; children: React.React
   );
 }
 
-function ModuleDisabledTab({ icon, name, reason }: { icon: string; name: string; reason?: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 24px', textAlign: 'center' }}>
-      <div style={{ fontSize: 40, marginBottom: 14, opacity: 0.45 }}>{icon}</div>
-      <div style={{ fontWeight: 800, fontSize: 16, color: 'rgba(15,23,42,0.55)', marginBottom: 6 }}>{name}</div>
-      <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.38)', maxWidth: 400, lineHeight: 1.6 }}>
-        {reason ?? 'This section is not active for your school plan. Contact your administrator to enable it.'}
-      </div>
-    </div>
-  );
-}
-
 // ─── Tabs definition ─────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'overview',    label: 'Overview',     icon: '🏠' },
-  { id: 'employment',  label: 'Employment',   icon: '💼' },
-  { id: 'academics',   label: 'Academics',    icon: '📚' },
-  { id: 'timetable',   label: 'Timetable',    icon: '🗓' },
-  { id: 'documents',   label: 'Documents',    icon: '📄' },
-  { id: 'access',      label: 'Access',       icon: '🔐' },
-  { id: 'leave',       label: 'Leave',        icon: '🏖' },
-  { id: 'payroll',     label: 'Payroll',      icon: '💰' },
-  { id: 'activity',    label: 'Activity Log', icon: '📋' },
+  { id: 'overview',    label: 'Overview',     icon: '' },
+  { id: 'employment',  label: 'Employment',   icon: '' },
+  { id: 'academics',   label: 'Academics',    icon: '' },
+  { id: 'timetable',   label: 'Timetable',    icon: '' },
+  { id: 'documents',   label: 'Documents',    icon: '' },
+  { id: 'access',      label: 'Access',       icon: '' },
+  { id: 'leave',       label: 'Leave',        icon: '' },
+  { id: 'payroll',     label: 'Payroll',      icon: '' },
+  { id: 'activity',    label: 'Activity Log', icon: '' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -270,16 +258,16 @@ function MoreMenu({ staffId: _staffId, profile, onResetLogin, onDeactivate, onMa
       </button>
       {open && (
         <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', background: '#fff', borderRadius: 12, border: '1px solid rgba(15,23,42,0.12)', boxShadow: '0 8px 32px rgba(15,23,42,0.14)', zIndex: 200, minWidth: 200, padding: 6 }}>
-          {item('Upload Document', '📎', () => onDocuments ? onDocuments() : undefined, false, !onDocuments)}
-          {item('Reset Login', '🔄', onResetLogin, false, !profile.hasLoginAccount)}
+          {item('Upload Document', '', () => onDocuments ? onDocuments() : undefined, false, !onDocuments)}
+          {item('Reset Login', '', onResetLogin, false, !profile.hasLoginAccount)}
           <div style={{ height: 1, background: 'rgba(15,23,42,0.07)', margin: '4px 0' }} />
           {item('Deactivate', '⏸', onDeactivate, true, profile.status === 'INACTIVE')}
-          {item('Mark Exited', '🚪', onMarkExited, true, profile.status === 'EXITED')}
+          {item('Mark Exited', '', onMarkExited, true, profile.status === 'EXITED')}
           <div style={{ height: 1, background: 'rgba(15,23,42,0.07)', margin: '4px 0' }} />
-          {item('Delete Staff', '🗑', onDelete, true)}
+          {item('Delete Staff', '', onDelete, true)}
           <div style={{ height: 1, background: 'rgba(15,23,42,0.07)', margin: '4px 0' }} />
-          {item('View Timetable Grid', '🗓', () => navigate('/app/timetable/grid'))}
-          {item('Staff Directory', '👥', () => navigate('/app/teachers'))}
+          {item('View Timetable Grid', '', () => navigate('/app/timetable/grid'))}
+          {item('Staff Directory', '', () => navigate('/app/teachers'))}
         </div>
       )}
     </div>
@@ -401,9 +389,9 @@ function TabOverview({ profile }: { profile: StaffProfile }) {
             Readiness Blockers
           </div>
           <ReadinessGroup title="Activation Blockers"  icon="⚡" items={activationBlockers}  color="#b91c1c" bg="rgba(220,38,38,0.04)" border="rgba(220,38,38,0.18)" />
-          <ReadinessGroup title="Timetable Blockers"   icon="📅" items={timetableBlockers}   color="#92400e" bg="rgba(234,179,8,0.05)"  border="rgba(234,179,8,0.2)"  />
-          <ReadinessGroup title="Portal Blockers"      icon="🔐" items={portalBlockers}       color="#1e40af" bg="rgba(37,99,235,0.04)"  border="rgba(37,99,235,0.18)" />
-          <ReadinessGroup title="Document Blockers"    icon="📄" items={documentBlockers}     color="#0e7490" bg="rgba(8,145,178,0.04)"  border="rgba(8,145,178,0.18)" />
+          <ReadinessGroup title="Timetable Blockers"   icon="" items={timetableBlockers}   color="#92400e" bg="rgba(234,179,8,0.05)"  border="rgba(234,179,8,0.2)"  />
+          <ReadinessGroup title="Portal Blockers"      icon="" items={portalBlockers}       color="#1e40af" bg="rgba(37,99,235,0.04)"  border="rgba(37,99,235,0.18)" />
+          <ReadinessGroup title="Document Blockers"    icon="" items={documentBlockers}     color="#0e7490" bg="rgba(8,145,178,0.04)"  border="rgba(8,145,178,0.18)" />
         </div>
       )}
 
@@ -459,7 +447,7 @@ function TabOverview({ profile }: { profile: StaffProfile }) {
       {/* ── E. Operational readiness cards ──────────────────────────────────── */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         <ReadinessCard
-          icon={profile.timetableEligible ? '📅' : '📅'}
+          icon={profile.timetableEligible ? '' : ''}
           label="Timetable"
           value={profile.timetableEligible ? '✓ Eligible' : '✗ Not Eligible'}
           sub={profile.timetableEligible ? `${profile.teachableSubjectCodes.length} subject${profile.teachableSubjectCodes.length !== 1 ? 's' : ''}` : (profile.timetableEligibilityReasons?.length ?? 0) + ' blocker(s)'}
@@ -467,7 +455,7 @@ function TabOverview({ profile }: { profile: StaffProfile }) {
           warn={!profile.timetableEligible}
         />
         <ReadinessCard
-          icon="🔐"
+          icon=""
           label="Login"
           value={loginLabel}
           sub={profile.username ? `@${profile.username}` : undefined}
@@ -475,7 +463,7 @@ function TabOverview({ profile }: { profile: StaffProfile }) {
           warn={loginWarn}
         />
         <ReadinessCard
-          icon="📄"
+          icon=""
           label="Documents"
           value={docsLabel}
           sub={docsMissing ?? undefined}
@@ -483,7 +471,7 @@ function TabOverview({ profile }: { profile: StaffProfile }) {
           warn={docsScore !== null && docsScore > 0 && docsScore < 100}
         />
         <ReadinessCard
-          icon="📖"
+          icon=""
           label="Subjects"
           value={profile.teachableSubjectCodes.length > 0 ? String(profile.teachableSubjectCodes.length) : 'None'}
           sub={profile.teachableSubjectCodes.slice(0, 3).join(', ') || (profile.staffType !== 'TEACHING' ? 'N/A' : 'Not assigned')}
@@ -612,7 +600,7 @@ function TabEmployment({ profile }: { profile: StaffProfile }) {
       {/* ── No audit log note ────────────────────────────────────────────────── */}
       <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.02)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)' }}>
         <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-          📋 HR status history and employment event log are not enabled for this school.
+           HR status history and employment event log are not enabled for this school.
         </div>
       </div>
     </div>
@@ -681,7 +669,7 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
       {/* Edit shortcut banner */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: 'rgba(37,99,235,0.05)', border: '1px solid rgba(37,99,235,0.15)', borderRadius: 10, gap: 12, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', fontWeight: 600 }}>
-          📚 This view is read-only. To assign subjects, set workload, or change timetable flags, use <strong>Edit Profile</strong>.
+           This view is read-only. To assign subjects, set workload, or change timetable flags, use <strong>Edit Profile</strong>.
         </div>
         <button type="button" onClick={onEditProfile}
           style={{ padding: '7px 16px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
@@ -901,7 +889,7 @@ function TabAcademics({ profile, subjects, structure, classGroups, onEditProfile
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
               {safeRestCGs.map(id => (
-                <span key={id} style={{ ...B, background: 'rgba(220,38,38,0.1)', color: '#991b1b', fontSize: 12 }}>🚫 {cgLabel(id)}</span>
+                <span key={id} style={{ ...B, background: 'rgba(220,38,38,0.1)', color: '#991b1b', fontSize: 12 }}> {cgLabel(id)}</span>
               ))}
             </div>
           </div>
@@ -986,10 +974,10 @@ function docDisplayLabel(code: string): string {
 }
 
 function DocStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; bg: string; color: string; icon: string }> = {
+  const map: Record<string, { label: string; bg: string; color: string }> = {
     VERIFIED:          { label: '✓ Verified',        bg: 'rgba(22,163,74,0.1)',   color: '#166534' },
-    COLLECTED_PHYSICAL:{ label: '📥 Collected',       bg: 'rgba(37,99,235,0.1)',   color: '#1e40af' },
-    UPLOADED:          { label: '📎 Uploaded',         bg: 'rgba(37,99,235,0.08)', color: '#1e40af' },
+    COLLECTED_PHYSICAL:{ label: ' Collected',       bg: 'rgba(37,99,235,0.1)',   color: '#1e40af' },
+    UPLOADED:          { label: ' Uploaded',         bg: 'rgba(37,99,235,0.08)', color: '#1e40af' },
     REJECTED:          { label: '✗ Rejected',          bg: 'rgba(220,38,38,0.1)',  color: '#b91c1c' },
     NOT_REQUIRED:      { label: '— Not Required',      bg: 'rgba(15,23,42,0.06)', color: 'rgba(15,23,42,0.4)' },
     PENDING_COLLECTION:{ label: '⏳ Pending',           bg: 'rgba(234,179,8,0.1)', color: '#92400e' },
@@ -1235,7 +1223,7 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
 
           {doc.verificationSource && (
             <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', fontWeight: 600 }}>
-              {doc.verificationSource === 'PHYSICAL_ORIGINAL' ? '📋 Physical original' : '📎 Uploaded copy'} verified
+              {doc.verificationSource === 'PHYSICAL_ORIGINAL' ? ' Physical original' : ' Uploaded copy'} verified
               {doc.verifiedAt && <span style={{ marginLeft: 5 }}>{new Date(doc.verifiedAt).toLocaleDateString()}</span>}
             </div>
           )}
@@ -1288,10 +1276,10 @@ function DocRow({ doc, staffId, onRefresh, isMobile }: { doc: StaffDoc; staffId:
         {/* Document name */}
         <td style={{ padding: '10px 12px', verticalAlign: 'middle', fontWeight: 600, fontSize: 13, color: isNotReq ? 'rgba(15,23,42,0.38)' : 'rgba(15,23,42,0.85)' }}>
           {label}
-          {doc.remarks && <span title={doc.remarks} style={{ marginLeft: 5, fontSize: 11, color: 'rgba(15,23,42,0.35)' }}>💬</span>}
+          {doc.remarks && <span title={doc.remarks} style={{ marginLeft: 5, fontSize: 11, color: 'rgba(15,23,42,0.35)' }}></span>}
           {doc.verificationSource && (
             <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', marginTop: 2, fontWeight: 500 }}>
-              {doc.verificationSource === 'PHYSICAL_ORIGINAL' ? '📋 Physical original' : '📎 Uploaded copy'} verified
+              {doc.verificationSource === 'PHYSICAL_ORIGINAL' ? ' Physical original' : ' Uploaded copy'} verified
             </div>
           )}
         </td>
@@ -1531,10 +1519,10 @@ interface AccessResult {
 
 function LoginStatusBadge({ status }: { status: string | null }) {
   const map: Record<string, { label: string; bg: string; color: string; icon: string }> = {
-    ACTIVE:      { label: 'Active',       bg: 'rgba(22,163,74,0.1)',  color: '#166534', icon: '🔓' },
-    INVITED:     { label: 'Invited',      bg: 'rgba(37,99,235,0.1)',  color: '#1e40af', icon: '📨' },
-    DISABLED:    { label: 'Disabled',     bg: 'rgba(220,38,38,0.1)', color: '#b91c1c', icon: '🚫' },
-    NOT_CREATED: { label: 'Not Created',  bg: 'rgba(15,23,42,0.07)', color: '#475569', icon: '🔒' },
+    ACTIVE:      { label: 'Active',       bg: 'rgba(22,163,74,0.1)',  color: '#166534', icon: '' },
+    INVITED:     { label: 'Invited',      bg: 'rgba(37,99,235,0.1)',  color: '#1e40af', icon: '' },
+    DISABLED:    { label: 'Disabled',     bg: 'rgba(220,38,38,0.1)', color: '#b91c1c', icon: '' },
+    NOT_CREATED: { label: 'Not Created',  bg: 'rgba(15,23,42,0.07)', color: '#475569', icon: '' },
   };
   const s = map[status ?? 'NOT_CREATED'] ?? map['NOT_CREATED'];
   return (
@@ -1582,7 +1570,7 @@ function TempPwdBanner({ pwd, onDismiss }: { pwd: string; onDismiss: () => void 
   return (
     <div style={{ padding: '14px 16px', background: 'rgba(22,163,74,0.08)', border: '1px solid rgba(22,163,74,0.25)', borderRadius: 10, display: 'grid', gap: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: '#166534' }}>🔑 One-time temporary password — copy it now</div>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#166534' }}> One-time temporary password — copy it now</div>
         <button type="button" onClick={onDismiss} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, color: '#166534', padding: 0 }}>✕</button>
       </div>
       <code style={{ fontSize: 20, fontWeight: 900, color: '#166534', letterSpacing: '0.12em', userSelect: 'all' }}>{pwd}</code>
@@ -1707,7 +1695,7 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
       {/* No-roles blocker — must be top-most warning */}
       {noRolesBlocked && (
         <div style={{ padding: '14px 16px', background: 'rgba(220,38,38,0.06)', border: '1.5px solid rgba(220,38,38,0.2)', borderRadius: 10, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-          <span style={{ fontSize: 20, flexShrink: 0 }}>🚫</span>
+          <span style={{ fontSize: 20, flexShrink: 0 }}></span>
           <div>
             <div style={{ fontSize: 13, fontWeight: 800, color: '#b91c1c', marginBottom: 4 }}>
               Assign a staff role before creating a login.
@@ -1836,7 +1824,7 @@ function TabAccess({ profile, staffId, onRefresh }: { profile: StaffProfile; sta
           {/* Update roles info — roles always come from StaffRoleMapping, never set here */}
           {hasLogin && (
             <div style={{ padding: '12px 14px', background: 'rgba(37,99,235,0.03)', borderRadius: 9, border: '1px solid rgba(37,99,235,0.12)', fontSize: 12, color: 'rgba(15,23,42,0.5)', fontWeight: 600 }}>
-              💡 Portal roles are automatically derived from the staff member's <strong>StaffRoleMapping</strong> (assigned in Edit Profile → Roles &amp; Access).
+               Portal roles are automatically derived from the staff member's <strong>StaffRoleMapping</strong> (assigned in Edit Profile → Roles &amp; Access).
               Role changes must be made there — they are reflected here on next login.
             </div>
           )}
@@ -1904,7 +1892,7 @@ function TabLeave() {
         borderRadius: 14,
         display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap',
       }}>
-        <div style={{ fontSize: 36, flexShrink: 0 }}>🏖</div>
+        <div style={{ fontSize: 36, flexShrink: 0 }}></div>
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontWeight: 900, fontSize: 15, color: 'rgba(15,23,42,0.6)', marginBottom: 6 }}>
             Leave Management is not enabled yet for this school.
@@ -1923,10 +1911,10 @@ function TabLeave() {
         </div>
         <div style={{ display: 'grid', gap: 10 }}>
           {[
-            { icon: '📊', title: 'Leave Balance',     desc: 'Available, used, and pending leave for each leave type (e.g. Casual, Sick, Earned).' },
-            { icon: '📋', title: 'Leave History',      desc: 'All past leave records with dates, type, status, and approver.' },
-            { icon: '📅', title: 'Upcoming Leave',     desc: 'Approved future leave and pending requests awaiting approval.' },
-            { icon: '🗓', title: 'Timetable Impact',   desc: 'Which periods are affected by leave and whether a substitute has been assigned.' },
+            { icon: '', title: 'Leave Balance',     desc: 'Available, used, and pending leave for each leave type (e.g. Casual, Sick, Earned).' },
+            { icon: '', title: 'Leave History',      desc: 'All past leave records with dates, type, status, and approver.' },
+            { icon: '', title: 'Upcoming Leave',     desc: 'Approved future leave and pending requests awaiting approval.' },
+            { icon: '', title: 'Timetable Impact',   desc: 'Which periods are affected by leave and whether a substitute has been assigned.' },
           ].map(item => (
             <div key={item.title} style={{ display: 'flex', gap: 12, padding: '10px 12px', borderRadius: 9, background: 'rgba(15,23,42,0.02)', border: '1px solid rgba(15,23,42,0.06)' }}>
               <span style={{ fontSize: 18, opacity: 0.45, flexShrink: 0, marginTop: 1 }}>{item.icon}</span>
@@ -2013,7 +2001,7 @@ function TabPayroll({ profile }: { profile: StaffProfile }) {
 
       {/* Explicit "not coming" note — no fake payslips */}
       <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.02)', borderRadius: 9, border: '1px solid rgba(15,23,42,0.07)', fontSize: 12, color: 'rgba(15,23,42,0.38)', fontWeight: 600 }}>
-        📋 Payslips, deductions, tax forms, and payroll runs are not available — salary processing is not active for this school.
+         Payslips, deductions, tax forms, and payroll runs are not available — salary processing is not active for this school.
       </div>
 
     </div>
@@ -2050,7 +2038,7 @@ function TabActivity({ profile }: { profile: StaffProfile }) {
         borderRadius: 12,
         display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap',
       }}>
-        <div style={{ fontSize: 30, flexShrink: 0 }}>📋</div>
+        <div style={{ fontSize: 30, flexShrink: 0 }}></div>
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontWeight: 900, fontSize: 14, color: 'rgba(15,23,42,0.55)', marginBottom: 4 }}>
             Activity log will appear after audit tracking is enabled.
@@ -2074,7 +2062,7 @@ function TabActivity({ profile }: { profile: StaffProfile }) {
           sub="Most recent change to any profile field"
         />
         <TimelineEntry
-          icon="🎉" iconBg="rgba(22,163,74,0.08)"
+          icon="" iconBg="rgba(22,163,74,0.08)"
           label="Record Created"
           value={fmtInstant(profile.createdAt)}
           sub="When this staff member was first added to the system"
@@ -2088,12 +2076,12 @@ function TabActivity({ profile }: { profile: StaffProfile }) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8, marginBottom: 16 }}>
           {[
-            { icon: '🕐', label: 'Timestamp' },
-            { icon: '👤', label: 'Actor (who made the change)' },
-            { icon: '🔧', label: 'Action' },
+            { icon: '', label: 'Timestamp' },
+            { icon: '', label: 'Actor (who made the change)' },
+            { icon: '', label: 'Action' },
             { icon: '⬅️', label: 'Old value' },
             { icon: '➡️', label: 'New value' },
-            { icon: '💬', label: 'Reason / note' },
+            { icon: '', label: 'Reason / note' },
           ].map(f => (
             <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'rgba(15,23,42,0.4)', fontWeight: 600, padding: '4px 0' }}>
               <span style={{ opacity: 0.5 }}>{f.icon}</span> {f.label}
@@ -2283,14 +2271,14 @@ export function StaffProfilePage() {
               {/* Timetable eligibility — include first reason if not eligible */}
               {profile.timetableEligible ? (
                 <span style={{ ...B, background: 'rgba(22,163,74,0.1)', color: '#166534', fontSize: 10 }}>
-                  📚 Eligible
+                   Eligible
                 </span>
               ) : (
                 <span
                   style={{ ...B, background: 'rgba(15,23,42,0.07)', color: '#64748b', fontSize: 10 }}
                   title={(profile.timetableEligibilityReasons ?? []).join(' · ')}
                 >
-                  📚 Not Eligible
+                   Not Eligible
                   {(profile.timetableEligibilityReasons?.length ?? 0) > 0 && (
                     <span style={{ marginLeft: 4, opacity: 0.7 }}>
                       — {profile.timetableEligibilityReasons![0]}
@@ -2326,7 +2314,7 @@ export function StaffProfilePage() {
 
             {/* Row 4: contact */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 11, color: 'rgba(15,23,42,0.5)', fontWeight: 600 }}>
-              {profile.phone && <span>📞 {profile.phone}</span>}
+              {profile.phone && <span> {profile.phone}</span>}
               {profile.email && <span>✉ {profile.email}</span>}
             </div>
           </div>
@@ -2339,7 +2327,7 @@ export function StaffProfilePage() {
             </button>
             <button type="button" onClick={() => setTab('access')}
               style={{ padding: '7px 14px', borderRadius: 8, border: '1.5px solid rgba(15,23,42,0.18)', background: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              🔐 Access
+               Access
             </button>
             <MoreMenu
               staffId={id}

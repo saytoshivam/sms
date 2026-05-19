@@ -1,9 +1,15 @@
 package com.myhaimi.sms.controllers;
 
 import com.myhaimi.sms.DTO.StudentViewDTO;
+import com.myhaimi.sms.DTO.fee.FeePaymentDTO;
+import com.myhaimi.sms.DTO.fee.StudentFeeDemandDTO;
+import com.myhaimi.sms.DTO.fee.StudentFeeLedgerDTO;
 import com.myhaimi.sms.DTO.student.*;
 import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
+import com.myhaimi.sms.service.impl.FeeDemandService;
+import com.myhaimi.sms.service.impl.FeePaymentService;
 import com.myhaimi.sms.service.impl.ParentLoginService;
+import com.myhaimi.sms.service.impl.StudentFeeLedgerService;
 import com.myhaimi.sms.service.impl.StudentLoginService;
 import com.myhaimi.sms.service.impl.StudentService;
 import com.myhaimi.sms.utils.CommonUtil;
@@ -29,6 +35,9 @@ public class StudentController {
     private final StudentService studentService;
     private final ParentLoginService parentLoginService;
     private final StudentLoginService studentLoginService;
+    private final FeeDemandService feeDemandService;
+    private final FeePaymentService feePaymentService;
+    private final StudentFeeLedgerService feeLedgerService;
 
     /** Converts access-denied errors to HTTP 403 with a JSON body. */
     @org.springframework.web.bind.annotation.ExceptionHandler(AccessDeniedException.class)
@@ -322,6 +331,53 @@ public class StudentController {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (AccessDeniedException ex) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    /**
+     * GET /api/students/{studentId}/fees/demands
+     * Returns all fee demands for a specific student in the current school.
+     */
+    @GetMapping("/{studentId}/fees/demands")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','ACCOUNTANT','PRINCIPAL')")
+    public ResponseEntity<java.util.List<StudentFeeDemandDTO>> getStudentFeeDemands(
+            @PathVariable Integer studentId) {
+        return ResponseEntity.ok(feeDemandService.getStudentDemands(studentId));
+    }
+
+    /**
+     * GET /api/students/{studentId}/fees/payments
+     * Returns payment history for a specific student in the current school.
+     */
+    @GetMapping("/{studentId}/fees/payments")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','ACCOUNTANT','PRINCIPAL')")
+    public ResponseEntity<java.util.List<FeePaymentDTO>> getStudentFeePayments(
+            @PathVariable Integer studentId) {
+        try {
+            return ResponseEntity.ok(feePaymentService.listPaymentsForStudent(studentId));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    /**
+     * GET /api/students/{studentId}/fees/ledger
+     *
+     * <p>Returns a computed fee ledger for the student showing demands (debits),
+     * payments (credits), and running balance.  The ledger is generated on-the-fly
+     * from existing records — not persisted.</p>
+     *
+     * <p>Access: SCHOOL_ADMIN, ACCOUNTANT, PRINCIPAL can view any student's ledger.
+     * (Parent / student self-access will be added in the portal phase.)</p>
+     */
+    @GetMapping("/{studentId}/fees/ledger")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','ACCOUNTANT','PRINCIPAL')")
+    public ResponseEntity<?> getStudentFeeLedger(@PathVariable Integer studentId) {
+        try {
+            StudentFeeLedgerDTO ledger = feeLedgerService.getLedger(studentId);
+            return ResponseEntity.ok(ledger);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
     }
 

@@ -5,7 +5,7 @@
  * Features: summary tiles, multi-filter, desktop table, mobile cards,
  *           kebab menu with real/stub actions clearly distinguished.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
@@ -489,7 +489,7 @@ export function TeachersModulePage() {
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid rgba(15,23,42,0.08)' }}>
         {([
-          { id: 'directory', label: '👥 Directory' },
+          { id: 'directory', label: ' Directory' },
           { id: 'readiness', label: '✅ Onboarding Readiness' },
         ] as const).map(tab => (
           <button
@@ -551,7 +551,7 @@ export function TeachersModulePage() {
       {/* Empty state */}
       {filtered.length === 0 && (
         <div className="card" style={{ textAlign: 'center', padding: '48px 20px', color: 'rgba(15,23,42,0.5)' }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>👤</div>
+          <div style={{ fontSize: 36, marginBottom: 12 }}></div>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>{allStaff.length === 0 ? 'No staff added yet' : 'No match for these filters'}</div>
           <div style={{ fontSize: 13 }}>{allStaff.length === 0 ? 'Use "+ Add Staff" or the setup wizard to add your team.' : 'Try adjusting the filters above.'}</div>
         </div>
@@ -723,7 +723,7 @@ export function TeachersModulePage() {
                 {/* Contact */}
                 {(row.phone || row.email) && (
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'rgba(15,23,42,0.5)', fontWeight: 600, borderTop: '1px solid rgba(15,23,42,0.06)', paddingTop: 8 }}>
-                    {row.phone && <span>📞 {row.phone}</span>}
+                    {row.phone && <span> {row.phone}</span>}
                     {row.email && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>✉ {row.email}</span>}
                   </div>
                 )}
