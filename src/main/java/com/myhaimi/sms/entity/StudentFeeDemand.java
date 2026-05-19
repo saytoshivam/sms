@@ -31,7 +31,10 @@ import java.time.LocalDate;
 @Entity
 @Table(
         name = "student_fee_demands",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"school_id", "demand_no"})
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uq_demand_school_no",             columnNames = {"school_id", "demand_no"}),
+                @UniqueConstraint(name = "uq_sfd_student_item_installment", columnNames = {"school_id", "student_id", "fee_plan_item_id", "fee_installment_id"})
+        }
 )
 public class StudentFeeDemand {
 
@@ -61,14 +64,14 @@ public class StudentFeeDemand {
     @JoinColumn(name = "fee_head_id", nullable = false)
     private FeeHead feeHead;
 
-    /** Plan item that triggered this demand (informational link). */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fee_plan_item_id")
+    /** Plan item that triggered this demand — required, never null. */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "fee_plan_item_id", nullable = false)
     private FeePlanItem feePlanItem;
 
-    /** Installment this demand maps to; null for ONE_TIME items. */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fee_installment_id")
+    /** Installment this demand maps to — required, never null. */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "fee_installment_id", nullable = false)
     private FeeInstallment installment;
 
     /** School-scoped unique human-readable reference number (e.g. "GH-2526-000001"). */

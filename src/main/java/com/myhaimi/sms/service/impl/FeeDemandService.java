@@ -5,11 +5,14 @@ import com.myhaimi.sms.DTO.fee.StudentFeeDemandDTO;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.ApplicableScopeType;
 import com.myhaimi.sms.entity.enums.FeePlanStatus;
+import com.myhaimi.sms.entity.enums.SequenceType;
 import com.myhaimi.sms.entity.enums.StudentFeeDemandStatus;
+import com.myhaimi.sms.entity.enums.StudentLifecycleStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,13 +22,20 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Generates and queries {@link StudentFeeDemand} records from a published
- * {@link FeePlan}.
+ * Generates and queries {@link StudentFeeDemand} records from a published {@link FeePlan}.
  *
- * <p><strong>Generation invariant:</strong> one demand per
- * (student, feePlanItem, installment).  Re-running generation for the same
- * plan is safe — existing demands are counted as "skipped" and no duplicate
- * is created.</p>
+ * <p><strong>Generation invariants:</strong>
+ * <ul>
+ *   <li>Plan must be PUBLISHED.</li>
+ *   <li>Each plan item must have at least one installment.</li>
+ *   <li>Only ACTIVE students receive demands.</li>
+ *   <li>Student must have an active enrollment in the plan's academic year.</li>
+ *   <li>One demand per (school_id, student_id, fee_plan_item_id, fee_installment_id) —
+ *       enforced by a DB unique constraint; duplicates are caught and counted as skipped.</li>
+ *   <li>Demand numbers use a locked school-scoped sequence (no COUNT+1).</li>
+ *   <li>Dry-run does NOT advance the sequence.</li>
+ * </ul>
+ * </p>
  */
 @Slf4j
 @Service
@@ -39,6 +49,7 @@ public class FeeDemandService {
     private final StudentAcademicEnrollmentRepo enrollmentRepo;
     private final ClassGroupRepo classGroupRepo;
     private final SchoolRepo schoolRepo;
+    private final SchoolSequenceService sequenceService;
 
     // ─── helpers ──────────────────────────────────────────────────────────────
 
@@ -49,28 +60,28 @@ public class FeeDemandService {
     }
 
     /**
-     * Zero-padded school-scoped demand number: {@code {schoolCode}-{year}-{seq:06d}}.
-     * The sequence is fetched and incremented inside the same transaction so
-     * concurrent generations will not produce duplicates (DB unique constraint
-     * is the ultimate safety net).
+     * Builds a collision-safe demand number using the school-scoped sequence service.
+     * Format: {SCHOOLCODE}-{yearTag}-{seq:06d}
      */
     private String buildDemandNo(School school, AcademicYear academicYear, long seq) {
-        String yearTag = String.valueOf(academicYear.getLabel()).replaceAll("[^0-9A-Za-z]", "").substring(0, Math.min(8, academicYear.getLabel().length()));
+        String label   = academicYear.getLabel();
+        String yearTag = label.replaceAll("[^0-9A-Za-z]", "")
+                              .substring(0, Math.min(8, label.replaceAll("[^0-9A-Za-z]", "").length()));
         return String.format("%s-%s-%06d", school.getCode().toUpperCase(), yearTag, seq);
     }
 
     // ─── Scope resolution ─────────────────────────────────────────────────────
 
     /**
-     * Returns the distinct set of students applicable to a given
-     * {@link FeePlanItem} for the supplied academic year.
+     * Returns the distinct set of ACTIVE students with active enrollments applicable to a
+     * given {@link FeePlanItem} for the supplied academic year.
      */
     private List<Student> resolveStudents(FeePlanItem item, Integer schoolId,
                                           Integer academicYearId, List<String> warnings) {
-        ApplicableScopeType scope = item.getApplicableScopeType();
-        Integer scopeId = item.getApplicableScopeId();
+        ApplicableScopeType scope   = item.getApplicableScopeType();
+        Integer             scopeId = item.getApplicableScopeId();
 
-        return switch (scope) {
+        List<Student> students = switch (scope) {
             case SCHOOL -> {
                 List<StudentAcademicEnrollment> enrollments =
                         enrollmentRepo.findActiveEnrollmentsBySchoolAndYear(schoolId, academicYearId);
@@ -89,7 +100,6 @@ public class FeeDemandService {
                         .collect(Collectors.toList());
             }
             case CLASS -> {
-                // Use the classGroup's gradeLevel to find all sections of that grade
                 ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(scopeId, schoolId)
                         .orElseThrow(() -> new IllegalArgumentException(
                                 "ClassGroup not found for scope: " + scopeId));
@@ -115,19 +125,32 @@ public class FeeDemandService {
                 Optional<StudentAcademicEnrollment> enrollment =
                         enrollmentRepo.findActiveEnrollmentForStudent(schoolId, scopeId, academicYearId);
                 if (enrollment.isEmpty()) {
-                    warnings.add("Student " + scopeId + " has no active enrollment for this academic year; skipped.");
+                    warnings.add("Student " + scopeId
+                            + " has no active enrollment for this academic year; skipped.");
                     yield List.of();
                 }
                 yield List.of(enrollment.get().getStudent());
             }
         };
+
+        // Filter to ACTIVE students only
+        List<Student> activeStudents = students.stream()
+                .filter(s -> s.getStatus() == StudentLifecycleStatus.ACTIVE)
+                .collect(Collectors.toList());
+
+        int inactiveCount = students.size() - activeStudents.size();
+        if (inactiveCount > 0) {
+            warnings.add(inactiveCount + " non-ACTIVE student(s) skipped for item '"
+                    + item.getFeeHead().getName() + "'.");
+        }
+        return activeStudents;
     }
 
     // ─── Core generation logic ────────────────────────────────────────────────
 
     /**
      * Shared generation / preview core.  When {@code persist} is {@code false}
-     * we only count without writing to the database.
+     * only counts rows without writing to the database (sequence is NOT advanced).
      */
     private DemandGenerationResultDTO runGeneration(Integer planId, boolean persist) {
         Integer schoolId = requireSchoolId();
@@ -140,25 +163,21 @@ public class FeeDemandService {
                     + "Current status: " + plan.getStatus());
         }
 
-        School school = schoolRepo.findById(schoolId)
+        School      school      = schoolRepo.findById(schoolId)
                 .orElseThrow(() -> new IllegalStateException("School not found: " + schoolId));
-
-        AcademicYear academicYear = plan.getAcademicYear();
-        Integer academicYearId = academicYear.getId();
+        AcademicYear academicYear   = plan.getAcademicYear();
+        Integer      academicYearId = academicYear.getId();
 
         List<FeePlanItem> items = feePlanItemRepository.findByFeePlan_IdOrderByIdAsc(planId);
         if (items.isEmpty()) {
             throw new IllegalStateException("Fee plan has no items — cannot generate demands.");
         }
 
-        List<String> warnings = new ArrayList<>();
-        int created = 0;
-        int skipped = 0;
-        BigDecimal totalAmount = BigDecimal.ZERO;
-        Set<Integer> applicableStudentIds = new LinkedHashSet<>();
-
-        // Fetch a stable base sequence. We increment per-demand below.
-        long baseSeq = demandRepository.nextDemandSequence(schoolId);
+        List<String>  warnings           = new ArrayList<>();
+        int           created            = 0;
+        int           skipped            = 0;
+        BigDecimal    totalAmount        = BigDecimal.ZERO;
+        Set<Integer>  applicableStudentIds = new LinkedHashSet<>();
 
         for (FeePlanItem item : items) {
             List<FeeInstallment> installments =
@@ -176,10 +195,10 @@ public class FeeDemandService {
                 applicableStudentIds.add(student.getId());
 
                 for (FeeInstallment installment : installments) {
-                    // Duplicate check
-                    boolean exists = demandRepository.existsByStudent_IdAndFeePlanItem_IdAndInstallment_Id(
-                            student.getId(), item.getId(), installment.getId());
-
+                    // Pre-check for duplicate (reduces noise; DB constraint is the hard guard)
+                    boolean exists = demandRepository
+                            .existsBySchool_IdAndStudentItemInstallment(
+                                    schoolId, student.getId(), item.getId(), installment.getId());
                     if (exists) {
                         skipped++;
                         continue;
@@ -190,6 +209,9 @@ public class FeeDemandService {
                     created++;
 
                     if (persist) {
+                        // Allocate demand number only for rows we are about to insert
+                        long seq = sequenceService.nextValue(schoolId, SequenceType.FEE_DEMAND);
+
                         StudentFeeDemand demand = new StudentFeeDemand();
                         demand.setSchool(school);
                         demand.setStudent(student);
@@ -198,9 +220,8 @@ public class FeeDemandService {
                         demand.setFeeHead(item.getFeeHead());
                         demand.setFeePlanItem(item);
                         demand.setInstallment(installment);
-                        demand.setDemandNo(buildDemandNo(school, academicYear, baseSeq++));
-                        demand.setDescription(item.getFeeHead().getName()
-                                + " — " + installment.getName());
+                        demand.setDemandNo(buildDemandNo(school, academicYear, seq));
+                        demand.setDescription(item.getFeeHead().getName() + " — " + installment.getName());
                         demand.setOriginalAmount(amount);
                         demand.setConcessionAmount(BigDecimal.ZERO);
                         demand.setFineAmount(BigDecimal.ZERO);
@@ -209,7 +230,19 @@ public class FeeDemandService {
                         demand.setBalanceAmount(amount);
                         demand.setDueDate(installment.getDueDate());
                         demand.setStatus(StudentFeeDemandStatus.UNPAID);
-                        demandRepository.save(demand);
+
+                        try {
+                            demandRepository.save(demand);
+                        } catch (DataIntegrityViolationException dive) {
+                            // Race condition: another thread inserted the same demand between our
+                            // check and our insert. Count it as skipped; demand number is abandoned
+                            // (the sequence is still advanced — a small gap is acceptable and safe).
+                            log.warn("[fee_demand.generation] duplicate skipped (race) for student={} item={} installment={}",
+                                    student.getId(), item.getId(), installment.getId());
+                            created--;
+                            skipped++;
+                            totalAmount = totalAmount.subtract(amount);
+                        }
                     }
                 }
             }
@@ -220,7 +253,7 @@ public class FeeDemandService {
                 .planName(plan.getName())
                 .dryRun(!persist)
                 .totalApplicableStudents(applicableStudentIds.size())
-                .createdDemands(persist ? created : created)
+                .createdDemands(created)
                 .skippedExistingDemands(skipped)
                 .totalAmountGenerated(totalAmount)
                 .warnings(warnings)
@@ -229,6 +262,7 @@ public class FeeDemandService {
 
     /**
      * Dry-run: compute what would be generated without persisting anything.
+     * Does NOT advance any sequence.
      */
     @Transactional(readOnly = true)
     public DemandGenerationResultDTO previewDemandGeneration(Integer planId) {
@@ -237,12 +271,11 @@ public class FeeDemandService {
 
     /**
      * Persist demands for the given published fee plan.
-     * Idempotent — existing demands are skipped.
+     * Idempotent — existing demands are skipped gracefully.
      */
     @Transactional
     public DemandGenerationResultDTO generateDemands(Integer planId) {
         DemandGenerationResultDTO result = runGeneration(planId, true);
-        // TODO: audit(fee_demand.generated, schoolId, planId, createdDemands, triggeredByUserId)
         log.info("[AUDIT] fee_demand.generated planId={} created={} skipped={}",
                 planId, result.getCreatedDemands(), result.getSkippedExistingDemands());
         return result;
@@ -250,18 +283,10 @@ public class FeeDemandService {
 
     // ─── Query methods ────────────────────────────────────────────────────────
 
-    /**
-     * Filtered list of demands for the current school.
-     */
     @Transactional(readOnly = true)
     public List<StudentFeeDemandDTO> listDemands(
-            Integer studentId,
-            Integer classGroupId,
-            Integer academicYearId,
-            Integer feePlanId,
-            String statusStr,
-            LocalDate dueFrom,
-            LocalDate dueTo) {
+            Integer studentId, Integer classGroupId, Integer academicYearId,
+            Integer feePlanId, String statusStr, LocalDate dueFrom, LocalDate dueTo) {
 
         Integer schoolId = requireSchoolId();
         StudentFeeDemandStatus status = statusStr != null
@@ -271,22 +296,17 @@ public class FeeDemandService {
         List<StudentFeeDemand> demands = demandRepository.findFiltered(
                 schoolId, studentId, academicYearId, feePlanId, status, dueFrom, dueTo);
 
-        // If classGroupId filter is requested, post-filter via enrollment
         if (classGroupId != null) {
             demands = demands.stream()
                     .filter(d -> classGroupId.equals(
                             d.getStudent().getClassGroup() != null
-                                    ? d.getStudent().getClassGroup().getId()
-                                    : null))
+                                    ? d.getStudent().getClassGroup().getId() : null))
                     .collect(Collectors.toList());
         }
 
         return demands.stream().map(this::toDTO).collect(Collectors.toList());
     }
 
-    /**
-     * All demands for a specific student in the current school.
-     */
     @Transactional(readOnly = true)
     public List<StudentFeeDemandDTO> getStudentDemands(Integer studentId) {
         Integer schoolId = requireSchoolId();

@@ -4,12 +4,12 @@ import com.myhaimi.sms.DTO.fee.*;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.PaymentMode;
 import com.myhaimi.sms.entity.enums.PaymentStatus;
+import com.myhaimi.sms.entity.enums.SequenceType;
 import com.myhaimi.sms.entity.enums.StudentFeeDemandStatus;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,8 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -26,11 +25,15 @@ import java.util.stream.Collectors;
  *
  * <p>Business rules enforced:
  * <ul>
- *   <li>Allocated amount per demand ≤ demand balance amount.</li>
- *   <li>Sum of allocations must equal the payment amount.</li>
- *   <li>Demand statuses are updated after payment (PAID / PARTIAL / UNPAID).</li>
- *   <li>Receipt number is unique per school: RCPT-{year}-{seq:06d}.</li>
- *   <li>Cancellation reverses all allocations and marks demands appropriately.</li>
+ *   <li>Allocations list must not be empty.</li>
+ *   <li>No duplicate demand IDs in one request.</li>
+ *   <li>Demand must be UNPAID or PARTIAL — rejects PAID, WAIVED, CANCELLED.</li>
+ *   <li>Demand balance must be > 0.</li>
+ *   <li>Allocated amount per demand must be positive and ≤ demand balance.</li>
+ *   <li>Payment amount = sum of allocations (derived, not a request field).</li>
+ *   <li>UPI / BANK_TRANSFER / CHEQUE / CARD require a non-blank referenceNo.</li>
+ *   <li>Receipt number is school-scoped and sequence-safe (no COUNT+1).</li>
+ *   <li>Cancellation reverses allocations, cannot make paidAmount negative, preserves records.</li>
  * </ul>
  * </p>
  */
@@ -39,6 +42,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class FeePaymentService {
 
+    /** Payment modes that require a non-blank reference number. */
+    private static final Set<PaymentMode> REFERENCE_REQUIRED_MODES = Set.of(
+            PaymentMode.UPI, PaymentMode.BANK_TRANSFER, PaymentMode.CHEQUE, PaymentMode.CARD);
+
+    /** Demand statuses that block receiving payment. */
+    private static final Set<StudentFeeDemandStatus> NON_PAYABLE_STATUSES = Set.of(
+            StudentFeeDemandStatus.PAID, StudentFeeDemandStatus.WAIVED, StudentFeeDemandStatus.CANCELLED);
+
     private final FeePaymentRepo paymentRepo;
     private final FeePaymentAllocationRepository allocationRepo;
     private final FeeReceiptRepository receiptRepo;
@@ -46,6 +57,7 @@ public class FeePaymentService {
     private final StudentRepo studentRepo;
     private final SchoolRepo schoolRepo;
     private final UserRepo userRepo;
+    private final SchoolSequenceService sequenceService;
 
     // ─── helpers ──────────────────────────────────────────────────────────────
 
@@ -69,14 +81,18 @@ public class FeePaymentService {
         }
     }
 
+    /**
+     * Builds a collision-safe receipt number using the school-scoped sequence service.
+     * Format: RCPT-{year}-{seq:06d}
+     */
     private String buildReceiptNo(Integer schoolId, LocalDate paymentDate) {
-        long seq = paymentRepo.nextReceiptSequence(schoolId);
+        long seq = sequenceService.nextValue(schoolId, SequenceType.FEE_RECEIPT);
         int year = paymentDate.getYear();
         return String.format("RCPT-%d-%06d", year, seq);
     }
 
     private void updateDemandStatus(StudentFeeDemand demand) {
-        BigDecimal paid = demand.getPaidAmount() != null ? demand.getPaidAmount() : BigDecimal.ZERO;
+        BigDecimal paid    = demand.getPaidAmount()    != null ? demand.getPaidAmount()    : BigDecimal.ZERO;
         BigDecimal payable = demand.getPayableAmount() != null ? demand.getPayableAmount() : BigDecimal.ZERO;
         if (paid.compareTo(BigDecimal.ZERO) == 0) {
             demand.setStatus(StudentFeeDemandStatus.UNPAID);
@@ -92,12 +108,26 @@ public class FeePaymentService {
     @Transactional
     public FeePaymentDTO collectPayment(FeePaymentCreateRequestDTO req) {
         Integer schoolId = requireSchoolId();
-        School school = requireSchool(schoolId);
+        School  school   = requireSchool(schoolId);
 
         Student student = studentRepo.findByIdAndSchool_Id(req.getStudentId(), schoolId)
                 .orElseThrow(() -> new IllegalArgumentException("Student not found: " + req.getStudentId()));
 
-        // Validate payment mode
+        // ── 1. Allocations must not be empty ───────────────────────────────
+        if (req.getAllocations() == null || req.getAllocations().isEmpty()) {
+            throw new IllegalArgumentException("At least one demand allocation is required.");
+        }
+
+        // ── 2. No duplicate demand IDs ─────────────────────────────────────
+        Set<Long> seenDemandIds = new HashSet<>();
+        for (FeePaymentCreateRequestDTO.AllocationItemDTO alloc : req.getAllocations()) {
+            if (!seenDemandIds.add(alloc.getDemandId())) {
+                throw new IllegalArgumentException(
+                        "Duplicate demand ID in allocations: " + alloc.getDemandId());
+            }
+        }
+
+        // ── 3. Validate payment mode ───────────────────────────────────────
         PaymentMode mode;
         try {
             mode = PaymentMode.valueOf(req.getPaymentMode().toUpperCase());
@@ -105,37 +135,60 @@ public class FeePaymentService {
             throw new IllegalArgumentException("Invalid paymentMode: " + req.getPaymentMode());
         }
 
-        // Validate allocations and load demands
-        List<StudentFeeDemand> demands = new ArrayList<>();
-        BigDecimal totalAllocated = BigDecimal.ZERO;
+        // ── 4. Reference required modes ────────────────────────────────────
+        if (REFERENCE_REQUIRED_MODES.contains(mode)
+                && (req.getReferenceNo() == null || req.getReferenceNo().isBlank())) {
+            throw new IllegalArgumentException(
+                    "referenceNo is required for payment mode " + mode.name());
+        }
+
+        // ── 5. Validate each allocation ────────────────────────────────────
+        List<StudentFeeDemand> demands       = new ArrayList<>();
+        BigDecimal             totalAllocated = BigDecimal.ZERO;
+
         for (FeePaymentCreateRequestDTO.AllocationItemDTO alloc : req.getAllocations()) {
             StudentFeeDemand demand = demandRepo.findByIdAndSchool_Id(alloc.getDemandId(), schoolId)
                     .orElseThrow(() -> new IllegalArgumentException("Demand not found: " + alloc.getDemandId()));
 
+            // 5a. Demand must belong to the student
             if (!demand.getStudent().getId().equals(req.getStudentId())) {
                 throw new IllegalArgumentException(
                         "Demand " + alloc.getDemandId() + " does not belong to student " + req.getStudentId());
             }
 
-            BigDecimal balance = demand.getBalanceAmount() != null ? demand.getBalanceAmount() : BigDecimal.ZERO;
-            if (alloc.getAmount().compareTo(balance) > 0) {
+            // 5b. Reject non-payable statuses
+            if (NON_PAYABLE_STATUSES.contains(demand.getStatus())) {
                 throw new IllegalArgumentException(
-                        "Allocated amount " + alloc.getAmount() + " exceeds balance " + balance
-                                + " for demand " + demand.getDemandNo());
+                        "Demand " + demand.getDemandNo() + " is " + demand.getStatus()
+                        + " and cannot receive payment.");
             }
+
+            // 5c. Balance must be positive
+            BigDecimal balance = demand.getBalanceAmount() != null ? demand.getBalanceAmount() : BigDecimal.ZERO;
+            if (balance.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new IllegalArgumentException(
+                        "Demand " + demand.getDemandNo() + " has no remaining balance.");
+            }
+
+            // 5d. Allocation amount must be positive and ≤ balance
             if (alloc.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
                 throw new IllegalArgumentException(
                         "Allocated amount must be positive for demand " + demand.getDemandNo());
+            }
+            if (alloc.getAmount().compareTo(balance) > 0) {
+                throw new IllegalArgumentException(
+                        "Allocated amount " + alloc.getAmount() + " exceeds balance " + balance
+                        + " for demand " + demand.getDemandNo());
             }
 
             demands.add(demand);
             totalAllocated = totalAllocated.add(alloc.getAmount());
         }
 
-        // Compute total from allocations (payment amount = sum of allocations)
+        // Payment amount is derived from allocations (not a separate request field).
         BigDecimal paymentAmount = totalAllocated;
 
-        // Build and save payment
+        // ── 6. Build and save payment ──────────────────────────────────────
         FeePayment payment = new FeePayment();
         payment.setSchool(school);
         payment.setStudent(student);
@@ -149,7 +202,7 @@ public class FeePaymentService {
         payment.setReceiptNo(buildReceiptNo(schoolId, req.getPaymentDate()));
         payment = paymentRepo.save(payment);
 
-        // Create allocations and update demands
+        // ── 7. Create allocations and update demands ───────────────────────
         List<FeePaymentAllocation> savedAllocations = new ArrayList<>();
         for (int i = 0; i < req.getAllocations().size(); i++) {
             FeePaymentCreateRequestDTO.AllocationItemDTO allocReq = req.getAllocations().get(i);
@@ -161,7 +214,6 @@ public class FeePaymentService {
             allocation.setAllocatedAmount(allocReq.getAmount());
             savedAllocations.add(allocationRepo.save(allocation));
 
-            // Update demand paid/balance
             BigDecimal newPaid = demand.getPaidAmount().add(allocReq.getAmount());
             demand.setPaidAmount(newPaid);
             demand.recalculate();
@@ -169,14 +221,13 @@ public class FeePaymentService {
             demandRepo.save(demand);
         }
 
-        // Create receipt
+        // ── 8. Create receipt ──────────────────────────────────────────────
         FeeReceipt receipt = new FeeReceipt();
         receipt.setPayment(payment);
         receipt.setReceiptNo(payment.getReceiptNo());
         receipt.setIssuedAt(Instant.now());
         receipt = receiptRepo.save(receipt);
 
-        // TODO: audit(fee_payment.collected, schoolId, paymentId, receiptNo, amount, collectedByUserId)
         log.info("[AUDIT] fee_payment.collected schoolId={} paymentId={} receiptNo={} amount={} collectedBy={}",
                 schoolId, payment.getId(), payment.getReceiptNo(), paymentAmount, payment.getCollectedByUserId());
 
@@ -223,6 +274,18 @@ public class FeePaymentService {
 
     // ─── cancel payment ───────────────────────────────────────────────────────
 
+    /**
+     * Cancels a payment.
+     *
+     * <ul>
+     *   <li>Requires a non-blank cancel reason.</li>
+     *   <li>Rejects already-cancelled payments.</li>
+     *   <li>Reverses all demand allocations (paidAmount never goes below 0).</li>
+     *   <li>Recalculates demand statuses.</li>
+     *   <li>Marks the receipt as cancelled.</li>
+     *   <li>Records are preserved — never deleted.</li>
+     * </ul>
+     */
     @Transactional
     public FeePaymentDTO cancelPayment(Long paymentId, String cancelReason) {
         Integer schoolId = requireSchoolId();
@@ -231,13 +294,13 @@ public class FeePaymentService {
                 .orElseThrow(() -> new IllegalArgumentException("Payment not found: " + paymentId));
 
         if (payment.getStatus() == PaymentStatus.CANCELLED) {
-            throw new IllegalStateException("Payment is already cancelled");
+            throw new IllegalStateException("Payment " + paymentId + " is already cancelled.");
         }
         if (cancelReason == null || cancelReason.isBlank()) {
-            throw new IllegalArgumentException("cancelReason is required");
+            throw new IllegalArgumentException("cancelReason is required to cancel a payment.");
         }
 
-        // Reverse allocations — subtract from demand paidAmount and recalculate
+        // Reverse allocations — paidAmount never goes below 0
         List<FeePaymentAllocation> allocations = allocationRepo.findByPayment_Id(paymentId);
         for (FeePaymentAllocation alloc : allocations) {
             StudentFeeDemand demand = alloc.getStudentFeeDemand();
@@ -249,11 +312,11 @@ public class FeePaymentService {
             demandRepo.save(demand);
         }
 
-        // Mark payment cancelled
+        // Mark payment CANCELLED (never delete)
         payment.setStatus(PaymentStatus.CANCELLED);
         payment = paymentRepo.save(payment);
 
-        // Mark receipt cancelled
+        // Mark receipt cancelled (never delete)
         FeeReceipt receipt = receiptRepo.findByPayment_Id(paymentId).orElse(null);
         if (receipt != null) {
             receipt.setCancelledAt(Instant.now());
@@ -261,7 +324,6 @@ public class FeePaymentService {
             receipt = receiptRepo.save(receipt);
         }
 
-        // TODO: audit(fee_payment.cancelled, schoolId, paymentId, cancelledByUserId, reason)
         log.info("[AUDIT] fee_payment.cancelled schoolId={} paymentId={} reason='{}'",
                 schoolId, paymentId, cancelReason);
 
@@ -280,8 +342,7 @@ public class FeePaymentService {
     }
 
     private FeePaymentDTO toDTOSummary(FeePayment p) {
-        FeePaymentDTO dto = baseDTO(p);
-        return dto;
+        return baseDTO(p);
     }
 
     private FeePaymentDTO toDTOWithDetails(FeePayment p) {
@@ -296,7 +357,7 @@ public class FeePaymentService {
         dto.setSchoolId(p.getSchool().getId());
         dto.setStudentId(p.getStudent().getId());
         String firstName = p.getStudent().getFirstName();
-        String lastName = p.getStudent().getLastName();
+        String lastName  = p.getStudent().getLastName();
         dto.setStudentName(firstName + (lastName != null ? " " + lastName : ""));
         dto.setReceiptNo(p.getReceiptNo());
         dto.setAmount(p.getAmount());

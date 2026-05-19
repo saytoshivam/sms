@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SchoolManagementService {
 
-    private final FeeService feeService;
+    private final FeeDashboardService feeDashboardService;
     private final TenantSubscriptionRepository tenantSubscriptionRepository;
     private final SubscriptionPlanRepository subscriptionPlanRepository;
     private final UserRepo userRepo;
@@ -72,7 +72,7 @@ public class SchoolManagementService {
     @Transactional(readOnly = true)
     public SchoolManagementOverviewDTO overview() {
         Integer schoolId = requireTenant();
-        FeeSchoolSummaryDTO fees = feeService.getSchoolSummary();
+        FeeSchoolSummaryDTO fees = feeDashboardService.getSchoolSummary();
 
         String planCode = null;
         String planName = null;

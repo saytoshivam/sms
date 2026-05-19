@@ -1,11 +1,13 @@
 package com.myhaimi.sms.service.impl;
 
+import com.myhaimi.sms.DTO.FeeSchoolSummaryDTO;
 import com.myhaimi.sms.DTO.fee.*;
 import com.myhaimi.sms.entity.enums.PaymentMode;
 import com.myhaimi.sms.entity.enums.StudentFeeDemandStatus;
 import com.myhaimi.sms.repository.FeePaymentRepo;
 import com.myhaimi.sms.repository.FeeReceiptRepository;
 import com.myhaimi.sms.repository.StudentFeeDemandRepository;
+import com.myhaimi.sms.repository.StudentRepo;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +36,7 @@ public class FeeDashboardService {
     private final StudentFeeDemandRepository demandRepo;
     private final FeePaymentRepo paymentRepo;
     private final FeeReceiptRepository receiptRepo;
+    private final StudentRepo studentRepo;
 
     // ─── helpers ───────────────────────────────────���──────────────────────────
 
@@ -71,6 +74,24 @@ public class FeeDashboardService {
         }
 
         return new FeeDashboardDTO(expected, collected, outstanding, overdue, rate, studentsWithDues);
+    }
+
+    /**
+     * Simplified fee KPI snapshot for the school overview (no academic year filter).
+     * Used by {@link SchoolManagementService#overview()}.
+     */
+    @Transactional(readOnly = true)
+    public FeeSchoolSummaryDTO getSchoolSummary() {
+        Integer schoolId = requireSchoolId();
+        BigDecimal totalInvoiced  = notNull(demandRepo.sumPayableAmount(schoolId, null));
+        BigDecimal totalCollected = notNull(demandRepo.sumPaidAmount(schoolId, null));
+        BigDecimal outstanding    = totalInvoiced.subtract(totalCollected);
+        if (outstanding.compareTo(BigDecimal.ZERO) < 0) outstanding = BigDecimal.ZERO;
+        long students       = studentRepo.countBySchool_Id(schoolId);
+        long demandCount    = demandRepo.countBySchoolId(schoolId);
+        long openDemandCount = demandRepo.countOpenBySchoolId(
+                schoolId, List.of(StudentFeeDemandStatus.UNPAID, StudentFeeDemandStatus.PARTIAL));
+        return new FeeSchoolSummaryDTO(students, totalInvoiced, totalCollected, outstanding, demandCount, openDemandCount);
     }
 
     // ─── Daily Collection Report ──────────────────────────────────────────────

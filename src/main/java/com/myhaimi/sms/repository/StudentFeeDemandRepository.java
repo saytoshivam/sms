@@ -27,16 +27,23 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
 
     boolean existsBySchool_IdAndDemandNo(Integer schoolId, String demandNo);
 
-    /** Duplicate-guard: one demand per student × plan-item × installment. */
-    boolean existsByStudent_IdAndFeePlanItem_IdAndInstallment_Id(
-            Integer studentId, Integer feePlanItemId, Integer installmentId);
+    /**
+     * Duplicate guard: one demand per (school, student, plan-item, installment).
+     * Mirrors the DB unique constraint {@code uq_sfd_student_item_installment}.
+     */
+    @Query("""
+            SELECT COUNT(d) > 0 FROM StudentFeeDemand d
+            WHERE d.school.id        = :schoolId
+              AND d.student.id       = :studentId
+              AND d.feePlanItem.id   = :feePlanItemId
+              AND d.installment.id   = :installmentId
+            """)
+    boolean existsBySchool_IdAndStudentItemInstallment(
+            @Param("schoolId")      Integer schoolId,
+            @Param("studentId")     Integer studentId,
+            @Param("feePlanItemId") Integer feePlanItemId,
+            @Param("installmentId") Integer installmentId);
 
-    @Query("SELECT COUNT(d) FROM StudentFeeDemand d WHERE d.feePlan.id = :feePlanId")
-    long countByFeePlanId(@Param("feePlanId") Integer feePlanId);
-
-    /** Next sequence for demand number generation (school-scoped, +1 for new demand). */
-    @Query("SELECT COUNT(d) + 1 FROM StudentFeeDemand d WHERE d.school.id = :schoolId")
-    long nextDemandSequence(@Param("schoolId") Integer schoolId);
 
     /** Check if any demand exists for a given fee head in the school (used to guard deactivation). */
     boolean existsBySchool_IdAndFeeHead_Id(Integer schoolId, Integer feeHeadId);

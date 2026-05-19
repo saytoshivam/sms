@@ -38,9 +38,6 @@ public interface FeePaymentRepo extends JpaRepository<FeePayment, Long> {
             @Param("toDate")      LocalDate toDate,
             @Param("status")      PaymentStatus status);
 
-    /** Next receipt sequence for the school (school-scoped). */
-    @Query("SELECT COUNT(p) + 1 FROM FeePayment p WHERE p.school.id = :schoolId")
-    long nextReceiptSequence(@Param("schoolId") Integer schoolId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM FeePayment p WHERE p.student.id IN :ids")

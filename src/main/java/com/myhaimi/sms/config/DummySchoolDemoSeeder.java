@@ -53,7 +53,6 @@ public class DummySchoolDemoSeeder implements CommandLineRunner {
     private final AttendanceSessionRepo attendanceSessionRepo;
     private final StudentAttendanceRepo studentAttendanceRepo;
     private final StudentMarkRepo studentMarkRepo;
-    private final FeeInvoiceRepo feeInvoiceRepo;
     private final UserRepo userRepo;
     private final RoleRepo roleRepo;
     private final PasswordEncoder passwordEncoder;
@@ -234,16 +233,6 @@ public class DummySchoolDemoSeeder implements CommandLineRunner {
             upsertMark(school, s, "SCI", "PRACX", "Practical exam", new BigDecimal("40"), bd(30 + rnd.nextInt(8)), today.minusDays(11));
         }
 
-        for (int i = 0; i < 3; i++) {
-            Student s = classA.get(i);
-            FeeInvoice inv = new FeeInvoice();
-            inv.setSchool(school);
-            inv.setStudent(s);
-            inv.setAmountDue(new BigDecimal("45000.00"));
-            inv.setDueDate(today.plusMonths(1));
-            inv.setStatus("PARTIAL");
-            inv = feeInvoiceRepo.save(inv);
-        }
 
         Role rAdmin = roleRepo.findByName("SCHOOL_ADMIN").stream().findFirst().orElseThrow();
         Role rPrincipal = roleRepo.findByName("PRINCIPAL").stream().findFirst().orElseThrow();

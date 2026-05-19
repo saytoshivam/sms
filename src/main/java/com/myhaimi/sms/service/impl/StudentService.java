@@ -19,7 +19,6 @@ import com.myhaimi.sms.entity.enums.FileVisibility;
 import com.myhaimi.sms.modules.files.FileObjectDTO;
 import com.myhaimi.sms.modules.files.FileService;
 import com.myhaimi.sms.repository.*;
-import com.myhaimi.sms.repository.FeeInvoiceRepo;
 import com.myhaimi.sms.repository.FeePaymentAllocationRepository;
 import com.myhaimi.sms.repository.FeePaymentRepo;
 import com.myhaimi.sms.repository.FeeReceiptRepository;
@@ -71,7 +70,6 @@ public class StudentService {
     private final DocumentTypeRepo documentTypeRepo;
     private final StudentAttendanceRepo attendanceRepo;
     private final StudentMarkRepo markRepo;
-    private final FeeInvoiceRepo feeInvoiceRepo;
     private final FeePaymentRepo feePaymentRepo;
     private final FeePaymentAllocationRepository allocationRepo;
     private final FeeReceiptRepository receiptRepo;
@@ -113,7 +111,6 @@ public class StudentService {
         receiptRepo.deleteByPayment_Student_IdIn(ids);
         feePaymentRepo.deleteByStudent_IdIn(ids);
         demandRepo.deleteByStudent_IdIn(ids);
-        feeInvoiceRepo.deleteByStudent_IdIn(ids);
         studentGuardianRepo.deleteByStudent_IdIn(ids);
         // Entity-based delete to trigger Hibernate cascade on user_roles join table
         List<User> linkedUsers = userRepo.findByLinkedStudent_IdIn(ids);
@@ -138,7 +135,6 @@ public class StudentService {
         receiptRepo.deleteByPayment_Student_IdIn(ids);
         feePaymentRepo.deleteByStudent_IdIn(ids);
         demandRepo.deleteByStudent_IdIn(ids);
-        feeInvoiceRepo.deleteByStudent_IdIn(ids);
         studentGuardianRepo.deleteByStudent_IdIn(ids);
         // Entity-based delete to trigger Hibernate cascade on user_roles join table
         List<User> linkedUsers = userRepo.findByLinkedStudent_IdIn(ids);

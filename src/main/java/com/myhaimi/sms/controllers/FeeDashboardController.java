@@ -1,5 +1,6 @@
 package com.myhaimi.sms.controllers;
 
+import com.myhaimi.sms.DTO.FeeSchoolSummaryDTO;
 import com.myhaimi.sms.DTO.fee.*;
 import com.myhaimi.sms.service.impl.FeeDashboardService;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,22 @@ import java.util.Map;
 public class FeeDashboardController {
 
     private final FeeDashboardService dashboardService;
+
+    // ─── School Summary (replaces /api/fees/summary from old FeeController) ─────
+
+    /**
+     * GET /api/fees/summary
+     * School-wide fee KPIs backed by the new demand/payment engine.
+     * Replaces the old invoice-based endpoint.
+     */
+    @GetMapping("/summary")
+    public ResponseEntity<?> summary() {
+        try {
+            return ResponseEntity.ok(dashboardService.getSchoolSummary());
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        }
+    }
 
     // ─── Dashboard ────────────────────────────────────────────────────────────
 
