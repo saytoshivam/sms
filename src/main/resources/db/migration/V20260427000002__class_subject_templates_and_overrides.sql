@@ -8,27 +8,23 @@ SET @has_csc := (
     SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = @db AND table_name = 'class_subject_configs'
 );
 
-SET @stmt := IF(
-    @has_csc > 0,
-    'SELECT 1',
-    'CREATE TABLE class_subject_configs (\n'
-    '  id BIGINT NOT NULL AUTO_INCREMENT,\n'
-    '  school_id INT NOT NULL,\n'
-    '  grade_level INT NOT NULL,\n'
-    '  subject_id INT NOT NULL,\n'
-    '  default_periods_per_week INT NOT NULL,\n'
-    '  staff_id INT NULL,\n'
-    '  room_id INT NULL,\n'
-    '  PRIMARY KEY (id),\n'
-    '  UNIQUE KEY uq_class_subject_cfg (school_id, grade_level, subject_id),\n'
-    '  KEY idx_csc_school (school_id), -- Logical FK to schools.id\n'
-    '  KEY idx_csc_grade (school_id, grade_level),\n'
-    '  KEY idx_csc_subject (subject_id), -- Logical FK to subjects.id\n'
-    '  KEY idx_csc_staff (staff_id), -- Logical FK to staff.id\n'
-    '  KEY idx_csc_room (room_id) -- Logical FK to rooms.id\n'
-    ') ENGINE=InnoDB'
-);
-PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
+-- Note: single-line string to avoid multi-line adjacent literal concatenation issues in MySQL 9.x
+CREATE TABLE IF NOT EXISTS class_subject_configs (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    school_id INT NOT NULL,
+    grade_level INT NOT NULL,
+    subject_id INT NOT NULL,
+    default_periods_per_week INT NOT NULL,
+    staff_id INT NULL,
+    room_id INT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_class_subject_cfg (school_id, grade_level, subject_id),
+    KEY idx_csc_school (school_id),
+    KEY idx_csc_grade (school_id, grade_level),
+    KEY idx_csc_subject (subject_id),
+    KEY idx_csc_staff (staff_id),
+    KEY idx_csc_room (room_id)
+) ENGINE=InnoDB;
 
 -- 2) subject_section_overrides: add nullable override fields
 SET @has_sso := (
