@@ -2,29 +2,25 @@
 -- MySQL 8+
 
 SET @db := DATABASE();
+SET @has_subjects := (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = @db AND table_name = 'subjects');
 
 -- subjects.allocation_venue_requirement
-SET @stmt := IF(
-    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @db AND table_name = 'subjects' AND column_name = 'allocation_venue_requirement') > 0,
+SET @stmt := IF(@has_subjects = 0 OR (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @db AND table_name = 'subjects' AND column_name = 'allocation_venue_requirement') > 0,
     'SELECT 1',
-    'ALTER TABLE subjects ADD COLUMN allocation_venue_requirement VARCHAR(32) NOT NULL DEFAULT ''STANDARD_CLASSROOM'''
-);
+    'ALTER TABLE subjects ADD COLUMN allocation_venue_requirement VARCHAR(32) NOT NULL DEFAULT ''STANDARD_CLASSROOM''');
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
 -- subjects.specialized_venue_type (RoomType when requirement = SPECIALIZED_ROOM)
-SET @stmt := IF(
-    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @db AND table_name = 'subjects' AND column_name = 'specialized_venue_type') > 0,
+SET @stmt := IF(@has_subjects = 0 OR (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @db AND table_name = 'subjects' AND column_name = 'specialized_venue_type') > 0,
     'SELECT 1',
-    'ALTER TABLE subjects ADD COLUMN specialized_venue_type VARCHAR(32) NULL'
-);
+    'ALTER TABLE subjects ADD COLUMN specialized_venue_type VARCHAR(32) NULL');
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
--- Widen rooms.type for longer enum names
+-- Widen rooms.type for longer enum names (rooms is Flyway-managed)
 SET @stmt := IF(
     (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @db AND table_name = 'rooms' AND column_name = 'type' AND character_maximum_length >= 32) > 0,
     'SELECT 1',
-    'ALTER TABLE rooms MODIFY COLUMN type VARCHAR(32) NOT NULL DEFAULT ''STANDARD_CLASSROOM'''
-);
+    'ALTER TABLE rooms MODIFY COLUMN type VARCHAR(32) NOT NULL DEFAULT ''STANDARD_CLASSROOM''');
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
 UPDATE rooms SET type = 'STANDARD_CLASSROOM' WHERE type = 'CLASSROOM';
