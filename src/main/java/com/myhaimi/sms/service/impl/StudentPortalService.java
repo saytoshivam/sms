@@ -26,14 +26,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.*;
 
 @Service
 @RequiredArgsConstructor
 public class StudentPortalService {
 
-    private static final String GREENWOOD_DEMO_SCHOOL_CODE = "greenwood-demo";
 
     private final StudentRepo studentRepo;
     private final PublishedTimetableCalendarService publishedTimetableCalendarService;
@@ -72,8 +70,7 @@ public class StudentPortalService {
     }
 
     /**
-     * Published exam schedule cards. Demo data for Greenwood ({@value GREENWOOD_DEMO_SCHOOL_CODE}); other schools
-     * return an empty list until exam scheduling is modelled in the database.
+     * Published exam schedule cards. Not yet modelled in the database — returns empty list.
      */
     @Transactional(readOnly = true)
     public List<StudentExamCardDTO> myExamCards(int studentId) {
@@ -81,65 +78,8 @@ public class StudentPortalService {
         if (tenantId == null) {
             throw new IllegalStateException("Tenant context required");
         }
-        Student student = studentRepo.findByIdAndSchool_Id(studentId, tenantId).orElseThrow();
-        School school = student.getSchool();
-        if (school == null || !GREENWOOD_DEMO_SCHOOL_CODE.equalsIgnoreCase(school.getCode())) {
-            return List.of();
-        }
-        return greenwoodDemoExamCards();
-    }
-
-    private static List<StudentExamCardDTO> greenwoodDemoExamCards() {
-        LocalDate today = LocalDate.now();
-        LocalDate dayCbt = today.plusDays(5);
-        LocalDate dayTheory = dayCbt;
-        LocalDate dayPrac1 = today.plusDays(28);
-        LocalDate dayPrac2 = today.plusDays(30);
-        return List.of(
-                new StudentExamCardDTO(
-                        "COMBINED",
-                        null,
-                        "CBT1 of CSE101 and INT306",
-                        null,
-                        null,
-                        "",
-                        dayCbt,
-                        LocalTime.of(9, 30),
-                        LocalTime.of(12, 0),
-                        "25-104"),
-                new StudentExamCardDTO(
-                        "SPLIT",
-                        "ECE249",
-                        "Theory End Term",
-                        "(ReAppear/Improvement)",
-                        "Mix MCQ + Subjective",
-                        "BASIC ELECTRICAL AND ELECTRONICS ENGINEERING",
-                        dayTheory,
-                        LocalTime.of(13, 30),
-                        LocalTime.of(16, 30),
-                        "36-808"),
-                new StudentExamCardDTO(
-                        "SPLIT",
-                        "CSE101",
-                        "Practical End Term",
-                        "(Regular)",
-                        null,
-                        "COMPUTER PROGRAMMING",
-                        dayPrac1,
-                        LocalTime.of(9, 30),
-                        LocalTime.of(12, 30),
-                        "27-401"),
-                new StudentExamCardDTO(
-                        "SPLIT",
-                        "INT306",
-                        "Practical End Term",
-                        "(Regular)",
-                        null,
-                        "DATABASE MANAGEMENT SYSTEMS",
-                        dayPrac2,
-                        LocalTime.of(14, 0),
-                        LocalTime.of(17, 0),
-                        "37-610"));
+        studentRepo.findByIdAndSchool_Id(studentId, tenantId).orElseThrow();
+        return List.of();
     }
 
     @Transactional(readOnly = true)
