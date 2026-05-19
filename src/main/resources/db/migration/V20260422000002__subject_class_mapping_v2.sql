@@ -19,7 +19,6 @@ SET @stmt := IF(
     '  applies_to_all_sections TINYINT(1) NOT NULL DEFAULT 1,\n'
     '  PRIMARY KEY (id),\n'
     '  UNIQUE KEY uk_subject_grade (subject_id, grade_level),\n'
-    '  KEY idx_scm_subject (subject_id),\n'
     '  KEY idx_scm_subject (subject_id) -- Logical FK to subjects.id\n'
     ') ENGINE=InnoDB'
 );
