@@ -6,9 +6,8 @@ CREATE TABLE IF NOT EXISTS staff_teachable_subjects (
     subject_id INT NOT NULL,
     UNIQUE KEY uq_staff_teachable (staff_id, subject_id),
     KEY idx_sts_subject (subject_id),
-    KEY idx_sts_staff (staff_id),
-    CONSTRAINT fk_sts_staff FOREIGN KEY (staff_id) REFERENCES staff (id) ON DELETE CASCADE,
-    CONSTRAINT fk_sts_subject FOREIGN KEY (subject_id) REFERENCES subjects (id) ON DELETE CASCADE
+    KEY idx_sts_staff_id (staff_id),   -- Logical FK to staff.id (Hibernate-managed)
+    KEY idx_sts_subject_id (subject_id) -- Logical FK to subjects.id (Hibernate-managed)
 ) ENGINE=InnoDB;
 
 -- Deduplicate subject_allocations: keep the lowest id for each (school, class, subject).

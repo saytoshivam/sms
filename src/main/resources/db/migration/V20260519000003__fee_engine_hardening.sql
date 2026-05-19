@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS school_sequences (
     PRIMARY KEY (id),
     UNIQUE KEY uq_school_seq_type (school_id, sequence_type),
     KEY idx_school_seq_school (school_id),
-    CONSTRAINT fk_school_seq_school FOREIGN KEY (school_id) REFERENCES schools (id) ON DELETE CASCADE
+    KEY idx_school_seq_school_id (school_id),  -- Logical FK to schools.id (Hibernate-managed)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Atomic per-school sequence counters for financial document numbers.';
 

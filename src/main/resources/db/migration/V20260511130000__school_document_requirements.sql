@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS school_document_requirements (
     created_at          DATETIME(6)  NOT NULL,
     updated_at          DATETIME(6)  NOT NULL,
     UNIQUE KEY uq_sdr_school_doctype_target (school_id, document_type_id, target_type),
+    INDEX idx_sdr_school_id (school_id),  -- Logical FK to schools.id
     INDEX idx_sdr_school_target (school_id, target_type),
-    CONSTRAINT fk_sdr_school   FOREIGN KEY (school_id)        REFERENCES schools(id)        ON DELETE CASCADE,
     CONSTRAINT fk_sdr_doctype  FOREIGN KEY (document_type_id) REFERENCES document_types(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

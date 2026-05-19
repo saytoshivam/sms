@@ -22,8 +22,7 @@ CREATE TABLE IF NOT EXISTS staff_documents (
     created_at          DATETIME(6)   NOT NULL,
     updated_at          DATETIME(6)   NOT NULL,
 
-    CONSTRAINT fk_staff_doc_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
-    INDEX idx_staff_doc_staff_id (staff_id),
+    INDEX idx_staff_doc_staff_id (staff_id),  -- Logical FK to staff.id
     INDEX idx_staff_doc_document_type (document_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

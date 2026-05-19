@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS platform_operator_notification_reads (
     read_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     PRIMARY KEY (notification_id, user_id),
     CONSTRAINT fk_ponr_notification FOREIGN KEY (notification_id) REFERENCES platform_operator_notifications (id) ON DELETE CASCADE,
-    CONSTRAINT fk_ponr_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    KEY idx_ponr_user_id (user_id)  -- Logical FK to users.id (Hibernate-managed)
 );
 
 SET @idx_exists := (

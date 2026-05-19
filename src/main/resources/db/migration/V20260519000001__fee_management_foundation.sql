@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS fee_heads (
     PRIMARY KEY (id),
     UNIQUE KEY uq_fee_head_school_code (school_id, code),
     KEY idx_fee_head_school (school_id),
-    CONSTRAINT fk_fee_head_school FOREIGN KEY (school_id) REFERENCES schools (id) ON DELETE CASCADE
+    KEY idx_fee_head_school_id (school_id) -- Logical FK to schools.id (Hibernate-managed)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Master fee category definitions per school.';
 
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS fee_plans (
     KEY idx_fee_plan_school (school_id),
     KEY idx_fee_plan_academic_year (academic_year_id),
     KEY idx_fee_plan_status (status),
-    CONSTRAINT fk_fee_plan_school        FOREIGN KEY (school_id)        REFERENCES schools        (id) ON DELETE CASCADE,
+    KEY idx_fee_plan_school_id (school_id),   -- Logical FK to schools.id (Hibernate-managed)
     CONSTRAINT fk_fee_plan_academic_year FOREIGN KEY (academic_year_id) REFERENCES academic_years (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Fee plan (template) for a school academic year.';
@@ -122,8 +122,8 @@ CREATE TABLE IF NOT EXISTS student_fee_demands (
     KEY idx_sfd_fee_head    (fee_head_id),
     KEY idx_sfd_status      (status),
     KEY idx_sfd_due_date    (due_date),
-    CONSTRAINT fk_sfd_school          FOREIGN KEY (school_id)        REFERENCES schools          (id) ON DELETE CASCADE,
-    CONSTRAINT fk_sfd_student         FOREIGN KEY (student_id)       REFERENCES students         (id) ON DELETE CASCADE,
+    KEY idx_sfd_school_id  (school_id),   -- Logical FK to schools.id (Hibernate-managed)
+    KEY idx_sfd_student_id (student_id),  -- Logical FK to students.id (Hibernate-managed)
     CONSTRAINT fk_sfd_academic_year   FOREIGN KEY (academic_year_id) REFERENCES academic_years   (id) ON DELETE RESTRICT,
     CONSTRAINT fk_sfd_fee_plan        FOREIGN KEY (fee_plan_id)      REFERENCES fee_plans        (id) ON DELETE RESTRICT,
     CONSTRAINT fk_sfd_fee_head        FOREIGN KEY (fee_head_id)      REFERENCES fee_heads        (id) ON DELETE RESTRICT,

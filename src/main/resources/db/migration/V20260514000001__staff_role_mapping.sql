@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS staff_role_mapping (
     role_id  BIGINT       NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_staff_role (staff_id, role_id),
-    CONSTRAINT fk_srm_staff FOREIGN KEY (staff_id) REFERENCES staff (id)  ON DELETE CASCADE,
-    CONSTRAINT fk_srm_role  FOREIGN KEY (role_id)  REFERENCES roles (id) ON DELETE CASCADE
+    KEY idx_srm_staff_id (staff_id),  -- Logical FK to staff.id (Hibernate-managed)
+    KEY idx_srm_role_id  (role_id)    -- Logical FK to roles.id (Hibernate-managed)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='First-class staff role assignments. Independent of portal login.';
 

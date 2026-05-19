@@ -11,9 +11,8 @@ CREATE TABLE IF NOT EXISTS academic_years (
     ends_on DATE NOT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    CONSTRAINT fk_academic_years_school FOREIGN KEY (school_id) REFERENCES schools (id),
     UNIQUE KEY uk_academic_year_school_label (school_id, label),
-    KEY idx_academic_year_school (school_id)
+    KEY idx_academic_year_school (school_id)  -- Logical FK to schools.id (Hibernate-managed)
 ) ENGINE=InnoDB;
 
 -- ---- students extra columns ----
@@ -114,8 +113,8 @@ CREATE TABLE IF NOT EXISTS student_guardians (
     is_primary BIT(1) NOT NULL DEFAULT b'0',
     can_login BIT(1) NOT NULL DEFAULT b'0',
     receives_notifications BIT(1) NOT NULL DEFAULT b'1',
-    CONSTRAINT fk_sg_student FOREIGN KEY (student_id) REFERENCES students (id),
-    CONSTRAINT fk_sg_guardian FOREIGN KEY (guardian_id) REFERENCES guardians (id),
+    KEY idx_sg_student_id (student_id),   -- Logical FK to students.id (Hibernate-managed)
+    KEY idx_sg_guardian_id (guardian_id), -- Logical FK to guardians.id (Hibernate-managed)
     UNIQUE KEY uk_sg_student_guardian (student_id, guardian_id),
     KEY idx_sg_student_primary (student_id, is_primary)
 ) ENGINE=InnoDB;
@@ -167,9 +166,9 @@ CREATE TABLE IF NOT EXISTS student_academic_enrollments (
     status VARCHAR(32) NOT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    CONSTRAINT fk_sae_student FOREIGN KEY (student_id) REFERENCES students (id),
+    KEY idx_sae_student_id (student_id),          -- Logical FK to students.id (Hibernate-managed)
     CONSTRAINT fk_sae_ay FOREIGN KEY (academic_year_id) REFERENCES academic_years (id),
-    CONSTRAINT fk_sae_class_group FOREIGN KEY (class_group_id) REFERENCES class_groups (id),
+    KEY idx_sae_class_group_id (class_group_id),  -- Logical FK to class_groups.id (Hibernate-managed)
     UNIQUE KEY uk_sae_student_academic_year (student_id, academic_year_id),
     UNIQUE KEY uk_sae_roll (academic_year_id, class_group_id, roll_no),
     KEY idx_sae_student (student_id),
@@ -186,7 +185,7 @@ CREATE TABLE IF NOT EXISTS student_medical_infos (
     emergency_contact_phone VARCHAR(32) NULL,
     doctor_contact VARCHAR(256) NULL,
     medication_notes VARCHAR(4096) NULL,
-    CONSTRAINT fk_smi_student FOREIGN KEY (student_id) REFERENCES students (id)
+    KEY idx_smi_student_id (student_id)  -- Logical FK to students.id (Hibernate-managed)
 ) ENGINE=InnoDB;
 
 -- ---- documents ----
@@ -201,7 +200,7 @@ CREATE TABLE IF NOT EXISTS student_documents (
     remarks VARCHAR(1024) NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-    CONSTRAINT fk_sd_student FOREIGN KEY (student_id) REFERENCES students (id),
+    KEY idx_sd_student_id (student_id),  -- Logical FK to students.id (Hibernate-managed)
     KEY idx_sd_student (student_id)
 ) ENGINE=InnoDB;
 

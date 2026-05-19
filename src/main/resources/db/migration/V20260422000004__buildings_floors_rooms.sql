@@ -19,7 +19,7 @@ SET @stmt := IF(
     '  PRIMARY KEY (id),\n'
     '  UNIQUE KEY uk_buildings_school_name (school_id, name),\n'
     '  KEY idx_buildings_school (school_id),\n'
-    '  CONSTRAINT fk_buildings_school FOREIGN KEY (school_id) REFERENCES schools(id)\n'
+    '  KEY idx_buildings_school_id (school_id) -- Logical FK to schools.id\n'
     ') ENGINE=InnoDB'
 );
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;

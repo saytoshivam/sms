@@ -21,15 +21,11 @@ SET @stmt := IF(
     '  room_id INT NULL,\n'
     '  PRIMARY KEY (id),\n'
     '  UNIQUE KEY uq_class_subject_cfg (school_id, grade_level, subject_id),\n'
-    '  KEY idx_csc_school (school_id),\n'
+    '  KEY idx_csc_school (school_id), -- Logical FK to schools.id\n'
     '  KEY idx_csc_grade (school_id, grade_level),\n'
-    '  KEY idx_csc_subject (subject_id),\n'
-    '  KEY idx_csc_staff (staff_id),\n'
-    '  KEY idx_csc_room (room_id),\n'
-    '  CONSTRAINT fk_csc_school FOREIGN KEY (school_id) REFERENCES schools(id),\n'
-    '  CONSTRAINT fk_csc_subject FOREIGN KEY (subject_id) REFERENCES subjects(id),\n'
-    '  CONSTRAINT fk_csc_staff FOREIGN KEY (staff_id) REFERENCES staff(id),\n'
-    '  CONSTRAINT fk_csc_room FOREIGN KEY (room_id) REFERENCES rooms(id)\n'
+    '  KEY idx_csc_subject (subject_id), -- Logical FK to subjects.id\n'
+    '  KEY idx_csc_staff (staff_id), -- Logical FK to staff.id\n'
+    '  KEY idx_csc_room (room_id) -- Logical FK to rooms.id\n'
     ') ENGINE=InnoDB'
 );
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
@@ -60,7 +56,7 @@ SET @stmt := IF(
         (SELECT COUNT(*) FROM information_schema.columns
             WHERE table_schema = @db AND table_name = 'subject_section_overrides' AND column_name = 'staff_id') > 0,
         'SELECT 1',
-        'ALTER TABLE subject_section_overrides ADD COLUMN staff_id INT NULL, ADD KEY idx_sso_staff (staff_id), ADD CONSTRAINT fk_sso_staff FOREIGN KEY (staff_id) REFERENCES staff(id)'
+        'ALTER TABLE subject_section_overrides ADD COLUMN staff_id INT NULL, ADD KEY idx_sso_staff (staff_id)'
     )
 );
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
@@ -73,7 +69,7 @@ SET @stmt := IF(
         (SELECT COUNT(*) FROM information_schema.columns
             WHERE table_schema = @db AND table_name = 'subject_section_overrides' AND column_name = 'room_id') > 0,
         'SELECT 1',
-        'ALTER TABLE subject_section_overrides ADD COLUMN room_id INT NULL, ADD KEY idx_sso_room (room_id), ADD CONSTRAINT fk_sso_room FOREIGN KEY (room_id) REFERENCES rooms(id)'
+        'ALTER TABLE subject_section_overrides ADD COLUMN room_id INT NULL, ADD KEY idx_sso_room (room_id)'
     )
 );
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;

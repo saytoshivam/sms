@@ -8,8 +8,22 @@
 --   fee_receipts           — receipt document per payment
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- ── 1. Preserve old invoice-based payments ───────────────────────────────────
-RENAME TABLE fee_payments TO legacy_fee_payments;
+-- ── 1. Preserve old invoice-based payments (only if old table exists) ──────────
+DROP PROCEDURE IF EXISTS _safe_rename_fee_payments;
+CREATE PROCEDURE _safe_rename_fee_payments()
+BEGIN
+  IF EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = DATABASE() AND table_name = 'fee_payments'
+  ) AND NOT EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = DATABASE() AND table_name = 'legacy_fee_payments'
+  ) THEN
+    RENAME TABLE fee_payments TO legacy_fee_payments;
+  END IF;
+END;
+CALL _safe_rename_fee_payments();
+DROP PROCEDURE IF EXISTS _safe_rename_fee_payments;
 
 -- ── 2. New fee_payments ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS fee_payments (
@@ -33,8 +47,8 @@ CREATE TABLE IF NOT EXISTS fee_payments (
     KEY idx_fp_mode     (payment_mode),
     KEY idx_fp_date     (payment_date),
     KEY idx_fp_status   (status),
-    CONSTRAINT fk_fp_school   FOREIGN KEY (school_id)  REFERENCES schools  (id) ON DELETE CASCADE,
-    CONSTRAINT fk_fp_student  FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+    KEY idx_fp_school_id  (school_id),   -- Logical FK to schools.id (Hibernate-managed)
+    KEY idx_fp_student_id (student_id)   -- Logical FK to students.id (Hibernate-managed)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Offline/manual fee payment collected by accountant/admin.';
 
