@@ -8,71 +8,85 @@
 --  1. For legacy rows that already have a canonical sibling, re-point user_roles to the canonical
 --     row (INSERT IGNORE handles users that hold both), then drop the legacy row.
 --  2. For legacy rows without a canonical sibling, rename in place (the unique index uses a
---     case-insensitive collation and we’re free of duplicates after step 1).
+--     case-insensitive collation and we're free of duplicates after step 1).
 --
--- "Admin" (id 1) is intentionally left untouched — it isn’t in the canonical RoleNames catalog
--- and isn’t referenced by any user_roles row in current dev databases.
+-- "Admin" (id 1) is intentionally left untouched — it isn't in the canonical RoleNames catalog
+-- and isn't referenced by any user_roles row in current dev databases.
+--
+-- Guard: user_roles and roles are Hibernate-managed; on a fresh DB they don't exist when Flyway
+-- runs, so the entire procedure is skipped when the table is absent.
 
--- ------------------------------------------------------------------
--- 1) Merge legacy rows with canonical siblings.
--- ------------------------------------------------------------------
+DROP PROCEDURE IF EXISTS _sp_normalize_role_names;
+CREATE PROCEDURE _sp_normalize_role_names()
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_roles') THEN
 
--- (a) "Super Admin" -> SUPER_ADMIN
-INSERT IGNORE INTO user_roles (user_id, role_id)
-SELECT ur.user_id, c.id
-FROM user_roles ur
-JOIN roles l ON l.id = ur.role_id AND l.name = 'Super Admin'
-JOIN roles c ON c.name = 'SUPER_ADMIN';
-DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'Super Admin';
-DELETE FROM roles WHERE name = 'Super Admin';
+        -- ------------------------------------------------------------------
+        -- 1) Merge legacy rows with canonical siblings.
+        -- ------------------------------------------------------------------
 
--- (b) "Hostel Warden" -> HOSTEL_WARDEN
-INSERT IGNORE INTO user_roles (user_id, role_id)
-SELECT ur.user_id, c.id
-FROM user_roles ur
-JOIN roles l ON l.id = ur.role_id AND l.name = 'Hostel Warden'
-JOIN roles c ON c.name = 'HOSTEL_WARDEN';
-DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'Hostel Warden';
-DELETE FROM roles WHERE name = 'Hostel Warden';
+        -- (a) "Super Admin" -> SUPER_ADMIN
+        INSERT IGNORE INTO user_roles (user_id, role_id)
+        SELECT ur.user_id, c.id
+        FROM user_roles ur
+        JOIN roles l ON l.id = ur.role_id AND l.name = 'Super Admin'
+        JOIN roles c ON c.name = 'SUPER_ADMIN';
+        DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'Super Admin';
+        DELETE FROM roles WHERE name = 'Super Admin';
 
--- (c) "Exam Coordinator" -> EXAM_COORDINATOR
-INSERT IGNORE INTO user_roles (user_id, role_id)
-SELECT ur.user_id, c.id
-FROM user_roles ur
-JOIN roles l ON l.id = ur.role_id AND l.name = 'Exam Coordinator'
-JOIN roles c ON c.name = 'EXAM_COORDINATOR';
-DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'Exam Coordinator';
-DELETE FROM roles WHERE name = 'Exam Coordinator';
+        -- (b) "Hostel Warden" -> HOSTEL_WARDEN
+        INSERT IGNORE INTO user_roles (user_id, role_id)
+        SELECT ur.user_id, c.id
+        FROM user_roles ur
+        JOIN roles l ON l.id = ur.role_id AND l.name = 'Hostel Warden'
+        JOIN roles c ON c.name = 'HOSTEL_WARDEN';
+        DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'Hostel Warden';
+        DELETE FROM roles WHERE name = 'Hostel Warden';
 
--- (d) "IT Support" -> IT_SUPPORT
-INSERT IGNORE INTO user_roles (user_id, role_id)
-SELECT ur.user_id, c.id
-FROM user_roles ur
-JOIN roles l ON l.id = ur.role_id AND l.name = 'IT Support'
-JOIN roles c ON c.name = 'IT_SUPPORT';
-DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'IT Support';
-DELETE FROM roles WHERE name = 'IT Support';
+        -- (c) "Exam Coordinator" -> EXAM_COORDINATOR
+        INSERT IGNORE INTO user_roles (user_id, role_id)
+        SELECT ur.user_id, c.id
+        FROM user_roles ur
+        JOIN roles l ON l.id = ur.role_id AND l.name = 'Exam Coordinator'
+        JOIN roles c ON c.name = 'EXAM_COORDINATOR';
+        DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'Exam Coordinator';
+        DELETE FROM roles WHERE name = 'Exam Coordinator';
 
--- (e) "Transport Manager" -> TRANSPORT_MANAGER
-INSERT IGNORE INTO user_roles (user_id, role_id)
-SELECT ur.user_id, c.id
-FROM user_roles ur
-JOIN roles l ON l.id = ur.role_id AND l.name = 'Transport Manager'
-JOIN roles c ON c.name = 'TRANSPORT_MANAGER';
-DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'Transport Manager';
-DELETE FROM roles WHERE name = 'Transport Manager';
+        -- (d) "IT Support" -> IT_SUPPORT
+        INSERT IGNORE INTO user_roles (user_id, role_id)
+        SELECT ur.user_id, c.id
+        FROM user_roles ur
+        JOIN roles l ON l.id = ur.role_id AND l.name = 'IT Support'
+        JOIN roles c ON c.name = 'IT_SUPPORT';
+        DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'IT Support';
+        DELETE FROM roles WHERE name = 'IT Support';
 
--- ------------------------------------------------------------------
--- 2) Direct renames for legacy rows without a canonical sibling.
---    The unique index on roles.name is case-insensitive (utf8mb4_0900_ai_ci),
---    so updating "Teacher" -> "TEACHER" is a no-op for the index.
--- ------------------------------------------------------------------
+        -- (e) "Transport Manager" -> TRANSPORT_MANAGER
+        INSERT IGNORE INTO user_roles (user_id, role_id)
+        SELECT ur.user_id, c.id
+        FROM user_roles ur
+        JOIN roles l ON l.id = ur.role_id AND l.name = 'Transport Manager'
+        JOIN roles c ON c.name = 'TRANSPORT_MANAGER';
+        DELETE ur FROM user_roles ur JOIN roles l ON l.id = ur.role_id AND l.name = 'Transport Manager';
+        DELETE FROM roles WHERE name = 'Transport Manager';
 
-UPDATE roles SET name = 'TEACHER'      WHERE name = 'Teacher';
-UPDATE roles SET name = 'PRINCIPAL'    WHERE name = 'Principal';
-UPDATE roles SET name = 'STUDENT'      WHERE name = 'Student';
-UPDATE roles SET name = 'PARENT'       WHERE name = 'Parent';
-UPDATE roles SET name = 'ACCOUNTANT'   WHERE name = 'Accountant';
-UPDATE roles SET name = 'COUNSELOR'    WHERE name = 'Counselor';
-UPDATE roles SET name = 'LIBRARIAN'    WHERE name = 'Librarian';
-UPDATE roles SET name = 'RECEPTIONIST' WHERE name = 'Receptionist';
+        -- ------------------------------------------------------------------
+        -- 2) Direct renames for legacy rows without a canonical sibling.
+        --    The unique index on roles.name is case-insensitive (utf8mb4_0900_ai_ci),
+        --    so updating "Teacher" -> "TEACHER" is a no-op for the index.
+        -- ------------------------------------------------------------------
+
+        UPDATE roles SET name = 'TEACHER'      WHERE name = 'Teacher';
+        UPDATE roles SET name = 'PRINCIPAL'    WHERE name = 'Principal';
+        UPDATE roles SET name = 'STUDENT'      WHERE name = 'Student';
+        UPDATE roles SET name = 'PARENT'       WHERE name = 'Parent';
+        UPDATE roles SET name = 'ACCOUNTANT'   WHERE name = 'Accountant';
+        UPDATE roles SET name = 'COUNSELOR'    WHERE name = 'Counselor';
+        UPDATE roles SET name = 'LIBRARIAN'    WHERE name = 'Librarian';
+        UPDATE roles SET name = 'RECEPTIONIST' WHERE name = 'Receptionist';
+
+    END IF;
+END;
+CALL _sp_normalize_role_names();
+DROP PROCEDURE IF EXISTS _sp_normalize_role_names;

@@ -34,11 +34,13 @@ SET @sql := IF(@col_sd_file_id = 0,
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
 -- Add profile_photo_file_id to students (safe for MySQL 5.7+)
+-- Guard: students is Hibernate-managed; skip if table doesn't exist yet.
+SET @has_stu := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students');
 SET @col_stu_photo := (
     SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students' AND COLUMN_NAME = 'profile_photo_file_id'
 );
-SET @sql := IF(@col_stu_photo = 0,
-    'ALTER TABLE students ADD COLUMN profile_photo_file_id BIGINT NULL',
-    'SELECT 1 -- profile_photo_file_id already exists, skip');
+SET @sql := IF(@has_stu = 0 OR @col_stu_photo > 0,
+    'SELECT 1 -- students table absent or column already exists, skip',
+    'ALTER TABLE students ADD COLUMN profile_photo_file_id BIGINT NULL');
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;

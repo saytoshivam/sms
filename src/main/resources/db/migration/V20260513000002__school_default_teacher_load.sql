@@ -1,5 +1,6 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- School default teacher weekly load
+-- Guard: schools is Hibernate-managed; check TABLE existence before column check.
 -- Used as a fallback when individual staff have no maxWeeklyLectureLoad set.
 -- A staff without their own limit AND no school default is NOT timetable eligible.
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -7,7 +8,8 @@
 DROP PROCEDURE IF EXISTS _mig_school_default_load;
 CREATE PROCEDURE _mig_school_default_load()
 BEGIN
-    IF NOT EXISTS (
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schools')
+       AND NOT EXISTS (
         SELECT 1
         FROM   information_schema.COLUMNS
         WHERE  TABLE_SCHEMA = DATABASE()
@@ -21,4 +23,3 @@ BEGIN
 END;
 CALL _mig_school_default_load();
 DROP PROCEDURE IF EXISTS _mig_school_default_load;
-

@@ -23,9 +23,19 @@ CREATE TABLE IF NOT EXISTS staff_role_mapping (
 
 -- ── Seed from existing User.roles for staff that already have a linked login ──
 -- This is a best-effort backfill; run IGNORE ON DUPLICATE KEY to avoid errors.
-INSERT IGNORE INTO staff_role_mapping (staff_id, role_id)
-SELECT u.linked_staff_id, ur.role_id
-FROM   user_roles ur
-JOIN   users      u  ON u.id = ur.user_id
-WHERE  u.linked_staff_id IS NOT NULL;
+-- Guard: user_roles and users are Hibernate-managed; skip on fresh DB.
+DROP PROCEDURE IF EXISTS _sp_seed_staff_role_mapping;
+CREATE PROCEDURE _sp_seed_staff_role_mapping()
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_roles') THEN
+        INSERT IGNORE INTO staff_role_mapping (staff_id, role_id)
+        SELECT u.linked_staff_id, ur.role_id
+        FROM   user_roles ur
+        JOIN   users      u  ON u.id = ur.user_id
+        WHERE  u.linked_staff_id IS NOT NULL;
+    END IF;
+END;
+CALL _sp_seed_staff_role_mapping();
+DROP PROCEDURE IF EXISTS _sp_seed_staff_role_mapping;
 

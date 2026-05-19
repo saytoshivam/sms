@@ -9,7 +9,8 @@
 DROP PROCEDURE IF EXISTS _mig_staff_roles_json;
 CREATE PROCEDURE _mig_staff_roles_json()
 BEGIN
-    IF NOT EXISTS (
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'staff')
+       AND NOT EXISTS (
         SELECT 1
         FROM   information_schema.COLUMNS
         WHERE  TABLE_SCHEMA = DATABASE()

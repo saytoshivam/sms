@@ -42,28 +42,38 @@ INSERT IGNORE INTO document_types (code, name, description, target_type, is_syst
 
 -- ── Default document rows for all existing staff members ─────────────────────
 -- Creates one row per default document type per staff member (skips if already exists).
-INSERT INTO staff_documents (
-    staff_id, document_type, document_type_id,
-    collection_status, upload_status, verification_status,
-    created_at, updated_at
-)
-SELECT
-    s.id,
-    dt.code,
-    dt.id,
-    'PENDING_COLLECTION',
-    'NOT_UPLOADED',
-    'NOT_VERIFIED',
-    NOW(6),
-    NOW(6)
-FROM staff s
-CROSS JOIN document_types dt
-WHERE dt.target_type = 'STAFF'
-  AND dt.is_active   = 1
-  AND s.is_deleted   = 0
-  AND NOT EXISTS (
-      SELECT 1 FROM staff_documents sd
-      WHERE sd.staff_id      = s.id
-        AND sd.document_type = dt.code
-  );
+-- Guard: staff is Hibernate-managed; skip on fresh DB.
+DROP PROCEDURE IF EXISTS _sp_default_staff_docs;
+CREATE PROCEDURE _sp_default_staff_docs()
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'staff') THEN
+        INSERT INTO staff_documents (
+            staff_id, document_type, document_type_id,
+            collection_status, upload_status, verification_status,
+            created_at, updated_at
+        )
+        SELECT
+            s.id,
+            dt.code,
+            dt.id,
+            'PENDING_COLLECTION',
+            'NOT_UPLOADED',
+            'NOT_VERIFIED',
+            NOW(6),
+            NOW(6)
+        FROM staff s
+        CROSS JOIN document_types dt
+        WHERE dt.target_type = 'STAFF'
+          AND dt.is_active   = 1
+          AND s.is_deleted   = 0
+          AND NOT EXISTS (
+              SELECT 1 FROM staff_documents sd
+              WHERE sd.staff_id      = s.id
+                AND sd.document_type = dt.code
+          );
+    END IF;
+END;
+CALL _sp_default_staff_docs();
+DROP PROCEDURE IF EXISTS _sp_default_staff_docs;
 

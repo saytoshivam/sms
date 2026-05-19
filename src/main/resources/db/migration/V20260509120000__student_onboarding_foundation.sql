@@ -1,6 +1,9 @@
 -- Student onboarding foundation: academic years, enrollments, guardian mapping, documents, medical
 -- MySQL 8+
+-- Guard: students, schools, class_groups are Hibernate-managed; skip their DDL/DML on fresh DBs.
 SET @db := DATABASE();
+SET @has_students := (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = @db AND table_name = 'students');
+SET @has_schools  := (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = @db AND table_name = 'schools');
 
 -- ---- academic_years ----
 CREATE TABLE IF NOT EXISTS academic_years (
@@ -17,34 +20,35 @@ CREATE TABLE IF NOT EXISTS academic_years (
 
 -- ---- students extra columns ----
 SET @stmt := IF(
-        (SELECT COUNT(*) FROM information_schema.columns
+        @has_students = 0 OR (SELECT COUNT(*) FROM information_schema.columns
              WHERE table_schema = @db AND table_name = 'students' AND column_name = 'middle_name') > 0,
         'SELECT 1',
         'ALTER TABLE students ADD COLUMN middle_name VARCHAR(128) NULL AFTER first_name');
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
 SET @stmt := IF(
-        (SELECT COUNT(*) FROM information_schema.columns
+        @has_students = 0 OR (SELECT COUNT(*) FROM information_schema.columns
              WHERE table_schema = @db AND table_name = 'students' AND column_name = 'blood_group') > 0,
         'SELECT 1',
         'ALTER TABLE students ADD COLUMN blood_group VARCHAR(16) NULL');
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
 SET @stmt := IF(
-        (SELECT COUNT(*) FROM information_schema.columns
+        @has_students = 0 OR (SELECT COUNT(*) FROM information_schema.columns
              WHERE table_schema = @db AND table_name = 'students' AND column_name = 'status') > 0,
         'SELECT 1',
         "ALTER TABLE students ADD COLUMN status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE'");
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
 SET @stmt := IF(
-        (SELECT COUNT(*) FROM information_schema.columns
+        @has_students = 0 OR (SELECT COUNT(*) FROM information_schema.columns
              WHERE table_schema = @db AND table_name = 'students' AND column_name = 'updated_at') > 0,
         'SELECT 1',
         'ALTER TABLE students ADD COLUMN updated_at DATETIME(6) NULL');
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
-UPDATE students SET updated_at = created_at WHERE updated_at IS NULL;
+SET @stmt := IF(@has_students = 0, 'SELECT 1', 'UPDATE students SET updated_at = created_at WHERE updated_at IS NULL');
+PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
 -- ---- guardians extended columns ----
 SET @has_guardians := (
@@ -205,47 +209,67 @@ CREATE TABLE IF NOT EXISTS student_documents (
 ) ENGINE=InnoDB;
 
 -- Backfill academic year per school (April–March window heuristic)
-INSERT INTO academic_years (school_id, label, starts_on, ends_on, created_at, updated_at)
-SELECT s.id AS school_id,
-       CONCAT(
-               CASE WHEN MONTH(CURRENT_DATE()) >= 4 THEN YEAR(CURRENT_DATE())
-                    ELSE YEAR(CURRENT_DATE()) - 1 END,
-               '-',
-               CASE WHEN MONTH(CURRENT_DATE()) >= 4 THEN YEAR(CURRENT_DATE()) + 1
-                    ELSE YEAR(CURRENT_DATE()) END
-       ),
-       STR_TO_DATE(CONCAT(CASE WHEN MONTH(CURRENT_DATE()) >= 4 THEN YEAR(CURRENT_DATE())
-                               ELSE YEAR(CURRENT_DATE()) - 1 END, '-04-01'), '%Y-%m-%d'),
-       STR_TO_DATE(CONCAT(CASE WHEN MONTH(CURRENT_DATE()) >= 4 THEN YEAR(CURRENT_DATE()) + 1
-                               ELSE YEAR(CURRENT_DATE()) END, '-03-31'), '%Y-%m-%d'),
-       CURRENT_TIMESTAMP(6),
-       CURRENT_TIMESTAMP(6)
-FROM schools s
-WHERE NOT EXISTS (
-    SELECT 1 FROM academic_years ay WHERE ay.school_id = s.id
-);
+-- Guard: schools is Hibernate-managed; skip on fresh DB.
+DROP PROCEDURE IF EXISTS _sp_backfill_academic_years;
+CREATE PROCEDURE _sp_backfill_academic_years()
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schools') THEN
+        INSERT INTO academic_years (school_id, label, starts_on, ends_on, created_at, updated_at)
+        SELECT s.id AS school_id,
+               CONCAT(
+                       CASE WHEN MONTH(CURRENT_DATE()) >= 4 THEN YEAR(CURRENT_DATE())
+                            ELSE YEAR(CURRENT_DATE()) - 1 END,
+                       '-',
+                       CASE WHEN MONTH(CURRENT_DATE()) >= 4 THEN YEAR(CURRENT_DATE()) + 1
+                            ELSE YEAR(CURRENT_DATE()) END
+               ),
+               STR_TO_DATE(CONCAT(CASE WHEN MONTH(CURRENT_DATE()) >= 4 THEN YEAR(CURRENT_DATE())
+                                       ELSE YEAR(CURRENT_DATE()) - 1 END, '-04-01'), '%Y-%m-%d'),
+               STR_TO_DATE(CONCAT(CASE WHEN MONTH(CURRENT_DATE()) >= 4 THEN YEAR(CURRENT_DATE()) + 1
+                                       ELSE YEAR(CURRENT_DATE()) END, '-03-31'), '%Y-%m-%d'),
+               CURRENT_TIMESTAMP(6),
+               CURRENT_TIMESTAMP(6)
+        FROM schools s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM academic_years ay WHERE ay.school_id = s.id
+        );
+    END IF;
+END;
+CALL _sp_backfill_academic_years();
+DROP PROCEDURE IF EXISTS _sp_backfill_academic_years;
 
 -- Backfill enrollments for students already assigned to class groups (with latest academic year for school)
-INSERT IGNORE INTO student_academic_enrollments (
-    student_id, academic_year_id, class_group_id, roll_no, admission_date, joining_date, status, created_at, updated_at
-)
-SELECT st.id AS student_id,
-       ay.id AS academic_year_id,
-       st.class_group_id,
-       NULL,
-       CAST(st.created_at AS DATE),
-       CAST(st.created_at AS DATE),
-       'ACTIVE',
-       CURRENT_TIMESTAMP(6),
-       CURRENT_TIMESTAMP(6)
-FROM students st
-JOIN class_groups cg ON cg.id = st.class_group_id
-JOIN academic_years ay ON ay.school_id = st.school_id
-WHERE ay.id = (
-    SELECT ay2.id
-    FROM academic_years ay2
-    WHERE ay2.school_id = st.school_id
-    ORDER BY ay2.starts_on DESC, ay2.id DESC
-        LIMIT 1
-    )
-AND NOT EXISTS (SELECT 1 FROM student_academic_enrollments e WHERE e.student_id = st.id);
+-- Guard: students and class_groups are Hibernate-managed; skip on fresh DB.
+DROP PROCEDURE IF EXISTS _sp_backfill_enrollments;
+CREATE PROCEDURE _sp_backfill_enrollments()
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students') THEN
+        INSERT IGNORE INTO student_academic_enrollments (
+            student_id, academic_year_id, class_group_id, roll_no, admission_date, joining_date, status, created_at, updated_at
+        )
+        SELECT st.id AS student_id,
+               ay.id AS academic_year_id,
+               st.class_group_id,
+               NULL,
+               CAST(st.created_at AS DATE),
+               CAST(st.created_at AS DATE),
+               'ACTIVE',
+               CURRENT_TIMESTAMP(6),
+               CURRENT_TIMESTAMP(6)
+        FROM students st
+        JOIN class_groups cg ON cg.id = st.class_group_id
+        JOIN academic_years ay ON ay.school_id = st.school_id
+        WHERE ay.id = (
+            SELECT ay2.id
+            FROM academic_years ay2
+            WHERE ay2.school_id = st.school_id
+            ORDER BY ay2.starts_on DESC, ay2.id DESC
+                LIMIT 1
+            )
+        AND NOT EXISTS (SELECT 1 FROM student_academic_enrollments e WHERE e.student_id = st.id);
+    END IF;
+END;
+CALL _sp_backfill_enrollments();
+DROP PROCEDURE IF EXISTS _sp_backfill_enrollments;

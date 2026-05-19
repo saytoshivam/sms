@@ -10,4 +10,7 @@ SET @stmt := IF(@has_cg = 0 OR @has_col > 0, 'SELECT 1',
     'ALTER TABLE class_groups ADD COLUMN homeroom_locked TINYINT(1) NOT NULL DEFAULT 0');
 PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;
 
-UPDATE subject_section_overrides SET room_id = NULL WHERE room_id IS NOT NULL;
+-- Guard: subject_section_overrides is Hibernate-managed; skip on fresh DB if not yet created
+SET @has_sso := (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = @db AND table_name = 'subject_section_overrides');
+SET @stmt := IF(@has_sso = 0, 'SELECT 1', 'UPDATE subject_section_overrides SET room_id = NULL WHERE room_id IS NOT NULL');
+PREPARE s FROM @stmt; EXECUTE s; DEALLOCATE PREPARE s;

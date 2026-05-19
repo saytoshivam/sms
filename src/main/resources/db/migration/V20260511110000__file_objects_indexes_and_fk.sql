@@ -26,11 +26,12 @@ SET @sql := IF(@idx = 0,
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
 -- Index for FK lookups on students.profile_photo_file_id
+-- Guard: students is Hibernate-managed; skip if table doesn't exist yet.
+SET @has_stu := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students');
 SET @idx := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students' AND INDEX_NAME = 'idx_stu_photo_file');
-SET @sql := IF(@idx = 0,
-    'ALTER TABLE students ADD INDEX idx_stu_photo_file (profile_photo_file_id)',
-    'SELECT 1');
+SET @sql := IF(@has_stu = 0 OR @idx > 0, 'SELECT 1',
+    'ALTER TABLE students ADD INDEX idx_stu_photo_file (profile_photo_file_id)');
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
 -- FK: student_documents.file_id -> file_objects.id
@@ -44,10 +45,11 @@ SET @sql := IF(@fk = 0,
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
 -- FK: students.profile_photo_file_id -> file_objects.id
+-- Guard: students is Hibernate-managed; skip if table doesn't exist yet.
 SET @fk := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students'
     AND CONSTRAINT_NAME = 'fk_stu_photo_file_id' AND CONSTRAINT_TYPE = 'FOREIGN KEY');
-SET @sql := IF(@fk = 0,
-    'ALTER TABLE students ADD CONSTRAINT fk_stu_photo_file_id FOREIGN KEY (profile_photo_file_id) REFERENCES file_objects (id) ON DELETE SET NULL ON UPDATE CASCADE',
-    'SELECT 1');
+SET @sql := IF(@has_stu = 0 OR @fk > 0,
+    'SELECT 1',
+    'ALTER TABLE students ADD CONSTRAINT fk_stu_photo_file_id FOREIGN KEY (profile_photo_file_id) REFERENCES file_objects (id) ON DELETE SET NULL ON UPDATE CASCADE');
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;

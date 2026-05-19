@@ -1,6 +1,7 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- User login lifecycle fields
 -- Phase 1: enabled flag + invite tracking
+-- Guard: users is Hibernate-managed; check TABLE existence before column check.
 -- Uses stored-procedure guards because MySQL does not support
 -- ALTER TABLE ... ADD COLUMN IF NOT EXISTS (that is MariaDB syntax).
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -9,7 +10,8 @@
 DROP PROCEDURE IF EXISTS _migration_add_enabled;
 CREATE PROCEDURE _migration_add_enabled()
 BEGIN
-    IF NOT EXISTS (
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users')
+       AND NOT EXISTS (
         SELECT 1
         FROM   information_schema.COLUMNS
         WHERE  TABLE_SCHEMA = DATABASE()
@@ -28,7 +30,8 @@ DROP PROCEDURE IF EXISTS _migration_add_enabled;
 DROP PROCEDURE IF EXISTS _migration_add_invite_ts;
 CREATE PROCEDURE _migration_add_invite_ts()
 BEGIN
-    IF NOT EXISTS (
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users')
+       AND NOT EXISTS (
         SELECT 1
         FROM   information_schema.COLUMNS
         WHERE  TABLE_SCHEMA = DATABASE()

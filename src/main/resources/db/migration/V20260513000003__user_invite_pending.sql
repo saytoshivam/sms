@@ -2,12 +2,14 @@
 -- User invite_pending flag
 -- True when an invite has been recorded but the user has not been explicitly
 -- activated. Used to distinguish the INVITED login state from ACTIVE/DISABLED.
+-- Guard: users is Hibernate-managed; check TABLE existence before column check.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 DROP PROCEDURE IF EXISTS _mig_user_invite_pending;
 CREATE PROCEDURE _mig_user_invite_pending()
 BEGIN
-    IF NOT EXISTS (
+    IF EXISTS (SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users')
+       AND NOT EXISTS (
         SELECT 1
         FROM   information_schema.COLUMNS
         WHERE  TABLE_SCHEMA = DATABASE()
@@ -21,4 +23,3 @@ BEGIN
 END;
 CALL _mig_user_invite_pending();
 DROP PROCEDURE IF EXISTS _mig_user_invite_pending;
-
