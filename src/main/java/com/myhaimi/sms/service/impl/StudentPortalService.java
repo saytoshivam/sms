@@ -9,12 +9,13 @@ import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
 import com.myhaimi.sms.DTO.timetable.PublishedStudentWeeklyTimetableDTO;
 import com.myhaimi.sms.DTO.timetable.TimetableOccurrenceDTO;
 import com.myhaimi.sms.entity.*;
-import com.myhaimi.sms.repository.FeeInvoiceRepo;
+import com.myhaimi.sms.entity.enums.PaymentStatus;
 import com.myhaimi.sms.repository.FeePaymentRepo;
 import com.myhaimi.sms.repository.LectureRepo;
 import com.myhaimi.sms.repository.StudentAttendanceRepo;
 import com.myhaimi.sms.repository.StudentMarkRepo;
 import com.myhaimi.sms.repository.StudentRepo;
+import com.myhaimi.sms.repository.StudentFeeDemandRepository;
 import com.myhaimi.sms.repository.SubjectRepo;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -40,7 +41,7 @@ public class StudentPortalService {
     private final SubjectRepo subjectRepo;
     private final LectureRepo lectureRepo;
     private final StudentAttendanceRepo studentAttendanceRepo;
-    private final FeeInvoiceRepo feeInvoiceRepo;
+    private final StudentFeeDemandRepository demandRepo;
     private final FeePaymentRepo feePaymentRepo;
 
     @Transactional(readOnly = true)
@@ -399,7 +400,7 @@ public class StudentPortalService {
     }
 
     /**
-     * Ledger-style fee statement: invoice lines as DR (charges), payments as CR (credits). Running balance is amount
+     * Ledger-style fee statement: demand lines as DR (charges), payments as CR (credits). Running balance is amount
      * still owed (DR increases, CR decreases). Indian financial year Apr–Mar; filter with {@code financialYear} like
      * {@code 2025-2026}.
      */
@@ -411,37 +412,37 @@ public class StudentPortalService {
         }
         studentRepo.findByIdAndSchool_Id(studentId, tenantId).orElseThrow();
 
-        List<FeeInvoice> invoices =
-                feeInvoiceRepo.findBySchool_IdAndStudent_IdOrderByDueDateAscIdAsc(tenantId, studentId);
+        List<StudentFeeDemand> demands =
+                demandRepo.findBySchool_IdAndStudent_Id(tenantId, studentId);
+
+        List<FeePayment> payments =
+                feePaymentRepo.findBySchool_IdAndStudent_IdOrderByPaymentDateDesc(tenantId, studentId);
 
         record RawLine(LocalDateTime sortAt, LocalDate entryDate, BigDecimal amount, String drCr, String description) {}
 
         List<RawLine> raw = new ArrayList<>();
         Set<String> fyLabels = new TreeSet<>(Comparator.reverseOrder());
 
-        for (FeeInvoice inv : invoices) {
-            if ("VOID".equalsIgnoreCase(inv.getStatus())) {
+        for (StudentFeeDemand demand : demands) {
+            LocalDate due = demand.getDueDate();
+            fyLabels.add(financialYearLabel(due));
+            String headName = demand.getFeeHead() != null ? demand.getFeeHead().getName() : demand.getDemandNo();
+            String demandDesc = "Fee Demand — " + demand.getDemandNo()
+                    + " (" + headName + ") Due: " + due + " Status: " + demand.getStatus();
+            LocalDateTime sortAt = demand.getCreatedAt() != null
+                    ? LocalDateTime.ofInstant(demand.getCreatedAt(), java.time.ZoneId.systemDefault())
+                    : due.atStartOfDay();
+            raw.add(new RawLine(sortAt, due, demand.getPayableAmount(), "DR", demandDesc));
+        }
+
+        for (FeePayment p : payments) {
+            if (!includePaymentInStatement(p)) {
                 continue;
             }
-            LocalDate due = inv.getDueDate();
-            fyLabels.add(financialYearLabel(due));
-            String invDesc =
-                    "Fee and other charges — Invoice #" + inv.getId() + ", Status: " + inv.getStatus() + ", Due: " + due;
-            raw.add(new RawLine(
-                    inv.getCreatedAt() != null ? LocalDateTime.ofInstant(inv.getCreatedAt(), java.time.ZoneId.systemDefault()) : due.atStartOfDay(),
-                    due,
-                    inv.getAmountDue(),
-                    "DR",
-                    invDesc));
-            for (FeePayment p : feePaymentRepo.findByInvoice_Id(inv.getId())) {
-                if (!includePaymentInStatement(p)) {
-                    continue;
-                }
-                LocalDate paid = p.getPaidAt().toLocalDate();
-                fyLabels.add(financialYearLabel(paid));
-                String payDesc = paymentDescription(p, inv.getId());
-                raw.add(new RawLine(p.getPaidAt(), paid, p.getAmount(), "CR", payDesc));
-            }
+            LocalDate paid = p.getPaymentDate();
+            fyLabels.add(financialYearLabel(paid));
+            String payDesc = paymentDescription(p);
+            raw.add(new RawLine(paid.atStartOfDay(), paid, p.getAmount(), "CR", payDesc));
         }
 
         raw.sort(Comparator.comparing(RawLine::sortAt)
@@ -484,14 +485,15 @@ public class StudentPortalService {
     }
 
     private static boolean includePaymentInStatement(FeePayment p) {
-        String gs = p.getGatewayStatus();
-        return gs == null || gs.isBlank() || "SUCCEEDED".equalsIgnoreCase(gs);
+        return p.getStatus() == PaymentStatus.SUCCESS;
     }
 
-    private static String paymentDescription(FeePayment p, int invoiceId) {
-        String method = p.getMethod() != null ? p.getMethod() : "PAYMENT";
-        String ref = p.getReference() != null && !p.getReference().isBlank() ? " Ref: " + p.getReference() : "";
-        return "Payment — " + method + " — Invoice #" + invoiceId + ref;
+    private static String paymentDescription(FeePayment p) {
+        String mode = p.getPaymentMode() != null ? p.getPaymentMode().name() : "PAYMENT";
+        String ref = p.getReferenceNo() != null && !p.getReferenceNo().isBlank()
+                ? " Ref: " + p.getReferenceNo() : "";
+        String receipt = p.getReceiptNo() != null ? " Receipt: " + p.getReceiptNo() : "";
+        return "Payment — " + mode + receipt + ref;
     }
 
     /** Financial year label for a calendar date (India: Apr–Mar), e.g. 2025-2026. */

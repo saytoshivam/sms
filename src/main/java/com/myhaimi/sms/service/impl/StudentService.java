@@ -20,7 +20,10 @@ import com.myhaimi.sms.modules.files.FileObjectDTO;
 import com.myhaimi.sms.modules.files.FileService;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.repository.FeeInvoiceRepo;
+import com.myhaimi.sms.repository.FeePaymentAllocationRepository;
 import com.myhaimi.sms.repository.FeePaymentRepo;
+import com.myhaimi.sms.repository.FeeReceiptRepository;
+import com.myhaimi.sms.repository.StudentFeeDemandRepository;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -70,6 +73,9 @@ public class StudentService {
     private final StudentMarkRepo markRepo;
     private final FeeInvoiceRepo feeInvoiceRepo;
     private final FeePaymentRepo feePaymentRepo;
+    private final FeePaymentAllocationRepository allocationRepo;
+    private final FeeReceiptRepository receiptRepo;
+    private final StudentFeeDemandRepository demandRepo;
 
     /**
      * Fallback document codes used when a school has not yet configured any document requirements.
@@ -103,7 +109,10 @@ public class StudentService {
         documentRepo.deleteByStudent_IdIn(ids);
         enrollmentRepo.deleteByStudent_IdIn(ids);
         medicalRepo.deleteByStudent_IdIn(ids);
-        feePaymentRepo.deleteByInvoice_Student_IdIn(ids);
+        allocationRepo.deleteByPayment_Student_IdIn(ids);
+        receiptRepo.deleteByPayment_Student_IdIn(ids);
+        feePaymentRepo.deleteByStudent_IdIn(ids);
+        demandRepo.deleteByStudent_IdIn(ids);
         feeInvoiceRepo.deleteByStudent_IdIn(ids);
         studentGuardianRepo.deleteByStudent_IdIn(ids);
         // Entity-based delete to trigger Hibernate cascade on user_roles join table
@@ -125,7 +134,10 @@ public class StudentService {
         documentRepo.deleteByStudent_IdIn(ids);
         enrollmentRepo.deleteByStudent_IdIn(ids);
         medicalRepo.deleteByStudent_IdIn(ids);
-        feePaymentRepo.deleteByInvoice_Student_IdIn(ids);
+        allocationRepo.deleteByPayment_Student_IdIn(ids);
+        receiptRepo.deleteByPayment_Student_IdIn(ids);
+        feePaymentRepo.deleteByStudent_IdIn(ids);
+        demandRepo.deleteByStudent_IdIn(ids);
         feeInvoiceRepo.deleteByStudent_IdIn(ids);
         studentGuardianRepo.deleteByStudent_IdIn(ids);
         // Entity-based delete to trigger Hibernate cascade on user_roles join table

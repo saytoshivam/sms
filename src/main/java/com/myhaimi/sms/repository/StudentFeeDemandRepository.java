@@ -5,6 +5,7 @@ import com.myhaimi.sms.entity.enums.StudentFeeDemandStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -80,6 +81,16 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
 
     @Query("SELECT COUNT(DISTINCT d.student.id) FROM StudentFeeDemand d WHERE d.school.id = :schoolId AND d.balanceAmount > 0 AND (:academicYearId IS NULL OR d.academicYear.id = :academicYearId)")
     long countStudentsWithDues(@Param("schoolId") Integer schoolId, @Param("academicYearId") Integer academicYearId);
+
+    @Query("SELECT COUNT(d) FROM StudentFeeDemand d WHERE d.school.id = :schoolId")
+    long countBySchoolId(@Param("schoolId") Integer schoolId);
+
+    @Query("SELECT COUNT(d) FROM StudentFeeDemand d WHERE d.school.id = :schoolId AND d.status IN :statuses")
+    long countOpenBySchoolId(@Param("schoolId") Integer schoolId, @Param("statuses") Collection<StudentFeeDemandStatus> statuses);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM StudentFeeDemand d WHERE d.student.id IN :ids")
+    void deleteByStudent_IdIn(@Param("ids") Collection<Integer> ids);
 
     // ─── Report queries ───────────────────────────────────────────────────────
 

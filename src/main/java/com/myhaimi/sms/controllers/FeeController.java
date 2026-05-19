@@ -1,10 +1,8 @@
 package com.myhaimi.sms.controllers;
 
 import com.myhaimi.sms.DTO.FeeInvoiceCreateDTO;
-import com.myhaimi.sms.DTO.FeePaymentCreateDTO;
 import com.myhaimi.sms.DTO.FeeSchoolSummaryDTO;
 import com.myhaimi.sms.entity.FeeInvoice;
-import com.myhaimi.sms.entity.FeePayment;
 import com.myhaimi.sms.service.impl.FeeService;
 import com.myhaimi.sms.utils.CommonUtil;
 import jakarta.validation.Valid;
@@ -15,8 +13,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/fees")
@@ -42,23 +38,4 @@ public class FeeController {
         FeeInvoice created = feeService.createInvoice(dto);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
-
-    @GetMapping("/invoices/{invoiceId}/payments")
-    public List<FeePayment> listPayments(@PathVariable Integer invoiceId) {
-        return feeService.listPayments(invoiceId);
-    }
-
-    @PostMapping("/invoices/{invoiceId}/payments")
-    public ResponseEntity<?> addPayment(
-            @PathVariable Integer invoiceId,
-            @Valid @RequestBody FeePaymentCreateDTO dto,
-            BindingResult result
-    ) {
-        ResponseEntity<?> res = CommonUtil.dtoBindingResults(result);
-        if (res.getStatusCode().is4xxClientError()) return res;
-
-        FeePayment created = feeService.addPayment(invoiceId, dto);
-        return ResponseEntity.status(HttpStatus.CREATED).body(created);
-    }
 }
-

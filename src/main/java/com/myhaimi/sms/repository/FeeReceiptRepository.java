@@ -6,13 +6,20 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import org.springframework.data.jpa.repository.Modifying;
+
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public interface FeeReceiptRepository extends JpaRepository<FeeReceipt, Long> {
 
     Optional<FeeReceipt> findByPayment_Id(Long paymentId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM FeeReceipt r WHERE r.payment.student.id IN :ids")
+    void deleteByPayment_Student_IdIn(@Param("ids") Collection<Integer> ids);
 
     /**
      * Receipt register report.
