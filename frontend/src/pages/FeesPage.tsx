@@ -1154,7 +1154,7 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
 
   const classGroupsQ = useQuery({
     queryKey: ['class-groups-all'],
-    queryFn: async () => (await api.get<SpringPage<ClassGroup> | ClassGroup[]>('/api/v1/class-groups?size=500')).data,
+    queryFn: async () => (await api.get<SpringPage<ClassGroup> | ClassGroup[]>('/api/class-groups?size=500')).data,
   });
   const classGroups = pageContent(classGroupsQ.data);
 
