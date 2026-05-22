@@ -1055,12 +1055,39 @@ function TabFeeHeads({ perms }: { perms: FeePermissions }) {
 
 type InstDraft = { name: string; dueDate: string; amount: string; sequence: number };
 
+// Suggested installment count per frequency
+const INST_COUNT: Record<FeeFrequency, number> = {
+  ONE_TIME: 1, YEARLY: 1, HALF_YEARLY: 2, QUARTERLY: 4, MONTHLY: 12, CUSTOM: 1,
+};
+
+const INST_NAME_FN: Record<FeeFrequency, (i: number) => string> = {
+  ONE_TIME:    ()  => 'Full Payment',
+  YEARLY:      ()  => 'Annual Payment',
+  HALF_YEARLY: (i) => ['Half-yearly 1 (Apr–Sep)', 'Half-yearly 2 (Oct–Mar)'][i] ?? `Half ${i + 1}`,
+  QUARTERLY:   (i) => ['Q1 (Apr–Jun)', 'Q2 (Jul–Sep)', 'Q3 (Oct–Dec)', 'Q4 (Jan–Mar)'][i] ?? `Q${i + 1}`,
+  MONTHLY:     (i) => ['April','May','June','July','August','September','October','November','December','January','February','March'][i] + ' Installment',
+  CUSTOM:      (i) => `Installment ${i + 1}`,
+};
+
+function buildDefaultInstRows(item: FeePlanItem): InstDraft[] {
+  const amt  = typeof item.amount === 'string' ? parseFloat(item.amount) || 0 : item.amount || 0;
+  const n    = INST_COUNT[item.frequency] ?? 1;
+  const base = Math.floor((amt / n) * 100) / 100;
+  const last = Math.round((amt - base * (n - 1)) * 100) / 100;
+  return Array.from({ length: n }, (_, i) => ({
+    name:     INST_NAME_FN[item.frequency]?.(i) ?? `Installment ${i + 1}`,
+    dueDate:  '',
+    amount:   String(i === n - 1 ? last : base),
+    sequence: i + 1,
+  }));
+}
+
 function InstallmentEditor({ item, planId, onDone }: { item: FeePlanItem; planId: number; onDone: () => void }) {
   const qc = useQueryClient();
   const [rows, setRows] = useState<InstDraft[]>(() =>
     item.installments && item.installments.length > 0
       ? item.installments.map((inst, i) => ({ name: inst.name, dueDate: formatJsonDate(inst.dueDate), amount: String(inst.amount), sequence: inst.sequence || i + 1 }))
-      : [{ name: 'Installment 1', dueDate: '', amount: String(item.amount), sequence: 1 }],
+      : buildDefaultInstRows(item),
   );
   const [err, setErr] = useState('');
 
@@ -1201,14 +1228,20 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
     setItemErr(''); setShowAddItem(true);
   }
 
-  const saveItemMut = useMutation({
+  const saveItemMut = useMutation<FeePlanItem, Error>({
     mutationFn: async () => {
       const body = { feeHeadId: Number(itemDraft.feeHeadId), applicableScopeType: itemDraft.applicableScopeType, applicableScopeId: Number(itemDraft.applicableScopeId), amount: parseFloat(itemDraft.amount), frequency: itemDraft.frequency, mandatory: itemDraft.mandatory };
       return editingItem
         ? (await api.put(`/api/fees/plans/${planId}/items/${editingItem.id}`, body)).data
         : (await api.post(`/api/fees/plans/${planId}/items`, body)).data;
     },
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['fee-plan-detail', planId] }); toast.success(editingItem ? 'Item updated' : 'Item added'); resetItem(); },
+    onSuccess: async (savedItem) => {
+      await qc.invalidateQueries({ queryKey: ['fee-plan-detail', planId] });
+      const isNew = !editingItem;
+      toast.success(isNew ? 'Item added — set up installments below' : 'Item updated');
+      resetItem();
+      if (isNew) setInstallmentItem(savedItem);
+    },
     onError: (e) => setItemErr(formatApiError(e)),
   });
 
@@ -1379,6 +1412,19 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                   const instTotal = sumInst(it.installments ?? []);
                   const itAmt = typeof it.amount === 'string' ? parseFloat(it.amount) || 0 : it.amount || 0;
                   const bal = Math.abs(instTotal - itAmt) < 0.01;
+                  const needsSchedule = instCount === 0;
+                  const isInstOpen = installmentItem?.id === it.id;
+
+                  // Resolve scope display label
+                  let scopeDisplay = String(it.applicableScopeId);
+                  if (it.applicableScopeType === 'SCHOOL') {
+                    scopeDisplay = 'All Students';
+                  } else if (it.applicableScopeType === 'CLASS' || it.applicableScopeType === 'SECTION') {
+                    const cg = classGroups.find(c => c.id === it.applicableScopeId);
+                    if (cg) scopeDisplay = it.applicableScopeType === 'CLASS' && cg.gradeLevel != null
+                      ? `Grade ${cg.gradeLevel} (all sections)` : cg.displayName;
+                  }
+
                   return (
                     <tr key={it.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '8px 10px' }}>
@@ -1387,21 +1433,29 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                       </td>
                       <td style={{ padding: '8px 10px' }}>
                         <span style={{ padding: '2px 6px', borderRadius: 6, background: '#f1f5f9', fontSize: 11 }}>{it.applicableScopeType}</span>
-                        <div style={{ fontSize: 11, color: '#94a3b8' }}>ID: {it.applicableScopeId}</div>
+                        <div style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>{scopeDisplay}</div>
                       </td>
                       <td style={{ padding: '8px 10px', fontWeight: 600 }}>{fmt(it.amount)}</td>
                       <td style={{ padding: '8px 10px' }}>{FREQUENCY_LABELS[it.frequency]}</td>
                       <td style={{ padding: '8px 10px', textAlign: 'center' }}>{it.mandatory ? '✓' : '—'}</td>
                       <td style={{ padding: '8px 10px' }}>
-                        {instCount === 0
-                          ? <span style={{ color: '#dc2626', fontSize: 11 }}>None ⚠</span>
-                          : <span style={{ color: bal ? '#16a34a' : '#f59e0b', fontSize: 11 }}>{instCount} × {fmt(instTotal)}</span>}
+                        {needsSchedule
+                          ? <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 600 }}>⚠ No schedule</span>
+                          : <span style={{ color: bal ? '#16a34a' : '#f59e0b', fontSize: 11 }}>{instCount} × {fmt(instTotal)}{!bal && ' ⚠ mismatch'}</span>}
                       </td>
                       <td style={{ padding: '8px 10px' }}>
                         <div className="row" style={{ gap: 6 }}>
-                          <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setInstallmentItem(installmentItem?.id === it.id ? null : it)}>
-                            {installmentItem?.id === it.id ? 'Close' : '📅 Schedule'}
-                          </button>
+                          {needsSchedule ? (
+                            <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#dc2626', borderColor: '#dc2626' }}
+                              onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
+                              {isInstOpen ? 'Close' : '📅 Create Schedule'}
+                            </button>
+                          ) : (
+                            <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }}
+                              onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
+                              {isInstOpen ? 'Close' : '📅 Schedule'}
+                            </button>
+                          )}
                           {isEditable && <>
                             <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => openEditItem(it)}>Edit</button>
                             <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px', color: '#dc2626' }} onClick={() => setDeleteItemTarget(it)}>✕</button>

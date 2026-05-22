@@ -260,6 +260,14 @@ public class FeeSetupService {
 
         validateScope(dto.getApplicableScopeType(), dto.getApplicableScopeId(), schoolId);
 
+        // Duplicate guard: (plan, feeHead, scopeType, scopeId) must be unique
+        if (feePlanItemRepository.existsByFeePlan_IdAndFeeHead_IdAndApplicableScopeTypeAndApplicableScopeId(
+                planId, dto.getFeeHeadId(), dto.getApplicableScopeType(), dto.getApplicableScopeId())) {
+            throw new IllegalArgumentException(
+                    "A fee item for '" + feeHead.getName() + "' with this scope already exists in this plan. "
+                    + "The same fee head can be added for different classes or sections.");
+        }
+
         FeePlanItem item = new FeePlanItem();
         item.setFeePlan(plan);
         item.setFeeHead(feeHead);
@@ -290,6 +298,13 @@ public class FeeSetupService {
         }
 
         validateScope(dto.getApplicableScopeType(), dto.getApplicableScopeId(), schoolId);
+
+        // Duplicate guard (exclude current item)
+        if (feePlanItemRepository.existsByFeePlan_IdAndFeeHead_IdAndApplicableScopeTypeAndApplicableScopeIdAndIdNot(
+                planId, dto.getFeeHeadId(), dto.getApplicableScopeType(), dto.getApplicableScopeId(), itemId)) {
+            throw new IllegalArgumentException(
+                    "A fee item for '" + feeHead.getName() + "' with this scope already exists in this plan.");
+        }
 
         item.setFeeHead(feeHead);
         item.setApplicableScopeType(dto.getApplicableScopeType());
