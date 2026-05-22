@@ -1158,6 +1158,7 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
   const [deleteItemTarget, setDeleteItemTarget] = useState<FeePlanItem | null>(null);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   // Generate demands state
   const [showGenerateModal, setShowGenerateModal] = useState(false);
@@ -1205,6 +1206,7 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
   const missingScheduleItems = items.filter(it => scheduleStatus(it) === 'missing');
   const invalidScheduleItems = items.filter(it => scheduleStatus(it) === 'invalid');
   const allHaveValidSchedules = hasItems && missingScheduleItems.length === 0 && invalidScheduleItems.length === 0;
+  const totalInstallments = items.reduce((sum, it) => sum + (it.installments?.length ?? 0), 0);
 
   // Resolve a human-readable label for an item's scope target
   function itemTargetLabel(it: FeePlanItem): string {
@@ -1345,50 +1347,92 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
             <div className="row" style={{ alignItems: 'center', gap: 10 }}>
               <h3 style={{ margin: 0, fontSize: 17 }}>{plan.name}</h3>
               <span style={{ padding: '2px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, background: s.bg, color: s.color }}>{plan.status}</span>
+              {plan.status !== 'DRAFT' && (
+                <span style={{ padding: '2px 10px', borderRadius: 99, fontSize: 11, fontWeight: 600, background: '#f1f5f9', color: '#94a3b8', border: '1px solid #e2e8f0' }}>🔒 Read-only</span>
+              )}
             </div>
             <div style={{ fontSize: 13, color: '#64748b' }}>
-              {plan.academicYearLabel} • {items.length} items • Total: <strong>{fmt(sumItems(items))}</strong>
-              {plan.publishedAt ? ` • Published ${formatJsonDate(plan.publishedAt)}` : ''}
+              {plan.academicYearLabel} · {items.length} item{items.length !== 1 ? 's' : ''} · Configured item total: <strong>{fmt(sumItems(items))}</strong>
+              {plan.publishedAt ? ` · Published ${formatJsonDate(plan.publishedAt)}` : ''}
             </div>
+            {/* Publish readiness indicator */}
+            {plan.status === 'DRAFT' && hasItems && (
+              allHaveValidSchedules ? (
+                <div style={{ fontSize: 12, color: '#16a34a', fontWeight: 600, marginTop: 2 }}>
+                  ✓ Ready to publish · {items.length} item{items.length !== 1 ? 's' : ''} · {totalInstallments} installment{totalInstallments !== 1 ? 's' : ''} configured
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 600, marginTop: 2 }}>
+                  ✗ Cannot publish · {missingScheduleItems.length + invalidScheduleItems.length} item{(missingScheduleItems.length + invalidScheduleItems.length) !== 1 ? '(s)' : ''} missing or invalid schedule
+                </div>
+              )
+            )}
           </div>
-          <div className="row" style={{ gap: 8 }}>
+          {/* Header action buttons */}
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            {/* Primary action */}
+            {plan.status === 'DRAFT' && (
+              <button type="button" className="btn"
+                disabled={!hasItems || !allHaveValidSchedules}
+                title={!hasItems ? 'Add items first' : !allHaveValidSchedules ? 'Fix schedules before publishing' : undefined}
+                onClick={() => setShowPublishConfirm(true)}>
+                🚀 Publish Plan
+              </button>
+            )}
             {plan.status === 'PUBLISHED' && (
               <button type="button" className="btn" style={{ background: 'linear-gradient(180deg,#059669,#047857)', borderColor: '#047857' }}
                 onClick={openGenerateModal}>
                 ⚡ Generate Student Dues
               </button>
             )}
-            {plan.status === 'DRAFT' && (
-              <button type="button" className="btn" disabled={!hasItems || !allHaveValidSchedules}
-                title={!hasItems ? 'Add items first' : !allHaveValidSchedules ? 'Fix schedules before publishing' : undefined}
-                onClick={() => setShowPublishConfirm(true)}>Publish Plan</button>
-            )}
-            {plan.status !== 'ARCHIVED' && <button type="button" className="btn secondary" onClick={() => setShowArchiveConfirm(true)}>Archive</button>}
+            {/* Secondary: Back */}
             <button type="button" className="btn secondary" onClick={onClose}>← Back</button>
+            {/* More menu */}
+            {plan.status !== 'ARCHIVED' && (
+              <div style={{ position: 'relative' }}>
+                <button type="button" className="btn secondary" style={{ padding: '8px 10px' }}
+                  onClick={() => setShowMoreMenu(v => !v)} title="More options">⋯</button>
+                {showMoreMenu && (
+                  <>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setShowMoreMenu(false)} />
+                    <div style={{ position: 'absolute', right: 0, top: '110%', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, boxShadow: '0 4px 16px rgba(15,23,42,0.1)', zIndex: 101, minWidth: 160, overflow: 'hidden' }}>
+                      <button type="button" style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', color: '#475569' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                        onClick={() => { setShowMoreMenu(false); setShowArchiveConfirm(true); }}>
+                        📦 Archive Plan
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        {plan.status === 'DRAFT' && !hasItems && (
-          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fef3c7', color: '#92400e', fontSize: 12 }}>⚠ Add at least one fee item before publishing.</div>
-        )}
         {plan.status === 'DRAFT' && hasItems && missingScheduleItems.length > 0 && (
-          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fef3c7', color: '#92400e', fontSize: 12 }}>
-            ⚠ {missingScheduleItems.length} fee item{missingScheduleItems.length > 1 ? 's are' : ' is'} missing a schedule:{' '}
-            {missingScheduleItems.map(it => `${it.feeHeadName} · ${itemTargetLabel(it)}`).join(', ')}.
+          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fef2f2', color: '#b91c1c', fontSize: 12 }}>
+            ⚠ Missing schedule: {missingScheduleItems.map(it => `${it.feeHeadName} · ${itemTargetLabel(it)}`).join(', ')}.
           </div>
         )}
         {plan.status === 'DRAFT' && hasItems && invalidScheduleItems.length > 0 && (
-          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fef3c7', color: '#92400e', fontSize: 12 }}>
-            ⚠ {invalidScheduleItems.length} fee item{invalidScheduleItems.length > 1 ? 's have' : ' has'} an invalid schedule total:{' '}
-            {invalidScheduleItems.map(it => `${it.feeHeadName} · ${itemTargetLabel(it)}`).join(', ')}.
+          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fff7ed', color: '#92400e', fontSize: 12 }}>
+            ⚠ Invalid schedule total: {invalidScheduleItems.map(it => `${it.feeHeadName} · ${itemTargetLabel(it)}`).join(', ')}.
           </div>
         )}
       </div>
 
       {/* Items section */}
       <div className="stack" style={{ gap: 8 }}>
-        <div className="row" style={{ justifyContent: 'space-between' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <strong>Fee Items</strong>
-          {isEditable && <button type="button" className="btn" style={{ fontSize: 13, padding: '6px 14px' }} onClick={openAddItem}>+ Add Item</button>}
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            {!isEditable && plan.status !== 'DRAFT' && (
+              <span style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>
+                🔒 Plan is {plan.status.toLowerCase()} — items are read-only
+              </span>
+            )}
+            {isEditable && <button type="button" className="btn" style={{ fontSize: 13, padding: '6px 14px' }} onClick={openAddItem}>+ Add Item</button>}
+          </div>
         </div>
 
         {showAddItem && isEditable && (
@@ -1495,28 +1539,36 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                       </td>
                       <td style={{ padding: '8px 10px' }}>
                         <div className="row" style={{ gap: 6 }}>
-                          {status === 'missing' && (
+                          {isEditable && status === 'missing' && (
                             <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#dc2626', borderColor: '#dc2626' }}
                               onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
                               {isInstOpen ? 'Close' : '📅 Create Schedule'}
                             </button>
                           )}
-                          {status === 'invalid' && (
+                          {isEditable && status === 'invalid' && (
                             <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#d97706', borderColor: '#d97706' }}
                               onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
                               {isInstOpen ? 'Close' : '⚠ Fix Schedule'}
                             </button>
                           )}
-                          {status === 'ready' && (
+                          {isEditable && status === 'ready' && (
                             <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }}
                               onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
                               {isInstOpen ? 'Close' : '📅 Edit Schedule'}
                             </button>
                           )}
-                          {isEditable && <>
-                            <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => openEditItem(it)}>Edit</button>
-                            <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px', color: '#dc2626' }} onClick={() => setDeleteItemTarget(it)}>✕</button>
-                          </>}
+                          {!isEditable && status !== 'missing' && (
+                            <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }}
+                              onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
+                              {isInstOpen ? 'Close' : '📅 View Schedule'}
+                            </button>
+                          )}
+                          {isEditable && (
+                            <>
+                              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => openEditItem(it)} title="Edit this item">✏ Edit Item</button>
+                              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px', color: '#dc2626' }} title="Remove this item" onClick={() => setDeleteItemTarget(it)}>🗑 Remove</button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1532,10 +1584,43 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
         )}
       </div>
 
-      <ConfirmDialog open={!!deleteItemTarget} title={`Remove "${deleteItemTarget?.feeHeadName}"?`} description="This will remove the item and all its installments."
+      <ConfirmDialog open={!!deleteItemTarget}
+        title={`Remove ${deleteItemTarget?.feeHeadName ?? 'item'}${deleteItemTarget ? ` for ${itemTargetLabel(deleteItemTarget)}` : ''} from this draft plan?`}
+        description="This will permanently remove the item and all its installments from this plan."
         danger confirmLabel="Remove" onConfirm={() => { if (deleteItemTarget) deleteItemMut.mutate(deleteItemTarget.id); }} onClose={() => setDeleteItemTarget(null)} />
-      <ConfirmDialog open={showPublishConfirm} title="Publish Fee Plan?" description={`After publishing "${plan.name}", plan items cannot be edited directly.`}
-        confirmLabel="Yes, Publish" onConfirm={() => publishMut.mutate()} onClose={() => setShowPublishConfirm(false)} />
+
+      {/* Publish confirmation modal */}
+      {showPublishConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          onClick={() => { if (!publishMut.isPending) setShowPublishConfirm(false); }}>
+          <div className="card stack" style={{ maxWidth: 480, width: '100%', gap: 16 }} onClick={e => e.stopPropagation()}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 36, marginBottom: 8 }}>🚀</div>
+              <h3 style={{ margin: 0, fontSize: 18 }}>Publish fee plan?</h3>
+              <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>{plan.name}</div>
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#475569', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <li>Fee items and installment schedules will become <strong>read-only</strong>.</li>
+              <li>Student dues can be generated after publishing.</li>
+              <li>Future changes should be made through a <strong>revised fee plan</strong>.</li>
+            </ul>
+            {publishMut.isError && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#b91c1c', fontSize: 13 }}>
+                {formatApiError(publishMut.error)}
+              </div>
+            )}
+            <div className="row" style={{ gap: 8 }}>
+              <button type="button" className="btn" style={{ flex: 1 }}
+                disabled={publishMut.isPending}
+                onClick={() => publishMut.mutate()}>
+                {publishMut.isPending ? 'Publishing…' : '🚀 Publish Plan'}
+              </button>
+              <button type="button" className="btn secondary" disabled={publishMut.isPending} onClick={() => setShowPublishConfirm(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ConfirmDialog open={showArchiveConfirm} title={`Archive "${plan.name}"?`} description="Archived plans are read-only."
         confirmLabel="Archive" onConfirm={() => archiveMut.mutate()} onClose={() => setShowArchiveConfirm(false)} />
 
@@ -1680,7 +1765,7 @@ function TabFeePlans({ schoolId, perms }: { schoolId: number | undefined; perms:
           <div className="row" style={{ gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div className="stack" style={{ flex: 2, minWidth: 200 }}>
               <label style={{ fontSize: 13 }}>Plan Name *</label>
-              <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="Annual Fee 2025-26" maxLength={128} />
+              <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="Annual Fee 2026-2027" maxLength={128} />
             </div>
             <div className="stack" style={{ flex: 1, minWidth: 180 }}>
               <label style={{ fontSize: 13 }}>Academic Year *</label>
