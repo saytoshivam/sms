@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -209,16 +210,29 @@ public class FeeSetupService {
             throw new IllegalStateException("Cannot publish fee plan without at least one fee item");
         }
 
-        // Every item must have at least one installment
+        // Validate every item has a schedule and installment total matches item amount
         List<FeePlanItem> items = feePlanItemRepository.findByFeePlan_IdOrderByIdAsc(id);
+        List<String> errors = new ArrayList<>();
         for (FeePlanItem item : items) {
+            String label = item.getFeeHead().getName();
             List<FeeInstallment> installments =
                     feeInstallmentRepository.findByFeePlanItem_IdOrderBySequenceAsc(item.getId());
             if (installments.isEmpty()) {
-                throw new IllegalStateException(
-                        "Fee plan item '" + item.getFeeHead().getName() + "' has no installments. "
-                        + "Add at least one installment before publishing.");
+                errors.add("'" + label + "' has no installment schedule");
+            } else {
+                BigDecimal instTotal = installments.stream()
+                        .map(FeeInstallment::getAmount)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                if (instTotal.compareTo(item.getAmount()) != 0) {
+                    errors.add("'" + label + "' schedule total (" + instTotal.toPlainString()
+                            + ") does not match item amount (" + item.getAmount().toPlainString() + ")");
+                }
             }
+        }
+        if (!errors.isEmpty()) {
+            throw new IllegalStateException(
+                    "Cannot publish — " + errors.size() + " item(s) have invalid schedule(s): "
+                    + String.join("; ", errors));
         }
 
         plan.setStatus(FeePlanStatus.PUBLISHED);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -1196,7 +1196,54 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
   const items = detailQ.data?.items ?? [];
   const isEditable = plan?.status === 'DRAFT';
   const hasItems = items.length > 0;
-  const allHaveInstallments = hasItems && items.every(i => i.installments && i.installments.length > 0);
+
+  // Schedule validity helpers
+  function scheduleStatus(it: FeePlanItem): 'missing' | 'invalid' | 'ready' {
+    const n = it.installments?.length ?? 0;
+    if (n === 0) return 'missing';
+    const itAmt = typeof it.amount === 'string' ? parseFloat(it.amount) || 0 : it.amount || 0;
+    const instTotal = sumInst(it.installments ?? []);
+    return Math.abs(instTotal - itAmt) < 0.01 ? 'ready' : 'invalid';
+  }
+
+  const missingScheduleItems = items.filter(it => scheduleStatus(it) === 'missing');
+  const invalidScheduleItems = items.filter(it => scheduleStatus(it) === 'invalid');
+  const allHaveValidSchedules = hasItems && missingScheduleItems.length === 0 && invalidScheduleItems.length === 0;
+
+  // Resolve a human-readable label for an item's scope target
+  function itemTargetLabel(it: FeePlanItem): string {
+    if (it.applicableScopeType === 'SCHOOL') return 'all students';
+    if (it.applicableScopeType === 'CLASS' || it.applicableScopeType === 'SECTION') {
+      const cg = classGroups.find(c => c.id === it.applicableScopeId);
+      if (cg) return it.applicableScopeType === 'CLASS' && cg.gradeLevel != null
+        ? `Grade ${cg.gradeLevel}` : cg.displayName;
+    }
+    return String(it.applicableScopeId);
+  }
+
+  // Real-time duplicate detection while filling in Add Item form
+  const dupCheck = useMemo<string | null>(() => {
+    if (!itemDraft.feeHeadId || !itemDraft.applicableScopeId) return null;
+    const fhId = Number(itemDraft.feeHeadId);
+    const scopeId = Number(itemDraft.applicableScopeId);
+    const conflict = items.find(it =>
+      it.feeHeadId === fhId &&
+      it.applicableScopeType === itemDraft.applicableScopeType &&
+      it.applicableScopeId === scopeId &&
+      (!editingItem || it.id !== editingItem.id)
+    );
+    if (!conflict) return null;
+    const fhName = activeHeads.find(h => h.id === fhId)?.name ?? 'This fee head';
+    let targetLabel = String(scopeId);
+    if (itemDraft.applicableScopeType === 'SCHOOL') {
+      targetLabel = 'all students';
+    } else if (itemDraft.applicableScopeType === 'CLASS' || itemDraft.applicableScopeType === 'SECTION') {
+      const cg = classGroups.find(c => c.id === scopeId);
+      if (cg) targetLabel = itemDraft.applicableScopeType === 'CLASS' && cg.gradeLevel != null
+        ? `Grade ${cg.gradeLevel}` : cg.displayName;
+    }
+    return `${fhName} is already configured for ${targetLabel}. Edit the existing item or choose a different class/section.`;
+  }, [itemDraft, items, editingItem, activeHeads, classGroups]);
 
   function scopeOptions(t: ApplicableScopeType) {
     if (t === 'SCHOOL') return schoolId ? [{ value: String(schoolId), label: 'All students (School-wide)' }] : [];
@@ -1316,8 +1363,8 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
               </button>
             )}
             {plan.status === 'DRAFT' && (
-              <button type="button" className="btn" disabled={!hasItems || !allHaveInstallments}
-                title={!hasItems ? 'Add items first' : !allHaveInstallments ? 'All items need installments' : undefined}
+              <button type="button" className="btn" disabled={!hasItems || !allHaveValidSchedules}
+                title={!hasItems ? 'Add items first' : !allHaveValidSchedules ? 'Fix schedules before publishing' : undefined}
                 onClick={() => setShowPublishConfirm(true)}>Publish Plan</button>
             )}
             {plan.status !== 'ARCHIVED' && <button type="button" className="btn secondary" onClick={() => setShowArchiveConfirm(true)}>Archive</button>}
@@ -1327,8 +1374,17 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
         {plan.status === 'DRAFT' && !hasItems && (
           <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fef3c7', color: '#92400e', fontSize: 12 }}>⚠ Add at least one fee item before publishing.</div>
         )}
-        {plan.status === 'DRAFT' && hasItems && !allHaveInstallments && (
-          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fef3c7', color: '#92400e', fontSize: 12 }}>⚠ All items must have installments before publishing.</div>
+        {plan.status === 'DRAFT' && hasItems && missingScheduleItems.length > 0 && (
+          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fef3c7', color: '#92400e', fontSize: 12 }}>
+            ⚠ {missingScheduleItems.length} fee item{missingScheduleItems.length > 1 ? 's are' : ' is'} missing a schedule:{' '}
+            {missingScheduleItems.map(it => `${it.feeHeadName} · ${itemTargetLabel(it)}`).join(', ')}.
+          </div>
+        )}
+        {plan.status === 'DRAFT' && hasItems && invalidScheduleItems.length > 0 && (
+          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, background: '#fef3c7', color: '#92400e', fontSize: 12 }}>
+            ⚠ {invalidScheduleItems.length} fee item{invalidScheduleItems.length > 1 ? 's have' : ' has'} an invalid schedule total:{' '}
+            {invalidScheduleItems.map(it => `${it.feeHeadName} · ${itemTargetLabel(it)}`).join(', ')}.
+          </div>
         )}
       </div>
 
@@ -1384,9 +1440,11 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                 <input type="checkbox" className="sms-checkbox" checked={itemDraft.mandatory} onChange={e => setItemDraft(d => ({ ...d, mandatory: e.target.checked }))} />Mandatory
               </label>
             </div>
-            {itemErr && <div style={{ color: '#dc2626', fontSize: 13 }}>{itemErr}</div>}
+            {(itemErr || dupCheck) && <div style={{ color: '#dc2626', fontSize: 13 }}>{dupCheck ?? itemErr}</div>}
             <div className="row">
-              <button type="button" className="btn" disabled={saveItemMut.isPending || !itemDraft.feeHeadId || !itemDraft.amount || !itemDraft.applicableScopeId} onClick={() => saveItemMut.mutate()}>
+              <button type="button" className="btn"
+                disabled={saveItemMut.isPending || !itemDraft.feeHeadId || !itemDraft.amount || !itemDraft.applicableScopeId || !!dupCheck}
+                onClick={() => saveItemMut.mutate()}>
                 {saveItemMut.isPending ? 'Saving…' : editingItem ? 'Update' : 'Add Item'}
               </button>
               <button type="button" className="btn secondary" onClick={resetItem}>Cancel</button>
@@ -1401,7 +1459,7 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
-                  {['Fee Head', 'Scope', 'Amount', 'Frequency', 'Mandatory', 'Installments', 'Actions'].map(h => (
+                  {['Fee Head', 'Applies To', 'Total Amount', 'Frequency', 'Schedule Status', 'Actions'].map(h => (
                     <th key={h} style={{ padding: '8px 10px', fontWeight: 600 }}>{h}</th>
                   ))}
                 </tr>
@@ -1411,19 +1469,9 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                   const instCount = it.installments?.length ?? 0;
                   const instTotal = sumInst(it.installments ?? []);
                   const itAmt = typeof it.amount === 'string' ? parseFloat(it.amount) || 0 : it.amount || 0;
-                  const bal = Math.abs(instTotal - itAmt) < 0.01;
-                  const needsSchedule = instCount === 0;
+                  const status = scheduleStatus(it);
                   const isInstOpen = installmentItem?.id === it.id;
-
-                  // Resolve scope display label
-                  let scopeDisplay = String(it.applicableScopeId);
-                  if (it.applicableScopeType === 'SCHOOL') {
-                    scopeDisplay = 'All Students';
-                  } else if (it.applicableScopeType === 'CLASS' || it.applicableScopeType === 'SECTION') {
-                    const cg = classGroups.find(c => c.id === it.applicableScopeId);
-                    if (cg) scopeDisplay = it.applicableScopeType === 'CLASS' && cg.gradeLevel != null
-                      ? `Grade ${cg.gradeLevel} (all sections)` : cg.displayName;
-                  }
+                  const targetLabel = itemTargetLabel(it);
 
                   return (
                     <tr key={it.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -1433,27 +1481,43 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                       </td>
                       <td style={{ padding: '8px 10px' }}>
                         <span style={{ padding: '2px 6px', borderRadius: 6, background: '#f1f5f9', fontSize: 11 }}>{it.applicableScopeType}</span>
-                        <div style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>{scopeDisplay}</div>
+                        <div style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>{targetLabel}</div>
                       </td>
                       <td style={{ padding: '8px 10px', fontWeight: 600 }}>{fmt(it.amount)}</td>
                       <td style={{ padding: '8px 10px' }}>{FREQUENCY_LABELS[it.frequency]}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'center' }}>{it.mandatory ? '✓' : '—'}</td>
                       <td style={{ padding: '8px 10px' }}>
-                        {needsSchedule
-                          ? <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 600 }}>⚠ No schedule</span>
-                          : <span style={{ color: bal ? '#16a34a' : '#f59e0b', fontSize: 11 }}>{instCount} × {fmt(instTotal)}{!bal && ' ⚠ mismatch'}</span>}
+                        {status === 'missing' && (
+                          <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 600 }}>⚠ No schedule</span>
+                        )}
+                        {status === 'invalid' && (
+                          <span style={{ color: '#d97706', fontSize: 11, fontWeight: 600 }}>
+                            ⚠ Schedule total {fmt(instTotal)}, expected {fmt(itAmt)}
+                          </span>
+                        )}
+                        {status === 'ready' && (
+                          <span style={{ color: '#16a34a', fontSize: 11 }}>
+                            ✓ {instCount} installment{instCount !== 1 ? 's' : ''} · total {fmt(instTotal)}
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: '8px 10px' }}>
                         <div className="row" style={{ gap: 6 }}>
-                          {needsSchedule ? (
+                          {status === 'missing' && (
                             <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#dc2626', borderColor: '#dc2626' }}
                               onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
                               {isInstOpen ? 'Close' : '📅 Create Schedule'}
                             </button>
-                          ) : (
+                          )}
+                          {status === 'invalid' && (
+                            <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#d97706', borderColor: '#d97706' }}
+                              onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
+                              {isInstOpen ? 'Close' : '⚠ Fix Schedule'}
+                            </button>
+                          )}
+                          {status === 'ready' && (
                             <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }}
                               onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
-                              {isInstOpen ? 'Close' : '📅 Schedule'}
+                              {isInstOpen ? 'Close' : '📅 Edit Schedule'}
                             </button>
                           )}
                           {isEditable && <>
