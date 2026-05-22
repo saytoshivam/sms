@@ -7,6 +7,8 @@ import { toast } from '../lib/toast';
 import { pageContent, type SpringPage, formatJsonDate } from '../lib/apiData';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SmartSelect } from '../components/SmartSelect';
+import { SelectKeeper } from '../components/SelectKeeper';
+import { DateKeeper } from '../components/DateKeeper';
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
 
@@ -476,13 +478,12 @@ function CollectPaymentModal({ studentId, studentName, preSelectDemandId, onClos
         <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div className="stack" style={{ flex: 1, minWidth: 140 }}>
             <label style={{ fontSize: 12 }}>Payment Date *</label>
-            <input type="date" value={paymentDate} max={today} onChange={e => setPaymentDate(e.target.value)} />
+            <DateKeeper value={paymentDate} onChange={setPaymentDate} />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 160 }}>
             <label style={{ fontSize: 12 }}>Payment Mode *</label>
-            <select value={paymentMode} onChange={e => setPaymentMode(e.target.value as PaymentMode)}>
-              {PAYMENT_MODES.map(m => <option key={m} value={m}>{PAYMENT_MODE_LABELS[m]}</option>)}
-            </select>
+            <SelectKeeper value={paymentMode} onChange={v => setPaymentMode(v as PaymentMode)}
+              options={PAYMENT_MODES.map(m => ({ value: m, label: PAYMENT_MODE_LABELS[m] }))} />
           </div>
           <div className="stack" style={{ flex: 2, minWidth: 180 }}>
             <label style={{ fontSize: 12 }}>Reference No {refRequired ? '*' : '(optional)'}</label>
@@ -668,10 +669,9 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
         <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div className="stack" style={{ flex: 1, minWidth: 160 }}>
             <label style={{ fontSize: 12 }}>Academic Year</label>
-            <select value={academicYearId} onChange={e => setAcademicYearId(e.target.value)}>
-              <option value="">All years</option>
-              {academicYears.map(y => <option key={y.id} value={String(y.id)}>{y.label}</option>)}
-            </select>
+            <SelectKeeper value={academicYearId} onChange={setAcademicYearId}
+              options={academicYears.map(y => ({ value: String(y.id), label: y.label }))}
+              emptyValueLabel="All years" />
           </div>
           <div className="stack" style={{ flex: 2, minWidth: 180 }}>
             <label style={{ fontSize: 12 }}>Class / Section</label>
@@ -681,20 +681,17 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             <label style={{ fontSize: 12 }}>Status</label>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              <option value="">All statuses</option>
-              {(['UNPAID', 'PARTIAL', 'PAID', 'WAIVED', 'CANCELLED'] as StudentFeeDemandStatus[]).map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <SelectKeeper value={statusFilter} onChange={setStatusFilter}
+              options={(['UNPAID', 'PARTIAL', 'PAID', 'WAIVED', 'CANCELLED'] as StudentFeeDemandStatus[]).map(s => ({ value: s, label: s }))}
+              emptyValueLabel="All statuses" />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             <label style={{ fontSize: 12 }}>Due From</label>
-            <input type="date" value={dueFrom} onChange={e => setDueFrom(e.target.value)} />
+            <DateKeeper value={dueFrom} onChange={setDueFrom} clearable emptyLabel="Any date" />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             <label style={{ fontSize: 12 }}>Due To</label>
-            <input type="date" value={dueTo} onChange={e => setDueTo(e.target.value)} />
+            <DateKeeper value={dueTo} onChange={setDueTo} clearable emptyLabel="Any date" />
           </div>
           <div className="stack" style={{ flex: 2, minWidth: 180 }}>
             <label style={{ fontSize: 12 }}>Search student / demand no.</label>
@@ -928,9 +925,8 @@ function TabFeeHeads({ perms }: { perms: FeePermissions }) {
             </div>
             <div className="stack" style={{ flex: 1, minWidth: 160 }}>
               <label style={{ fontSize: 13 }}>Type *</label>
-              <select value={draft.feeType} onChange={e => setDraft(d => ({ ...d, feeType: e.target.value as FeeType }))}>
-                {FEE_TYPES.map(t => <option key={t} value={t}>{FEE_TYPE_LABELS[t]}</option>)}
-              </select>
+              <SelectKeeper value={draft.feeType} onChange={v => setDraft(d => ({ ...d, feeType: v as FeeType }))}
+                options={FEE_TYPES.map(t => ({ value: t, label: FEE_TYPE_LABELS[t] }))} />
             </div>
           </div>
           <div className="stack">
@@ -1125,7 +1121,7 @@ function InstallmentEditor({ item, planId, onDone }: { item: FeePlanItem; planId
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             {idx === 0 && <label style={{ fontSize: 11 }}>Due Date</label>}
-            <input type="date" value={row.dueDate} onChange={e => setRows(r => r.map((x, i) => i === idx ? { ...x, dueDate: e.target.value } : x))} />
+            <DateKeeper value={row.dueDate} onChange={v => setRows(r => r.map((x, i) => i === idx ? { ...x, dueDate: v } : x))} emptyLabel="Pick date" clearable />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 110 }}>
             {idx === 0 && <label style={{ fontSize: 11 }}>Amount (₹)</label>}
@@ -1410,12 +1406,10 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
               </div>
               <div className="stack" style={{ flex: 1, minWidth: 140 }}>
                 <label style={{ fontSize: 13 }}>Scope *</label>
-                <select value={itemDraft.applicableScopeType} onChange={e => {
-                  const st = e.target.value as ApplicableScopeType;
+                <SelectKeeper value={itemDraft.applicableScopeType} onChange={v => {
+                  const st = v as ApplicableScopeType;
                   setItemDraft(d => ({ ...d, applicableScopeType: st, applicableScopeId: st === 'SCHOOL' && schoolId ? String(schoolId) : '' }));
-                }}>
-                  {SCOPE_TYPES.map(st => <option key={st} value={st}>{st}</option>)}
-                </select>
+                }} options={SCOPE_TYPES.map(st => ({ value: st, label: st }))} />
               </div>
               {itemDraft.applicableScopeType !== 'SCHOOL' && (
                 <div className="stack" style={{ flex: 2, minWidth: 200 }}>
@@ -1432,9 +1426,8 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
               </div>
               <div className="stack" style={{ flex: 1, minWidth: 150 }}>
                 <label style={{ fontSize: 13 }}>Frequency</label>
-                <select value={itemDraft.frequency} onChange={e => setItemDraft(d => ({ ...d, frequency: e.target.value as FeeFrequency }))}>
-                  {FEE_FREQUENCIES.map(f => <option key={f} value={f}>{FREQUENCY_LABELS[f]}</option>)}
-                </select>
+                <SelectKeeper value={itemDraft.frequency} onChange={v => setItemDraft(d => ({ ...d, frequency: v as FeeFrequency }))}
+                  options={FEE_FREQUENCIES.map(f => ({ value: f, label: FREQUENCY_LABELS[f] }))} />
               </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', paddingTop: 26 }}>
                 <input type="checkbox" className="sms-checkbox" checked={itemDraft.mandatory} onChange={e => setItemDraft(d => ({ ...d, mandatory: e.target.checked }))} />Mandatory
@@ -1691,10 +1684,9 @@ function TabFeePlans({ schoolId, perms }: { schoolId: number | undefined; perms:
             </div>
             <div className="stack" style={{ flex: 1, minWidth: 180 }}>
               <label style={{ fontSize: 13 }}>Academic Year *</label>
-              <select value={draft.academicYearId} onChange={e => setDraft(d => ({ ...d, academicYearId: e.target.value }))}>
-                <option value="">Select year…</option>
-                {academicYears.map(y => <option key={y.id} value={String(y.id)}>{y.label}</option>)}
-              </select>
+              <SelectKeeper value={draft.academicYearId} onChange={v => setDraft(d => ({ ...d, academicYearId: v }))}
+                options={academicYears.map(y => ({ value: String(y.id), label: y.label }))}
+                emptyValueLabel="Select year…" />
             </div>
           </div>
           <div className="stack">
@@ -1876,27 +1868,23 @@ function TabCollections({ perms }: { perms: FeePermissions }) {
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 150 }}>
             <label style={{ fontSize: 12 }}>Payment Mode</label>
-            <select value={paymentModeFilter} onChange={e => setPaymentModeFilter(e.target.value)}>
-              <option value="">All modes</option>
-              {PAYMENT_MODES.map(m => <option key={m} value={m}>{PAYMENT_MODE_LABELS[m]}</option>)}
-            </select>
+            <SelectKeeper value={paymentModeFilter} onChange={setPaymentModeFilter}
+              options={PAYMENT_MODES.map(m => ({ value: m, label: PAYMENT_MODE_LABELS[m] }))}
+              emptyValueLabel="All modes" />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             <label style={{ fontSize: 12 }}>From Date</label>
-            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+            <DateKeeper value={fromDate} onChange={setFromDate} clearable emptyLabel="Any date" />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             <label style={{ fontSize: 12 }}>To Date</label>
-            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
+            <DateKeeper value={toDate} onChange={setToDate} clearable emptyLabel="Any date" />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             <label style={{ fontSize: 12 }}>Status</label>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              <option value="">All</option>
-              {(['SUCCESS', 'PENDING', 'FAILED', 'CANCELLED'] as PaymentStatus[]).map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <SelectKeeper value={statusFilter} onChange={setStatusFilter}
+              options={(['SUCCESS', 'PENDING', 'FAILED', 'CANCELLED'] as PaymentStatus[]).map(s => ({ value: s, label: s }))}
+              emptyValueLabel="All" />
           </div>
           {(studentSearch || paymentModeFilter || fromDate || toDate || statusFilter) && (
             <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '8px 12px', alignSelf: 'flex-end' }}
@@ -2188,11 +2176,9 @@ function TabOverview({ onGoToHeads, onGoToPlans, onGoToDues }: { onGoToHeads: ()
       {/* Academic year filter */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <label style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>Academic Year:</label>
-        <select value={academicYearId} onChange={e => setAcademicYearId(e.target.value)}
-          style={{ fontSize: 13, padding: '4px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff' }}>
-          <option value="">All years</option>
-          {academicYears.map(y => <option key={y.id} value={String(y.id)}>{y.label}</option>)}
-        </select>
+        <SelectKeeper value={academicYearId} onChange={setAcademicYearId}
+          options={academicYears.map(y => ({ value: String(y.id), label: y.label }))}
+          emptyValueLabel="All years" />
         {dashboardQ.isRefetching && <span style={{ fontSize: 12, color: '#94a3b8' }}>Refreshing…</span>}
       </div>
 
@@ -2481,37 +2467,29 @@ function TabReports() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
           <div>
             <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Academic Year</div>
-            <select value={academicYearId} onChange={e => setAcademicYearId(e.target.value)}
-              style={{ fontSize: 13, padding: '5px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', minWidth: 130 }}>
-              <option value="">All years</option>
-              {academicYears.map(y => <option key={y.id} value={String(y.id)}>{y.label}</option>)}
-            </select>
+            <SelectKeeper value={academicYearId} onChange={setAcademicYearId}
+              options={academicYears.map(y => ({ value: String(y.id), label: y.label }))}
+              emptyValueLabel="All years" />
           </div>
           <div>
             <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>From</div>
-            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
-              style={{ fontSize: 13, padding: '5px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff' }} />
+            <DateKeeper value={fromDate} onChange={setFromDate} clearable emptyLabel="Any date" />
           </div>
           <div>
             <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>To</div>
-            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
-              style={{ fontSize: 13, padding: '5px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff' }} />
+            <DateKeeper value={toDate} onChange={setToDate} clearable emptyLabel="Any date" />
           </div>
           <div>
             <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Class</div>
-            <select value={classGroupId} onChange={e => setClassGroupId(e.target.value)}
-              style={{ fontSize: 13, padding: '5px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', minWidth: 130 }}>
-              <option value="">All classes</option>
-              {classGroups.map(cg => <option key={cg.id} value={String(cg.id)}>{cg.displayName}</option>)}
-            </select>
+            <SelectKeeper value={classGroupId} onChange={setClassGroupId}
+              options={classGroups.map(cg => ({ value: String(cg.id), label: cg.displayName }))}
+              emptyValueLabel="All classes" />
           </div>
           <div>
             <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Payment Mode</div>
-            <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)}
-              style={{ fontSize: 13, padding: '5px 10px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', minWidth: 130 }}>
-              <option value="">All modes</option>
-              {PAYMENT_MODES.map(m => <option key={m} value={m}>{PAYMENT_MODE_LABELS[m]}</option>)}
-            </select>
+            <SelectKeeper value={paymentMode} onChange={setPaymentMode}
+              options={PAYMENT_MODES.map(m => ({ value: m, label: PAYMENT_MODE_LABELS[m] }))}
+              emptyValueLabel="All modes" />
           </div>
           <button type="button" onClick={handleExport} disabled={exporting || rows.length === 0}
             style={{ marginLeft: 'auto', padding: '6px 14px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: exporting || rows.length === 0 ? 'not-allowed' : 'pointer', opacity: rows.length === 0 ? 0.5 : 1 }}>
