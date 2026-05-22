@@ -78,7 +78,7 @@ type FeeInstallment = {
 
 type FeePlanDetail = { plan: FeePlan; items: FeePlanItem[] };
 type AcademicYear = { id: number; label: string };
-type ClassGroup = { id: number; code: string; displayName: string };
+type ClassGroup = { id: number; code: string; displayName: string; gradeLevel?: number | null; section?: string | null };
 type Student = { id: number; admissionNo: string; firstName: string; lastName?: string | null };
 
 type StudentFeeDemandStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'WAIVED' | 'CANCELLED';
@@ -1173,7 +1173,23 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
 
   function scopeOptions(t: ApplicableScopeType) {
     if (t === 'SCHOOL') return schoolId ? [{ value: String(schoolId), label: 'All students (School-wide)' }] : [];
-    if (t === 'CLASS' || t === 'SECTION') return classGroups.map(cg => ({ value: String(cg.id), label: cg.displayName }));
+    if (t === 'CLASS') {
+      // One entry per grade level — backend resolves ALL sections of that grade
+      const gradeMap = new Map<number, ClassGroup>();
+      const noGrade: ClassGroup[] = [];
+      for (const cg of classGroups) {
+        if (cg.gradeLevel != null) {
+          if (!gradeMap.has(cg.gradeLevel)) gradeMap.set(cg.gradeLevel, cg);
+        } else {
+          noGrade.push(cg);
+        }
+      }
+      const gradeEntries = Array.from(gradeMap.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([grade, cg]) => ({ value: String(cg.id), label: `Grade ${grade} (all sections)` }));
+      return [...gradeEntries, ...noGrade.map(cg => ({ value: String(cg.id), label: cg.displayName }))];
+    }
+    if (t === 'SECTION') return classGroups.map(cg => ({ value: String(cg.id), label: cg.gradeLevel != null ? `Grade ${cg.gradeLevel} – ${cg.section ?? cg.displayName}` : cg.displayName }));
     return students.map(s => ({ value: String(s.id), label: `${s.firstName} ${s.lastName ?? ''}`.trim() + ` (${s.admissionNo})` }));
   }
 
