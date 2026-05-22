@@ -35,6 +35,8 @@ public class FeeSetupController {
 
     @GetMapping("/heads")
     public Page<FeeHeadDTO> listFeeHeads(Pageable pageable) {
+        // Idempotently seeds standard default fee heads the first time a school accesses fee management.
+        feeSetupService.seedDefaultFeeHeadsIfMissing();
         return feeSetupService.listFeeHeads(pageable);
     }
 

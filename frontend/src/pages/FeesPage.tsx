@@ -898,7 +898,7 @@ function TabFeeHeads({ perms }: { perms: FeePermissions }) {
     onError: (e) => toast.error('Deactivate failed', formatApiError(e)),
   });
 
-  return (
+    return (
     <div className="stack">
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <div><strong>Fee Heads</strong><span className="muted" style={{ fontSize: 13, marginLeft: 8 }}>{heads.length} total</span></div>
@@ -906,6 +906,12 @@ function TabFeeHeads({ perms }: { perms: FeePermissions }) {
           {perms.viewOnly && <span className="fee-role-notice">👁 View-only access</span>}
           {perms.canEdit && <button type="button" className="btn" onClick={openAdd}>+ Add Fee Head</button>}
         </div>
+      </div>
+
+      {/* Helper text */}
+      <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#0369a1', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ️</span>
+        <span>Default fee heads are provided to help you start. You can edit, deactivate, or add custom fee heads.</span>
       </div>
 
       {showForm && perms.canEdit && (
@@ -954,12 +960,12 @@ function TabFeeHeads({ perms }: { perms: FeePermissions }) {
       {headsQ.isLoading ? <div className="muted">Loading…</div> : headsQ.error ? (
         <div style={{ color: '#dc2626', fontSize: 13 }}>{formatApiError(headsQ.error)}</div>
       ) : heads.length === 0 ? (
-        <div className="fee-empty-state">
+          <div className="fee-empty-state">
           <div className="fee-empty-state__icon">🏷️</div>
           <div className="fee-empty-state__title">No fee heads configured</div>
           <div className="fee-empty-state__desc">
             Fee heads define what you charge — Tuition, Lab Fee, Transport, etc.<br />
-            Create your first fee head to start building fee plans.
+            Default fee heads will be created automatically on first load. If none appear, create your first fee head to get started.
           </div>
           {perms.canEdit && <button type="button" className="btn" onClick={openAdd}>+ Create First Fee Head</button>}
         </div>

@@ -4,6 +4,7 @@ import com.myhaimi.sms.DTO.fee.*;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.ApplicableScopeType;
 import com.myhaimi.sms.entity.enums.FeePlanStatus;
+import com.myhaimi.sms.entity.enums.FeeType;
 import com.myhaimi.sms.repository.*;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -107,6 +108,60 @@ public class FeeSetupService {
         head.setOptional(dto.isOptional());
 
         return toFeeHeadDTO(feeHeadRepository.save(head));
+    }
+
+    // ─── Default Fee Heads ────────────────────────────────────────────────────
+
+    /** Canonical defaults seeded into every new school's fee head catalogue. */
+    private record DefaultFeeHeadSpec(String code, String name, FeeType feeType, boolean optional) {}
+
+    private static final List<DefaultFeeHeadSpec> DEFAULT_FEE_HEADS = List.of(
+            new DefaultFeeHeadSpec("ADM", "Admission Fee",  FeeType.ADMISSION, false),
+            new DefaultFeeHeadSpec("TUI", "Tuition Fee",    FeeType.TUITION,   false),
+            new DefaultFeeHeadSpec("ANN", "Annual Fee",     FeeType.ANNUAL,    false),
+            new DefaultFeeHeadSpec("EXM", "Exam Fee",       FeeType.EXAM,      false),
+            new DefaultFeeHeadSpec("LIB", "Library Fee",    FeeType.LIBRARY,   true),
+            new DefaultFeeHeadSpec("LAB", "Lab Fee",        FeeType.LAB,       true),
+            new DefaultFeeHeadSpec("ACT", "Activity Fee",   FeeType.ACTIVITY,  true),
+            new DefaultFeeHeadSpec("TRN", "Transport Fee",  FeeType.TRANSPORT, true),
+            new DefaultFeeHeadSpec("HST", "Hostel Fee",     FeeType.HOSTEL,    true),
+            new DefaultFeeHeadSpec("OTH", "Other Fee",      FeeType.OTHER,     true)
+    );
+
+    /**
+     * Idempotently seeds the standard default fee heads for the current school tenant.
+     *
+     * <p>Rules:</p>
+     * <ul>
+     *   <li>Only inserts a default head if no head with the same code exists for this school.</li>
+     *   <li>Never overwrites heads the admin already created or edited.</li>
+     *   <li>Never reactivates a head the admin deactivated.</li>
+     * </ul>
+     *
+     * <p>Safe to call on every GET /api/fees/heads — it is a no-op when all defaults exist.</p>
+     */
+    @Transactional
+    public void seedDefaultFeeHeadsIfMissing() {
+        Integer schoolId = requireSchoolId();
+        School school = requireSchool(schoolId);
+        int seeded = 0;
+        for (DefaultFeeHeadSpec def : DEFAULT_FEE_HEADS) {
+            if (!feeHeadRepository.existsBySchool_IdAndCode(schoolId, def.code())) {
+                FeeHead head = new FeeHead();
+                head.setSchool(school);
+                head.setCode(def.code());
+                head.setName(def.name());
+                head.setFeeType(def.feeType());
+                head.setRefundable(false);
+                head.setOptional(def.optional());
+                head.setActive(true);
+                feeHeadRepository.save(head);
+                seeded++;
+            }
+        }
+        if (seeded > 0) {
+            log.info("[FeeSetup] Seeded {} default fee head(s) for schoolId={}", seeded, schoolId);
+        }
     }
 
     public Page<FeeHeadDTO> listFeeHeads(Pageable pageable) {
