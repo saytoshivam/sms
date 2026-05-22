@@ -96,6 +96,7 @@ public class ClassGroupImportService {
                 .rows(results).build();
     }
 
+    @Transactional
     public ClassGroupImportCommitResultDto commit(ClassGroupImportCommitDto request) {
         Integer schoolId = requireSchoolId();
         List<ClassGroupImportRowDto> validRows = tokenStore.consume(request.getImportToken(), schoolId)
@@ -108,18 +109,26 @@ public class ClassGroupImportService {
         for (ClassGroupImportRowDto row : validRows) {
             try {
                 String code = row.getCode().trim();
-                boolean exists = classGroupRepo.findByCodeAndSchool_Id(code, schoolId)
-                        .filter(cg -> !cg.isDeleted()).isPresent();
-                if (exists) { skipped++; continue; }
+                Optional<ClassGroup> existingOpt = classGroupRepo.findByCodeAndSchool_Id(code, schoolId);
 
-                ClassGroup cg = new ClassGroup();
+                if (existingOpt.isPresent() && !existingOpt.get().isDeleted()) {
+                    // Active record with same code — skip
+                    skipped++;
+                    continue;
+                }
+
+                // Reuse soft-deleted record if present (avoids unique-constraint violation on grade+section)
+                ClassGroup cg = existingOpt.orElseGet(ClassGroup::new);
                 cg.setSchool(school);
                 cg.setCode(code);
+                cg.setDeleted(false);
                 cg.setDisplayName(row.getDisplayName().trim());
+                Integer gradeLevel = null;
                 if (row.getGradeLevel() != null && !row.getGradeLevel().isBlank()) {
-                    try { cg.setGradeLevel(Integer.parseInt(row.getGradeLevel().trim())); } catch (NumberFormatException ignored) {}
+                    try { gradeLevel = Integer.parseInt(row.getGradeLevel().trim()); } catch (NumberFormatException ignored) {}
                 }
-                if (row.getSection() != null && !row.getSection().isBlank()) cg.setSection(row.getSection().trim());
+                cg.setGradeLevel(gradeLevel);
+                cg.setSection((row.getSection() != null && !row.getSection().isBlank()) ? row.getSection().trim() : null);
                 if (row.getCapacity() != null && !row.getCapacity().isBlank()) {
                     try { int cap = Integer.parseInt(row.getCapacity().trim()); if (cap > 0) cg.setCapacity(cap); } catch (NumberFormatException ignored) {}
                 }
