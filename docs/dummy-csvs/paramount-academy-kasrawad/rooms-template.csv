@@ -6,6 +6,9 @@ Academic Block A,0,Ground,104,STANDARD_CLASSROOM,45,true
 Academic Block A,0,Ground,105,STANDARD_CLASSROOM,45,true
 Academic Block A,0,Ground,106,STANDARD_CLASSROOM,45,true
 Academic Block A,0,Ground,107,STANDARD_CLASSROOM,45,true
+Academic Block A,0,Ground,108,STANDARD_CLASSROOM,45,true
+Academic Block A,0,Ground,109,STANDARD_CLASSROOM,45,true
+Academic Block A,0,Ground,110,STANDARD_CLASSROOM,45,true
 Academic Block A,1,First,201,STANDARD_CLASSROOM,45,true
 Academic Block A,1,First,202,STANDARD_CLASSROOM,45,true
 Academic Block A,1,First,203,STANDARD_CLASSROOM,45,true
@@ -13,6 +16,9 @@ Academic Block A,1,First,204,STANDARD_CLASSROOM,45,true
 Academic Block A,1,First,205,STANDARD_CLASSROOM,45,true
 Academic Block A,1,First,206,STANDARD_CLASSROOM,45,true
 Academic Block A,1,First,207,STANDARD_CLASSROOM,45,true
+Academic Block A,1,First,208,STANDARD_CLASSROOM,45,true
+Academic Block A,1,First,209,STANDARD_CLASSROOM,45,true
+Academic Block A,1,First,210,STANDARD_CLASSROOM,45,true
 Academic Block A,2,Second,301,STANDARD_CLASSROOM,45,true
 Academic Block A,2,Second,302,STANDARD_CLASSROOM,45,true
 Academic Block A,2,Second,303,STANDARD_CLASSROOM,45,true
@@ -20,6 +26,9 @@ Academic Block A,2,Second,304,STANDARD_CLASSROOM,45,true
 Academic Block A,2,Second,305,STANDARD_CLASSROOM,45,true
 Academic Block A,2,Second,306,STANDARD_CLASSROOM,45,true
 Academic Block A,2,Second,307,STANDARD_CLASSROOM,45,true
+Academic Block A,2,Second,308,STANDARD_CLASSROOM,45,true
+Academic Block A,2,Second,309,STANDARD_CLASSROOM,45,true
+Academic Block A,2,Second,310,STANDARD_CLASSROOM,45,true
 Academic Block B,0,Ground,101,STANDARD_CLASSROOM,45,true
 Academic Block B,0,Ground,102,STANDARD_CLASSROOM,45,true
 Academic Block B,0,Ground,103,STANDARD_CLASSROOM,45,true
@@ -27,6 +36,9 @@ Academic Block B,0,Ground,104,STANDARD_CLASSROOM,45,true
 Academic Block B,0,Ground,105,STANDARD_CLASSROOM,45,true
 Academic Block B,0,Ground,106,STANDARD_CLASSROOM,45,true
 Academic Block B,0,Ground,107,STANDARD_CLASSROOM,45,true
+Academic Block B,0,Ground,108,STANDARD_CLASSROOM,45,true
+Academic Block B,0,Ground,109,STANDARD_CLASSROOM,45,true
+Academic Block B,0,Ground,110,STANDARD_CLASSROOM,45,true
 Academic Block B,1,First,201,STANDARD_CLASSROOM,45,true
 Academic Block B,1,First,202,STANDARD_CLASSROOM,45,true
 Academic Block B,1,First,203,STANDARD_CLASSROOM,45,true
@@ -34,6 +46,9 @@ Academic Block B,1,First,204,STANDARD_CLASSROOM,45,true
 Academic Block B,1,First,205,STANDARD_CLASSROOM,45,true
 Academic Block B,1,First,206,STANDARD_CLASSROOM,45,true
 Academic Block B,1,First,207,STANDARD_CLASSROOM,45,true
+Academic Block B,1,First,208,STANDARD_CLASSROOM,45,true
+Academic Block B,1,First,209,STANDARD_CLASSROOM,45,true
+Academic Block B,1,First,210,STANDARD_CLASSROOM,45,true
 Academic Block B,2,Second,301,STANDARD_CLASSROOM,45,true
 Academic Block B,2,Second,302,STANDARD_CLASSROOM,45,true
 Academic Block B,2,Second,303,STANDARD_CLASSROOM,45,true
@@ -41,6 +56,9 @@ Academic Block B,2,Second,304,STANDARD_CLASSROOM,45,true
 Academic Block B,2,Second,305,STANDARD_CLASSROOM,45,true
 Academic Block B,2,Second,306,STANDARD_CLASSROOM,45,true
 Academic Block B,2,Second,307,STANDARD_CLASSROOM,45,true
+Academic Block B,2,Second,308,STANDARD_CLASSROOM,45,true
+Academic Block B,2,Second,309,STANDARD_CLASSROOM,45,true
+Academic Block B,2,Second,310,STANDARD_CLASSROOM,45,true
 Science Wing,0,Ground,101,SCIENCE_LAB,32,true
 Science Wing,0,Ground,102,SCIENCE_LAB,32,true
 Science Wing,1,First,201,SCIENCE_LAB,32,true
