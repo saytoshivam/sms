@@ -1414,7 +1414,8 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
   const studentsQ = useQuery({
     queryKey: ['students-list-fee'],
     queryFn: async () => (await api.get<SpringPage<Student> | Student[]>('/api/students?size=500')).data,
-    enabled: itemDraft.applicableScopeType === 'STUDENT' || items.some(i => i.applicableScopeType === 'STUDENT'),
+    enabled: itemDraft.applicableScopeType === 'STUDENT' ||
+      (detailQ.data?.items ?? []).some(i => i.applicableScopeType === 'STUDENT'),
   });
   const students = pageContent(studentsQ.data);
 
