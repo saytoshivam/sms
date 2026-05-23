@@ -64,6 +64,22 @@ public interface StudentAcademicEnrollmentRepo extends JpaRepository<StudentAcad
             @Param("schoolId") Integer schoolId,
             @Param("academicYearId") Integer academicYearId);
 
+    /**
+     * Same as above but also eagerly fetches classGroup — used by demand generation
+     * to avoid N+1 when resolving per-student override priority.
+     */
+    @Query("""
+            SELECT e FROM StudentAcademicEnrollment e
+            JOIN FETCH e.student s
+            JOIN FETCH e.classGroup cg
+            WHERE s.school.id = :schoolId
+              AND e.academicYear.id = :academicYearId
+              AND e.status = com.myhaimi.sms.entity.enums.StudentAcademicEnrollmentStatus.ACTIVE
+            """)
+    List<StudentAcademicEnrollment> findActiveEnrollmentsWithClassGroupBySchoolAndYear(
+            @Param("schoolId") Integer schoolId,
+            @Param("academicYearId") Integer academicYearId);
+
     /** ACTIVE enrollments for a specific classGroup (SECTION scope). */
     @Query("""
             SELECT e FROM StudentAcademicEnrollment e

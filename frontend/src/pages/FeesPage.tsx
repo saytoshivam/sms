@@ -116,6 +116,7 @@ type DemandGenerationResult = {
   skippedExistingDemands: number;
   totalAmountGenerated: number | string;
   warnings: string[];
+  overrideNotes: string[];
 };
 
 type PaymentMode = 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE' | 'CARD' | 'DEMAND_DRAFT' | 'ADJUSTMENT';
@@ -1149,6 +1150,228 @@ function InstallmentEditor({ item, planId, onDone }: { item: FeePlanItem; planId
   );
 }
 
+// ─── Fee Rules Grouped View ─────────────────────────────────────────────────
+
+interface FeeRulesGroupedProps {
+  items: FeePlanItem[];
+  classGroups: ClassGroup[];
+  students: Student[];
+  isEditable: boolean;
+  installmentItem: FeePlanItem | null;
+  setInstallmentItem: (it: FeePlanItem | null) => void;
+  scheduleStatus: (it: FeePlanItem) => 'missing' | 'invalid' | 'ready';
+  itemTargetLabel: (it: FeePlanItem) => string;
+  overrideBadge: (it: FeePlanItem) => string | null;
+  openEditItem: (it: FeePlanItem) => void;
+  setDeleteItemTarget: (it: FeePlanItem) => void;
+}
+
+function FeeRulesGrouped({ items, classGroups, students, isEditable, installmentItem, setInstallmentItem, scheduleStatus, itemTargetLabel, overrideBadge, openEditItem, setDeleteItemTarget }: FeeRulesGroupedProps) {
+
+  function renderRow(it: FeePlanItem) {
+    const instCount = it.installments?.length ?? 0;
+    const instTotal = sumInst(it.installments ?? []);
+    const itAmt = typeof it.amount === 'string' ? parseFloat(it.amount) || 0 : it.amount || 0;
+    const status = scheduleStatus(it);
+    const isInstOpen = installmentItem?.id === it.id;
+    const badge = overrideBadge(it);
+
+    return (
+      <tr key={it.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+        <td style={{ padding: '8px 10px' }}>
+          <div style={{ fontWeight: 600 }}>{it.feeHeadName}</div>
+          <div style={{ color: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}>{it.feeHeadCode}</div>
+          {badge && (
+            <span style={{ display: 'inline-block', marginTop: 3, padding: '1px 6px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
+              ↑ {badge}
+            </span>
+          )}
+        </td>
+        <td style={{ padding: '8px 10px', fontWeight: 600 }}>{fmt(it.amount)}</td>
+        <td style={{ padding: '8px 10px', fontSize: 12 }}>{FREQUENCY_LABELS[it.frequency]}</td>
+        <td style={{ padding: '8px 10px' }}>
+          {status === 'missing' && <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 600 }}>⚠ No schedule</span>}
+          {status === 'invalid' && <span style={{ color: '#d97706', fontSize: 11, fontWeight: 600 }}>⚠ Total {fmt(instTotal)}, expected {fmt(itAmt)}</span>}
+          {status === 'ready' && <span style={{ color: '#16a34a', fontSize: 11 }}>✓ {instCount} installment{instCount !== 1 ? 's' : ''} · {fmt(instTotal)}</span>}
+        </td>
+        <td style={{ padding: '8px 10px' }}>
+          <div className="row" style={{ gap: 5 }}>
+            {isEditable && status === 'missing' && (
+              <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#dc2626', borderColor: '#dc2626' }} onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
+                {isInstOpen ? 'Close' : '📅 Create Schedule'}
+              </button>
+            )}
+            {isEditable && status === 'invalid' && (
+              <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#d97706', borderColor: '#d97706' }} onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
+                {isInstOpen ? 'Close' : '⚠ Fix Schedule'}
+              </button>
+            )}
+            {isEditable && status === 'ready' && (
+              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
+                {isInstOpen ? 'Close' : '📅 Edit Schedule'}
+              </button>
+            )}
+            {!isEditable && status !== 'missing' && (
+              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
+                {isInstOpen ? 'Close' : '📅 View Schedule'}
+              </button>
+            )}
+            {isEditable && (
+              <>
+                <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => openEditItem(it)}>✏ Edit</button>
+                <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px', color: '#dc2626' }} onClick={() => setDeleteItemTarget(it)}>🗑 Remove</button>
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  function renderTable(groupItems: FeePlanItem[]) {
+    return (
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
+              {['Fee Head', 'Amount', 'Frequency', 'Schedule', 'Actions'].map(h => (
+                <th key={h} style={{ padding: '7px 10px', fontWeight: 600 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>{groupItems.map(it => renderRow(it))}</tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function renderGroup(title: string, groupItems: FeePlanItem[], helperText?: string) {
+    if (!groupItems.length) return null;
+    return (
+      <div key={title} style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+        <div style={{ background: '#f8fafc', padding: '8px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>{title}</span>
+            <span style={{ marginLeft: 8, fontSize: 12, color: '#94a3b8' }}>{groupItems.length} rule{groupItems.length !== 1 ? 's' : ''}</span>
+          </div>
+          {helperText && <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>{helperText}</span>}
+        </div>
+        {renderTable(groupItems)}
+      </div>
+    );
+  }
+
+  const schoolItems   = items.filter(it => it.applicableScopeType === 'SCHOOL');
+  const classItems    = items.filter(it => it.applicableScopeType === 'CLASS');
+  const sectionItems  = items.filter(it => it.applicableScopeType === 'SECTION');
+  const studentItems  = items.filter(it => it.applicableScopeType === 'STUDENT');
+
+  // Group class items by gradeLevel
+  const classGradeMap = new Map<string | number, FeePlanItem[]>();
+  for (const it of classItems) {
+    const cg = classGroups.find(c => c.id === it.applicableScopeId);
+    const key = cg?.gradeLevel != null ? `Grade ${cg.gradeLevel}` : (cg?.displayName ?? `Group #${it.applicableScopeId}`);
+    if (!classGradeMap.has(key)) classGradeMap.set(key, []);
+    classGradeMap.get(key)!.push(it);
+  }
+
+  // Group section items by classGroup displayName
+  const sectionGroupMap = new Map<string, FeePlanItem[]>();
+  for (const it of sectionItems) {
+    const cg = classGroups.find(c => c.id === it.applicableScopeId);
+    const key = cg ? (cg.gradeLevel != null ? `Grade ${cg.gradeLevel} – ${cg.section ?? cg.displayName}` : cg.displayName) : `Section #${it.applicableScopeId}`;
+    if (!sectionGroupMap.has(key)) sectionGroupMap.set(key, []);
+    sectionGroupMap.get(key)!.push(it);
+  }
+
+  // Group student items by student name
+  const studentGroupMap = new Map<string, FeePlanItem[]>();
+  for (const it of studentItems) {
+    const s = students.find(s => s.id === it.applicableScopeId);
+    const key = s ? `${s.firstName} ${s.lastName ?? ''}`.trim() : `Student #${it.applicableScopeId}`;
+    if (!studentGroupMap.has(key)) studentGroupMap.set(key, []);
+    studentGroupMap.get(key)!.push(it);
+  }
+
+  const hasOverrides = classItems.length > 0 || sectionItems.length > 0 || studentItems.length > 0;
+
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      {hasOverrides && (
+        <div style={{ fontSize: 12, color: '#475569', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 12px' }}>
+          💡 More specific rules override broader rules for the same fee head. Different fee heads are always additive.
+        </div>
+      )}
+
+      {/* School-wide */}
+      {renderGroup('🏫 School-wide Fees', schoolItems, 'Applied to all students unless overridden')}
+
+      {/* Class-wise */}
+      {classItems.length > 0 && (
+        <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ background: '#f8fafc', padding: '8px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>📚 Class-wise Fees</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#94a3b8' }}>{classItems.length} rule{classItems.length !== 1 ? 's' : ''}</span>
+            </div>
+            <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Overrides school-wide for same fee head</span>
+          </div>
+          <div className="stack" style={{ gap: 0 }}>
+            {Array.from(classGradeMap.entries()).sort(([a], [b]) => String(a).localeCompare(String(b), undefined, { numeric: true })).map(([key, gradeItems]) => (
+              <div key={String(key)} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <div style={{ padding: '6px 14px', background: '#fff', fontSize: 12, fontWeight: 600, color: '#475569', borderBottom: '1px solid #f1f5f9' }}>{String(key)}</div>
+                {renderTable(gradeItems)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Section overrides */}
+      {sectionItems.length > 0 && (
+        <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ background: '#f8fafc', padding: '8px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>🏷 Section Overrides</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#94a3b8' }}>{sectionItems.length} rule{sectionItems.length !== 1 ? 's' : ''}</span>
+            </div>
+            <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Overrides class/school for same fee head</span>
+          </div>
+          <div className="stack" style={{ gap: 0 }}>
+            {Array.from(sectionGroupMap.entries()).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([key, sItems]) => (
+              <div key={key} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <div style={{ padding: '6px 14px', background: '#fff', fontSize: 12, fontWeight: 600, color: '#475569', borderBottom: '1px solid #f1f5f9' }}>{key}</div>
+                {renderTable(sItems)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Student overrides */}
+      {studentItems.length > 0 && (
+        <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ background: '#f8fafc', padding: '8px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>👤 Student Overrides</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#94a3b8' }}>{studentItems.length} rule{studentItems.length !== 1 ? 's' : ''}</span>
+            </div>
+            <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>Most specific — overrides all broader rules</span>
+          </div>
+          <div className="stack" style={{ gap: 0 }}>
+            {Array.from(studentGroupMap.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([key, sItems]) => (
+              <div key={key} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <div style={{ padding: '6px 14px', background: '#fff', fontSize: 12, fontWeight: 600, color: '#475569', borderBottom: '1px solid #f1f5f9' }}>{key}</div>
+                {renderTable(sItems)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Fee Plan Detail ────────────────────────────────────────────────────────────
 
 type ItemDraft = { feeHeadId: string; applicableScopeType: ApplicableScopeType; applicableScopeId: string; amount: string; frequency: FeeFrequency; mandatory: boolean };
@@ -1191,7 +1414,7 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
   const studentsQ = useQuery({
     queryKey: ['students-list-fee'],
     queryFn: async () => (await api.get<SpringPage<Student> | Student[]>('/api/students?size=500')).data,
-    enabled: itemDraft.applicableScopeType === 'STUDENT',
+    enabled: itemDraft.applicableScopeType === 'STUDENT' || items.some(i => i.applicableScopeType === 'STUDENT'),
   });
   const students = pageContent(studentsQ.data);
 
@@ -1222,7 +1445,25 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
       if (cg) return it.applicableScopeType === 'CLASS' && cg.gradeLevel != null
         ? `Grade ${cg.gradeLevel}` : cg.displayName;
     }
+    if (it.applicableScopeType === 'STUDENT') {
+      const s = students.find(s => s.id === it.applicableScopeId);
+      return s ? `${s.firstName} ${s.lastName ?? ''}`.trim() : `Student #${it.applicableScopeId}`;
+    }
     return String(it.applicableScopeId);
+  }
+
+  function scopePriority(s: ApplicableScopeType): number {
+    return ({ SCHOOL: 1, CLASS: 2, SECTION: 3, STUDENT: 4 } as Record<string, number>)[s] ?? 0;
+  }
+
+  function overrideBadge(it: FeePlanItem): string | null {
+    if (it.applicableScopeType === 'SCHOOL') return null;
+    const thisPriority = scopePriority(it.applicableScopeType);
+    const overridden = items.filter(o =>
+      o.id !== it.id && o.feeHeadId === it.feeHeadId && scopePriority(o.applicableScopeType) < thisPriority);
+    if (!overridden.length) return null;
+    const highest = [...overridden].sort((a, b) => scopePriority(b.applicableScopeType) - scopePriority(a.applicableScopeType))[0];
+    return ({ SCHOOL: 'Overrides school-wide', CLASS: 'Overrides class fee', SECTION: 'Overrides section fee' } as Record<string, string>)[highest.applicableScopeType] ?? null;
   }
 
   // Real-time duplicate detection while filling in Add Item form
@@ -1427,24 +1668,27 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
         )}
       </div>
 
-      {/* Items section */}
+      {/* Fee Rules section */}
       <div className="stack" style={{ gap: 8 }}>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <strong>Fee Items</strong>
+          <div>
+            <strong>Fee Rules</strong>
+            <span className="muted" style={{ fontSize: 13, marginLeft: 8 }}>{items.length} rule{items.length !== 1 ? 's' : ''}</span>
+          </div>
           <div className="row" style={{ gap: 8, alignItems: 'center' }}>
             {!isEditable && plan.status !== 'DRAFT' && (
               <span style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>
-                🔒 Plan is {plan.status.toLowerCase()} — items are read-only
+                🔒 Plan is {plan.status.toLowerCase()} — rules are read-only
               </span>
             )}
-            {isEditable && <button type="button" className="btn" style={{ fontSize: 13, padding: '6px 14px' }} onClick={openAddItem}>+ Add Item</button>}
+            {isEditable && <button type="button" className="btn" style={{ fontSize: 13, padding: '6px 14px' }} onClick={openAddItem}>+ Add Rule</button>}
           </div>
         </div>
 
         {showAddItem && isEditable && (
           <div className="card stack" style={{ borderLeft: '4px solid var(--color-primary)' }}>
             <div className="row" style={{ justifyContent: 'space-between' }}>
-              <strong style={{ fontSize: 13 }}>{editingItem ? 'Edit Item' : 'Add Fee Item'}</strong>
+              <strong style={{ fontSize: 13 }}>{editingItem ? 'Edit Fee Rule' : 'Add Fee Rule'}</strong>
               <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={resetItem}>Close</button>
             </div>
             <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -1455,11 +1699,16 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                   placeholder="Select fee head…" searchable />
               </div>
               <div className="stack" style={{ flex: 1, minWidth: 140 }}>
-                <label style={{ fontSize: 13 }}>Scope *</label>
+                <label style={{ fontSize: 13 }}>Applies To *</label>
                 <SelectKeeper value={itemDraft.applicableScopeType} onChange={v => {
                   const st = v as ApplicableScopeType;
                   setItemDraft(d => ({ ...d, applicableScopeType: st, applicableScopeId: st === 'SCHOOL' && schoolId ? String(schoolId) : '' }));
-                }} options={SCOPE_TYPES.map(st => ({ value: st, label: st }))} />
+                }} options={[
+                  { value: 'SCHOOL', label: 'School-wide (all students)' },
+                  { value: 'CLASS', label: 'Class (all sections)' },
+                  { value: 'SECTION', label: 'Section' },
+                  { value: 'STUDENT', label: 'Individual Student' },
+                ]} />
               </div>
               {itemDraft.applicableScopeType !== 'SCHOOL' && (
                 <div className="stack" style={{ flex: 2, minWidth: 200 }}>
@@ -1468,6 +1717,9 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                     options={scopeOptions(itemDraft.applicableScopeType)} placeholder="Select…" searchable />
                 </div>
               )}
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px' }}>
+              💡 For the same fee head, more specific rules override broader ones: <strong>School → Class → Section → Student</strong>. Different fee heads are always additive.
             </div>
             <div className="row" style={{ gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
               <div className="stack" style={{ flex: 1, minWidth: 130 }}>
@@ -1488,7 +1740,7 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
               <button type="button" className="btn"
                 disabled={saveItemMut.isPending || !itemDraft.feeHeadId || !itemDraft.amount || !itemDraft.applicableScopeId || !!dupCheck}
                 onClick={() => saveItemMut.mutate()}>
-                {saveItemMut.isPending ? 'Saving…' : editingItem ? 'Update' : 'Add Item'}
+                {saveItemMut.isPending ? 'Saving…' : editingItem ? 'Update' : 'Add Rule'}
               </button>
               <button type="button" className="btn secondary" onClick={resetItem}>Cancel</button>
             </div>
@@ -1496,93 +1748,21 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
         )}
 
         {items.length === 0 ? (
-          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>No items yet.{isEditable ? ' Add a fee item above.' : ''}</div>
+          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>No fee rules yet.{isEditable ? ' Add a rule above.' : ''}</div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
-                  {['Fee Head', 'Applies To', 'Total Amount', 'Frequency', 'Schedule Status', 'Actions'].map(h => (
-                    <th key={h} style={{ padding: '8px 10px', fontWeight: 600 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map(it => {
-                  const instCount = it.installments?.length ?? 0;
-                  const instTotal = sumInst(it.installments ?? []);
-                  const itAmt = typeof it.amount === 'string' ? parseFloat(it.amount) || 0 : it.amount || 0;
-                  const status = scheduleStatus(it);
-                  const isInstOpen = installmentItem?.id === it.id;
-                  const targetLabel = itemTargetLabel(it);
-
-                  return (
-                    <tr key={it.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px 10px' }}>
-                        <div style={{ fontWeight: 600 }}>{it.feeHeadName}</div>
-                        <div style={{ color: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}>{it.feeHeadCode}</div>
-                      </td>
-                      <td style={{ padding: '8px 10px' }}>
-                        <span style={{ padding: '2px 6px', borderRadius: 6, background: '#f1f5f9', fontSize: 11 }}>{it.applicableScopeType}</span>
-                        <div style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>{targetLabel}</div>
-                      </td>
-                      <td style={{ padding: '8px 10px', fontWeight: 600 }}>{fmt(it.amount)}</td>
-                      <td style={{ padding: '8px 10px' }}>{FREQUENCY_LABELS[it.frequency]}</td>
-                      <td style={{ padding: '8px 10px' }}>
-                        {status === 'missing' && (
-                          <span style={{ color: '#dc2626', fontSize: 11, fontWeight: 600 }}>⚠ No schedule</span>
-                        )}
-                        {status === 'invalid' && (
-                          <span style={{ color: '#d97706', fontSize: 11, fontWeight: 600 }}>
-                            ⚠ Schedule total {fmt(instTotal)}, expected {fmt(itAmt)}
-                          </span>
-                        )}
-                        {status === 'ready' && (
-                          <span style={{ color: '#16a34a', fontSize: 11 }}>
-                            ✓ {instCount} installment{instCount !== 1 ? 's' : ''} · total {fmt(instTotal)}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: '8px 10px' }}>
-                        <div className="row" style={{ gap: 6 }}>
-                          {isEditable && status === 'missing' && (
-                            <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#dc2626', borderColor: '#dc2626' }}
-                              onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
-                              {isInstOpen ? 'Close' : '📅 Create Schedule'}
-                            </button>
-                          )}
-                          {isEditable && status === 'invalid' && (
-                            <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px', background: '#d97706', borderColor: '#d97706' }}
-                              onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
-                              {isInstOpen ? 'Close' : '⚠ Fix Schedule'}
-                            </button>
-                          )}
-                          {isEditable && status === 'ready' && (
-                            <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }}
-                              onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
-                              {isInstOpen ? 'Close' : '📅 Edit Schedule'}
-                            </button>
-                          )}
-                          {!isEditable && status !== 'missing' && (
-                            <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }}
-                              onClick={() => setInstallmentItem(isInstOpen ? null : it)}>
-                              {isInstOpen ? 'Close' : '📅 View Schedule'}
-                            </button>
-                          )}
-                          {isEditable && (
-                            <>
-                              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => openEditItem(it)} title="Edit this item">✏ Edit Item</button>
-                              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px', color: '#dc2626' }} title="Remove this item" onClick={() => setDeleteItemTarget(it)}>🗑 Remove</button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <FeeRulesGrouped
+            items={items}
+            classGroups={classGroups}
+            students={students}
+            isEditable={isEditable}
+            installmentItem={installmentItem}
+            setInstallmentItem={setInstallmentItem}
+            scheduleStatus={scheduleStatus}
+            itemTargetLabel={itemTargetLabel}
+            overrideBadge={overrideBadge}
+            openEditItem={openEditItem}
+            setDeleteItemTarget={setDeleteItemTarget}
+          />
         )}
 
         {installmentItem && (
@@ -1591,8 +1771,8 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
       </div>
 
       <ConfirmDialog open={!!deleteItemTarget}
-        title={`Remove ${deleteItemTarget?.feeHeadName ?? 'item'}${deleteItemTarget ? ` for ${itemTargetLabel(deleteItemTarget)}` : ''} from this draft plan?`}
-        description="This will permanently remove the item and all its installments from this plan."
+        title={`Remove ${deleteItemTarget?.feeHeadName ?? 'rule'}${deleteItemTarget ? ` for ${itemTargetLabel(deleteItemTarget)}` : ''} from this draft plan?`}
+        description="This will permanently remove the fee rule and all its installments from this plan."
         danger confirmLabel="Remove" onConfirm={() => { if (deleteItemTarget) deleteItemMut.mutate(deleteItemTarget.id); }} onClose={() => setDeleteItemTarget(null)} />
 
       {/* Publish confirmation modal */}
@@ -1677,6 +1857,16 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 4 }}>⚠ Warnings</div>
                     <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#92400e' }}>
                       {generatePreview.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {generatePreview.overrideNotes && generatePreview.overrideNotes.length > 0 && (
+                  <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px 14px' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#0369a1', marginBottom: 6 }}>📊 Override Summary</div>
+                    <div style={{ fontSize: 12, color: '#0369a1', marginBottom: 6 }}>More specific rules override broader rules for the same fee head.</div>
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#075985' }}>
+                      {generatePreview.overrideNotes.map((n, i) => <li key={i}>{n}</li>)}
                     </ul>
                   </div>
                 )}

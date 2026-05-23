@@ -70,87 +70,73 @@ public class FeeDemandService {
         return String.format("%s-%s-%06d", school.getCode().toUpperCase(), yearTag, seq);
     }
 
-    // ─── Scope resolution ─────────────────────────────────────────────────────
+    // ─── Scope priority ───────────────────────────────────────────────────────
 
     /**
-     * Returns the distinct set of ACTIVE students with active enrollments applicable to a
-     * given {@link FeePlanItem} for the supplied academic year.
+     * Override priority: STUDENT (4) beats SECTION (3) beats CLASS (2) beats SCHOOL (1).
+     * Higher number = more specific = wins.
      */
-    private List<Student> resolveStudents(FeePlanItem item, Integer schoolId,
-                                          Integer academicYearId, List<String> warnings) {
-        ApplicableScopeType scope   = item.getApplicableScopeType();
-        Integer             scopeId = item.getApplicableScopeId();
+    private static final Map<ApplicableScopeType, Integer> SCOPE_PRIORITY = Map.of(
+            ApplicableScopeType.SCHOOL,  1,
+            ApplicableScopeType.CLASS,   2,
+            ApplicableScopeType.SECTION, 3,
+            ApplicableScopeType.STUDENT, 4
+    );
 
-        List<Student> students = switch (scope) {
-            case SCHOOL -> {
-                List<StudentAcademicEnrollment> enrollments =
-                        enrollmentRepo.findActiveEnrollmentsBySchoolAndYear(schoolId, academicYearId);
-                yield enrollments.stream()
-                        .map(StudentAcademicEnrollment::getStudent)
-                        .distinct()
-                        .collect(Collectors.toList());
-            }
-            case SECTION -> {
-                List<StudentAcademicEnrollment> enrollments =
-                        enrollmentRepo.findActiveEnrollmentsBySchoolYearAndClassGroup(
-                                schoolId, academicYearId, scopeId);
-                yield enrollments.stream()
-                        .map(StudentAcademicEnrollment::getStudent)
-                        .distinct()
-                        .collect(Collectors.toList());
-            }
-            case CLASS -> {
-                ClassGroup cg = classGroupRepo.findByIdAndSchool_Id(scopeId, schoolId)
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                "ClassGroup not found for scope: " + scopeId));
-                if (cg.getGradeLevel() == null) {
-                    warnings.add("ClassGroup " + cg.getCode() + " has no gradeLevel; treating as SECTION scope.");
-                    List<StudentAcademicEnrollment> enrollments =
-                            enrollmentRepo.findActiveEnrollmentsBySchoolYearAndClassGroup(
-                                    schoolId, academicYearId, scopeId);
-                    yield enrollments.stream()
-                            .map(StudentAcademicEnrollment::getStudent)
-                            .distinct()
-                            .collect(Collectors.toList());
+    /**
+     * Given a student and her enrolled class-group, returns the single {@link FeePlanItem}
+     * from {@code candidateItems} (all for the same fee head) that should apply to her.
+     *
+     * <p>Resolution rule: most-specific scope wins.
+     * Returns {@code null} if none of the candidates match.</p>
+     */
+    private FeePlanItem resolveWinningItem(Student student,
+                                           ClassGroup studentClassGroup,
+                                           List<FeePlanItem> candidateItems,
+                                           Map<Integer, ClassGroup> classGroupCache) {
+        FeePlanItem best = null;
+        int bestPriority = -1;
+
+        for (FeePlanItem item : candidateItems) {
+            int priority = SCOPE_PRIORITY.getOrDefault(item.getApplicableScopeType(), 0);
+            boolean matches = switch (item.getApplicableScopeType()) {
+                case SCHOOL  -> true;
+                case CLASS   -> {
+                    ClassGroup itemCg = classGroupCache.get(item.getApplicableScopeId());
+                    if (itemCg == null) yield false;
+                    if (itemCg.getGradeLevel() != null && studentClassGroup.getGradeLevel() != null)
+                        yield itemCg.getGradeLevel().equals(studentClassGroup.getGradeLevel());
+                    // no gradeLevel: fall back to exact classGroup match
+                    yield itemCg.getId().equals(studentClassGroup.getId());
                 }
-                List<StudentAcademicEnrollment> enrollments =
-                        enrollmentRepo.findActiveEnrollmentsBySchoolYearAndGradeLevel(
-                                schoolId, academicYearId, cg.getGradeLevel());
-                yield enrollments.stream()
-                        .map(StudentAcademicEnrollment::getStudent)
-                        .distinct()
-                        .collect(Collectors.toList());
-            }
-            case STUDENT -> {
-                Optional<StudentAcademicEnrollment> enrollment =
-                        enrollmentRepo.findActiveEnrollmentForStudent(schoolId, scopeId, academicYearId);
-                if (enrollment.isEmpty()) {
-                    warnings.add("Student " + scopeId
-                            + " has no active enrollment for this academic year; skipped.");
-                    yield List.of();
-                }
-                yield List.of(enrollment.get().getStudent());
-            }
-        };
+                case SECTION -> item.getApplicableScopeId().equals(studentClassGroup.getId());
+                case STUDENT -> item.getApplicableScopeId().equals(student.getId());
+            };
 
-        // Filter to ACTIVE students only
-        List<Student> activeStudents = students.stream()
-                .filter(s -> s.getStatus() == StudentLifecycleStatus.ACTIVE)
-                .collect(Collectors.toList());
-
-        int inactiveCount = students.size() - activeStudents.size();
-        if (inactiveCount > 0) {
-            warnings.add(inactiveCount + " non-ACTIVE student(s) skipped for item '"
-                    + item.getFeeHead().getName() + "'.");
+            if (matches && priority > bestPriority) {
+                best = item;
+                bestPriority = priority;
+            }
         }
-        return activeStudents;
+        return best;
     }
 
     // ─── Core generation logic ────────────────────────────────────────────────
 
     /**
-     * Shared generation / preview core.  When {@code persist} is {@code false}
-     * only counts rows without writing to the database (sequence is NOT advanced).
+     * Shared generation / preview core.
+     *
+     * <h3>Override algorithm</h3>
+     * <ol>
+     *   <li>Load all active student enrollments for the academic year.</li>
+     *   <li>Group fee plan items by fee-head.</li>
+     *   <li>For each student × fee-head, pick the MOST SPECIFIC applicable item
+     *       (STUDENT &gt; SECTION &gt; CLASS &gt; SCHOOL).</li>
+     *   <li>Generate one demand per winning-item installment.</li>
+     * </ol>
+     *
+     * <p>When {@code persist} is {@code false} counts are computed but nothing is written
+     * and the sequence is NOT advanced.</p>
      */
     private DemandGenerationResultDTO runGeneration(Integer planId, boolean persist) {
         Integer schoolId = requireSchoolId();
@@ -163,42 +149,107 @@ public class FeeDemandService {
                     + "Current status: " + plan.getStatus());
         }
 
-        School      school      = schoolRepo.findById(schoolId)
+        School       school       = schoolRepo.findById(schoolId)
                 .orElseThrow(() -> new IllegalStateException("School not found: " + schoolId));
-        AcademicYear academicYear   = plan.getAcademicYear();
-        Integer      academicYearId = academicYear.getId();
+        AcademicYear academicYear    = plan.getAcademicYear();
+        Integer      academicYearId  = academicYear.getId();
 
-        List<FeePlanItem> items = feePlanItemRepository.findByFeePlan_IdOrderByIdAsc(planId);
-        if (items.isEmpty()) {
+        List<FeePlanItem> allItems = feePlanItemRepository.findByFeePlan_IdOrderByIdAsc(planId);
+        if (allItems.isEmpty()) {
             throw new IllegalStateException("Fee plan has no items — cannot generate demands.");
         }
 
-        List<String>  warnings           = new ArrayList<>();
-        int           created            = 0;
-        int           skipped            = 0;
-        BigDecimal    totalAmount        = BigDecimal.ZERO;
-        Set<Integer>  applicableStudentIds = new LinkedHashSet<>();
+        List<String> warnings     = new ArrayList<>();
+        List<String> overrideNotes = new ArrayList<>();
 
-        for (FeePlanItem item : items) {
-            List<FeeInstallment> installments =
+        // ── Pre-load installments ────────────────────────────────────────────
+        Map<Integer, List<FeeInstallment>> installmentsMap = new HashMap<>();
+        for (FeePlanItem item : allItems) {
+            List<FeeInstallment> insts =
                     feeInstallmentRepository.findByFeePlanItem_IdOrderBySequenceAsc(item.getId());
-
-            if (installments.isEmpty()) {
-                warnings.add("Fee item '" + item.getFeeHead().getName() + "' (id=" + item.getId()
-                        + ") has no installments — skipped.");
-                continue;
+            installmentsMap.put(item.getId(), insts);
+            if (insts.isEmpty()) {
+                warnings.add("Fee rule '" + item.getFeeHead().getName()
+                        + "' (" + item.getApplicableScopeType() + ") has no installments — skipped.");
             }
+        }
 
-            List<Student> students = resolveStudents(item, schoolId, academicYearId, warnings);
+        // Only items that have installments participate in demand generation
+        List<FeePlanItem> validItems = allItems.stream()
+                .filter(i -> !installmentsMap.getOrDefault(i.getId(), List.of()).isEmpty())
+                .collect(Collectors.toList());
 
-            for (Student student : students) {
+        if (validItems.isEmpty()) {
+            return DemandGenerationResultDTO.builder()
+                    .planId(planId).planName(plan.getName()).dryRun(!persist)
+                    .totalApplicableStudents(0).createdDemands(0).skippedExistingDemands(0)
+                    .totalAmountGenerated(BigDecimal.ZERO).warnings(warnings).overrideNotes(overrideNotes)
+                    .build();
+        }
+
+        // ── Pre-load ClassGroups for CLASS-scoped items ─────────────────────
+        Map<Integer, ClassGroup> classGroupCache = new HashMap<>();
+        for (FeePlanItem item : validItems) {
+            if (item.getApplicableScopeType() == ApplicableScopeType.CLASS) {
+                Integer cgId = item.getApplicableScopeId();
+                classGroupRepo.findByIdAndSchool_Id(cgId, schoolId)
+                        .ifPresent(cg -> classGroupCache.put(cgId, cg));
+            }
+        }
+
+        // ── Group valid items by fee-head ────────────────────────────────────
+        Map<Integer, List<FeePlanItem>> itemsByFeeHead = validItems.stream()
+                .collect(Collectors.groupingBy(i -> i.getFeeHead().getId()));
+
+        // ── Load active enrollments (with classGroup eagerly fetched) ────────
+        List<StudentAcademicEnrollment> allEnrollments =
+                enrollmentRepo.findActiveEnrollmentsWithClassGroupBySchoolAndYear(schoolId, academicYearId);
+
+        List<StudentAcademicEnrollment> activeEnrollments = allEnrollments.stream()
+                .filter(e -> e.getStudent().getStatus() == StudentLifecycleStatus.ACTIVE)
+                .collect(Collectors.toList());
+
+        int inactiveCount = allEnrollments.size() - activeEnrollments.size();
+        if (inactiveCount > 0) {
+            warnings.add(inactiveCount + " non-ACTIVE student(s) skipped.");
+        }
+
+        // Warn if any STUDENT-scoped item references a student with no active enrollment
+        Set<Integer> enrolledStudentIds = activeEnrollments.stream()
+                .map(e -> e.getStudent().getId()).collect(Collectors.toSet());
+        for (FeePlanItem item : validItems) {
+            if (item.getApplicableScopeType() == ApplicableScopeType.STUDENT
+                    && !enrolledStudentIds.contains(item.getApplicableScopeId())) {
+                warnings.add("Student id=" + item.getApplicableScopeId()
+                        + " ('" + item.getFeeHead().getName() + "') has no active enrollment — skipped.");
+            }
+        }
+
+        // ── Build override notes for dry-run ─────────────────────────────────
+        if (!persist) {
+            buildOverrideNotes(itemsByFeeHead, classGroupCache, activeEnrollments, overrideNotes);
+        }
+
+        // ── Generate demands ─────────────────────────────────────────────────
+        int          created             = 0;
+        int          skipped             = 0;
+        BigDecimal   totalAmount         = BigDecimal.ZERO;
+        Set<Integer> applicableStudentIds = new LinkedHashSet<>();
+
+        for (StudentAcademicEnrollment enrollment : activeEnrollments) {
+            Student    student    = enrollment.getStudent();
+            ClassGroup classGroup = enrollment.getClassGroup();
+
+            for (Map.Entry<Integer, List<FeePlanItem>> entry : itemsByFeeHead.entrySet()) {
+                FeePlanItem winning = resolveWinningItem(student, classGroup, entry.getValue(), classGroupCache);
+                if (winning == null) continue;
+
                 applicableStudentIds.add(student.getId());
+                List<FeeInstallment> installments = installmentsMap.get(winning.getId());
 
                 for (FeeInstallment installment : installments) {
-                    // Pre-check for duplicate (reduces noise; DB constraint is the hard guard)
-                    boolean exists = demandRepository
-                            .existsBySchool_IdAndStudentItemInstallment(
-                                    schoolId, student.getId(), item.getId(), installment.getId());
+                    boolean exists = demandRepository.existsBySchool_IdAndStudentItemInstallment(
+                            schoolId, student.getId(), winning.getId(), installment.getId());
                     if (exists) {
                         skipped++;
                         continue;
@@ -209,7 +260,6 @@ public class FeeDemandService {
                     created++;
 
                     if (persist) {
-                        // Allocate demand number only for rows we are about to insert
                         long seq = sequenceService.nextValue(schoolId, SequenceType.FEE_DEMAND);
 
                         StudentFeeDemand demand = new StudentFeeDemand();
@@ -217,11 +267,11 @@ public class FeeDemandService {
                         demand.setStudent(student);
                         demand.setAcademicYear(academicYear);
                         demand.setFeePlan(plan);
-                        demand.setFeeHead(item.getFeeHead());
-                        demand.setFeePlanItem(item);
+                        demand.setFeeHead(winning.getFeeHead());
+                        demand.setFeePlanItem(winning);
                         demand.setInstallment(installment);
                         demand.setDemandNo(buildDemandNo(school, academicYear, seq));
-                        demand.setDescription(item.getFeeHead().getName() + " — " + installment.getName());
+                        demand.setDescription(winning.getFeeHead().getName() + " — " + installment.getName());
                         demand.setOriginalAmount(amount);
                         demand.setConcessionAmount(BigDecimal.ZERO);
                         demand.setFineAmount(BigDecimal.ZERO);
@@ -234,11 +284,8 @@ public class FeeDemandService {
                         try {
                             demandRepository.save(demand);
                         } catch (DataIntegrityViolationException dive) {
-                            // Race condition: another thread inserted the same demand between our
-                            // check and our insert. Count it as skipped; demand number is abandoned
-                            // (the sequence is still advanced — a small gap is acceptable and safe).
-                            log.warn("[fee_demand.generation] duplicate skipped (race) for student={} item={} installment={}",
-                                    student.getId(), item.getId(), installment.getId());
+                            log.warn("[fee_demand.generation] race-condition duplicate for student={} item={} installment={}",
+                                    student.getId(), winning.getId(), installment.getId());
                             created--;
                             skipped++;
                             totalAmount = totalAmount.subtract(amount);
@@ -257,8 +304,55 @@ public class FeeDemandService {
                 .skippedExistingDemands(skipped)
                 .totalAmountGenerated(totalAmount)
                 .warnings(warnings)
+                .overrideNotes(overrideNotes)
                 .build();
     }
+
+    /**
+     * Builds human-readable override-effect notes for the dry-run preview.
+     * Only populated when multiple items exist for the same fee head (i.e. overrides are present).
+     */
+    private void buildOverrideNotes(Map<Integer, List<FeePlanItem>> itemsByFeeHead,
+                                    Map<Integer, ClassGroup> classGroupCache,
+                                    List<StudentAcademicEnrollment> activeEnrollments,
+                                    List<String> overrideNotes) {
+        for (Map.Entry<Integer, List<FeePlanItem>> entry : itemsByFeeHead.entrySet()) {
+            List<FeePlanItem> candidates = entry.getValue();
+            if (candidates.size() <= 1) continue; // no overrides for this head
+
+            String feeHeadName = candidates.get(0).getFeeHead().getName();
+            Map<Integer, Long> countByItemId = new HashMap<>();
+
+            for (StudentAcademicEnrollment enrollment : activeEnrollments) {
+                FeePlanItem winning = resolveWinningItem(
+                        enrollment.getStudent(), enrollment.getClassGroup(), candidates, classGroupCache);
+                if (winning != null) {
+                    countByItemId.merge(winning.getId(), 1L, Long::sum);
+                }
+            }
+
+            // Sort by priority so notes appear in order SCHOOL → CLASS → SECTION → STUDENT
+            candidates.stream()
+                    .sorted(Comparator.comparingInt(i -> SCOPE_PRIORITY.getOrDefault(i.getApplicableScopeType(), 0)))
+                    .forEach(item -> {
+                        long count = countByItemId.getOrDefault(item.getId(), 0L);
+                        if (count == 0) return;
+                        String scopeDesc = switch (item.getApplicableScopeType()) {
+                            case SCHOOL  -> "School-wide";
+                            case CLASS   -> {
+                                ClassGroup cg = classGroupCache.get(item.getApplicableScopeId());
+                                yield (cg != null && cg.getGradeLevel() != null)
+                                        ? "Grade " + cg.getGradeLevel() : "Class";
+                            }
+                            case SECTION -> "Section id=" + item.getApplicableScopeId();
+                            case STUDENT -> "Student id=" + item.getApplicableScopeId();
+                        };
+                        overrideNotes.add(feeHeadName + " · " + scopeDesc
+                                + ": " + count + " student" + (count == 1 ? "" : "s"));
+                    });
+        }
+    }
+
 
     /**
      * Dry-run: compute what would be generated without persisting anything.

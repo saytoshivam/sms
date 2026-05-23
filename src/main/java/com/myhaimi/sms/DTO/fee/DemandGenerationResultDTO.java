@@ -35,4 +35,11 @@ public class DemandGenerationResultDTO {
 
     /** Non-fatal warnings surfaced during generation. */
     private List<String> warnings;
+
+    /**
+     * Human-readable summary of override effects (populated on dry-run only).
+     * E.g. "Annual Fee · School-wide: 80 students" / "Annual Fee · Grade 2: 20 students (overrides school-wide)"
+     */
+    @Builder.Default
+    private List<String> overrideNotes = new java.util.ArrayList<>();
 }
