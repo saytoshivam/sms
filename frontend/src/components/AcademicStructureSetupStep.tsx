@@ -212,6 +212,7 @@ export function AcademicStructureSetupStep({
   const [mappingSearch, setMappingSearch] = useState('');
   const [overrideDrawer, setOverrideDrawer] = useState<{ open: boolean; classGroupId: number | null }>({ open: false, classGroupId: null });
   const [overrideSearch, setOverrideSearch] = useState<string>('');
+  const [copyFromSectionPick, setCopyFromSectionPick] = useState<string>('');
 
   const slotsPerWeek = useMemo(() => estimateSlotsPerWeek(basicInfo), [basicInfo]);
 
@@ -341,9 +342,10 @@ export function AcademicStructureSetupStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `subjects` is from the render where `subjectCatalogSignature` changed
   }, [subjectCatalogSignature]);
 
-  // Reset override search whenever drawer target changes.
+  // Reset override search and copy-from-section pick whenever drawer target changes.
   useEffect(() => {
     setOverrideSearch('');
+    setCopyFromSectionPick('');
   }, [overrideDrawer.open, overrideDrawer.classGroupId]);
 
   useEffect(() => {
@@ -1376,6 +1378,33 @@ export function AcademicStructureSetupStep({
               classSubjectConfigs.filter((c) => Number(c.gradeLevel) === Number(grade)).map((c) => Number(c.subjectId)),
             );
             const enabled = sectionEnabledSet(cg.classGroupId);
+
+            // Options for "Copy from section": other sections of the same grade.
+            const copyFromSectionOptions = classGroups
+              .filter((c) => Number(c.gradeLevel) === Number(grade) && c.classGroupId !== cg.classGroupId)
+              .map((c) => ({ value: String(c.classGroupId), label: c.displayName || c.code }))
+              .sort((a, b) => a.label.localeCompare(b.label));
+
+            const applyCopyFromSection = () => {
+              const srcId = Number(copyFromSectionPick);
+              if (!Number.isFinite(srcId)) return;
+              const srcEnabled = sectionEnabledSet(srcId);
+              // Apply source section's subject selections to the current section.
+              for (const s of subjects) {
+                const sid = Number(s.id);
+                const srcOn = srcEnabled.has(sid);
+                const destOn = enabled.has(sid);
+                if (srcOn === destOn) continue;
+                if (inherited.has(sid)) {
+                  setSectionSubjectEnabled(cg.classGroupId, sid, srcOn);
+                } else {
+                  setSectionSubjectAdditionEnabled(cg.classGroupId, sid, srcOn);
+                }
+              }
+              const srcCg = classGroups.find((c) => c.classGroupId === srcId);
+              const srcName = srcCg ? (srcCg.displayName || srcCg.code) : String(srcId);
+              toast.success('Copied', `Applied subject selection from ${srcName} to this section.`);
+            };
             const weeklyForSubjectInSection = (subjectId: number): number => {
               const sub = subjects.find((x) => Number(x.id) === Number(subjectId));
               const fallback = sub ? subjectDefaultWeeklyPeriods(sub) : 4;
@@ -1430,6 +1459,35 @@ export function AcademicStructureSetupStep({
                       Close
                     </button>
                   </div>
+
+                  {copyFromSectionOptions.length > 0 ? (
+                    <div className="stack" style={{ gap: 4, marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(15,23,42,0.08)', background: 'rgba(248,250,252,0.95)' }}>
+                      <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Copy from section</span>
+                        <div style={{ minWidth: 180, flex: '1 1 180px' }}>
+                          <SmartSelect
+                            value={copyFromSectionPick}
+                            onChange={setCopyFromSectionPick}
+                            placeholder="Select section…"
+                            options={copyFromSectionOptions}
+                            allowClear
+                            clearLabel="Clear"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          disabled={!copyFromSectionPick}
+                          onClick={applyCopyFromSection}
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, fontWeight: 700 }}>
+                        Copies the subject selection (enabled/disabled state) from another section in this class.
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div
                     style={{
