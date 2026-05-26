@@ -272,6 +272,19 @@ public class FeePaymentService {
         return payments.stream().map(this::toDTOWithDetails).collect(Collectors.toList());
     }
 
+    /**
+     * Returns full DTO for a single payment (with allocations and receipt).
+     * Used by the PDF download endpoint.
+     */
+    @Transactional(readOnly = true)
+    public FeePaymentDTO getPaymentWithDetails(Long paymentId) {
+        Integer schoolId = requireSchoolId();
+        FeePayment payment = paymentRepo.findByIdAndSchool_Id(paymentId, schoolId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Payment not found or access denied: " + paymentId));
+        return toDTOWithDetails(payment);
+    }
+
     // ─── cancel payment ───────────────────────────────────────────────────────
 
     /**

@@ -1468,10 +1468,7 @@ function fmtHumanDate(raw: string | null | undefined): string {
   } catch { return raw; }
 }
 
-/** School name — read from window or a simple fallback */
-const SCHOOL_NAME = (window as unknown as Record<string, string>)['SCHOOL_NAME'] ?? 'School';
-
-function printReceipt(payment: FeePayment) {
+function printReceipt(payment: FeePayment, schoolName: string = 'School') {
   const w = window.open('', '_blank', 'width=700,height=900');
   if (!w) return;
   const allocs = payment.allocations ?? [];
@@ -1498,7 +1495,7 @@ function printReceipt(payment: FeePayment) {
   .footer{font-size:11px;color:#aaa;margin-top:8px;border-top:1px solid #eee;padding-top:8px}
   @media print{body{padding:0}}
 </style></head><body>
-<h2>${SCHOOL_NAME}</h2>
+<h2>${schoolName}</h2>
 <div class="meta">Fee Payment Receipt · ${fmtHumanDate(new Date().toISOString())}</div>
 <div style="border:1px solid #ddd;border-radius:6px;padding:16px;margin-bottom:16px">
   <div style="font-weight:800;font-size:15px;margin-bottom:10px">Receipt: ${payment.receiptNo}</div>
@@ -1524,8 +1521,34 @@ ${allocs.length > 0 ? `<table>
   setTimeout(() => { w.print(); }, 400);
 }
 
-function SPReceiptModal({ payment, onClose }: { payment: FeePayment; onClose: () => void }) {
+function SPReceiptModal({ payment, schoolName, onClose }: { payment: FeePayment; schoolName: string; onClose: () => void }) {
   const r = payment.receipt;
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadErr, setDownloadErr] = useState('');
+
+  async function downloadPdf() {
+    setDownloadErr('');
+    setIsDownloading(true);
+    try {
+      const resp = await api.get(`/api/fees/payments/${payment.id}/receipt/pdf`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([resp.data as BlobPart], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `receipt-${payment.receiptNo ?? payment.id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setDownloadErr('Could not download receipt PDF.');
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
       onClick={onClose}>
@@ -1614,20 +1637,22 @@ function SPReceiptModal({ payment, onClose }: { payment: FeePayment; onClose: ()
           </div>
         )}
 
-        {/* PDF notice */}
-        <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
-          PDF receipt generation is not enabled yet.
-        </div>
+        {/* PDF download error */}
+        {downloadErr && (
+          <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#b91c1c', textAlign: 'center' }}>
+            {downloadErr}
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-          <button type="button" onClick={() => printReceipt(payment)}
+          <button type="button" onClick={() => printReceipt(payment, schoolName)}
             style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
             🖨 Print
           </button>
-          <button type="button" disabled
-            style={{ opacity: 0.5, cursor: 'not-allowed', padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13 }}>
-            ⬇ Download PDF
+          <button type="button" onClick={downloadPdf} disabled={isDownloading}
+            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, cursor: isDownloading ? 'wait' : 'pointer', fontWeight: 600, opacity: isDownloading ? 0.7 : 1 }}>
+            {isDownloading ? '⏳ Downloading…' : '⬇ Download PDF'}
           </button>
           <button type="button" onClick={onClose}
             style={{ padding: '8px 20px', borderRadius: 8, background: 'var(--color-primary, #4f46e5)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
@@ -1807,6 +1832,15 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
   const [cancelReason, setCancelReason] = useState('');
   const [cancelErr, setCancelErr] = useState('');
   const qc = useQueryClient();
+
+  // Fetch school name for receipt print / PDF
+  const meQ = useQuery({
+    queryKey: ['user-me'],
+    queryFn: async () => (await api.get<{ schoolName?: string; roles?: string[] }>('/api/user/me')).data,
+    staleTime: 5 * 60_000,
+  });
+  const schoolName = meQ.data?.schoolName ?? 'School';
+
   const feesQ = useQuery({
     queryKey: ['student-fee-demands', studentId],
     queryFn: async () => (await api.get<StudentFeeDemand[]>(`/api/students/${studentId}/fees/demands`)).data,
@@ -2126,7 +2160,7 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
         />
       )}
 
-      {receiptPayment && <SPReceiptModal payment={receiptPayment} onClose={() => setReceiptPayment(null)} />}
+      {receiptPayment && <SPReceiptModal payment={receiptPayment} schoolName={schoolName} onClose={() => setReceiptPayment(null)} />}
 
       {cancelTarget && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}

@@ -4,11 +4,14 @@ import com.myhaimi.sms.DTO.fee.CancelPaymentRequestDTO;
 import com.myhaimi.sms.DTO.fee.FeePaymentCreateRequestDTO;
 import com.myhaimi.sms.DTO.fee.FeePaymentDTO;
 import com.myhaimi.sms.service.impl.FeePaymentService;
+import com.myhaimi.sms.service.impl.FeeReceiptPdfService;
 import com.myhaimi.sms.utils.CommonUtil;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.BindingResult;
@@ -30,6 +33,7 @@ import java.util.Map;
 public class FeePaymentController {
 
     private final FeePaymentService feePaymentService;
+    private final FeeReceiptPdfService feeReceiptPdfService;
 
     /**
      * Collect a payment against one or more student fee demands.
@@ -92,6 +96,36 @@ public class FeePaymentController {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         } catch (IllegalStateException ex) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
+        }
+    }
+
+    /**
+     * Download official PDF receipt for a payment.
+     *
+     * <p>Returns a server-generated PDF with school name, student info,
+     * payment details, and allocation breakdown. Cross-school access is
+     * blocked by the service layer (TenantContext).</p>
+     */
+    @GetMapping("/{paymentId}/receipt/pdf")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','ACCOUNTANT','PRINCIPAL')")
+    public ResponseEntity<?> downloadReceiptPdf(@PathVariable Long paymentId) {
+        try {
+            byte[] pdfBytes = feeReceiptPdfService.generateReceiptPdf(paymentId);
+            // Fetch payment just to get receipt number for filename
+            FeePaymentDTO dto = feePaymentService.getPaymentWithDetails(paymentId);
+            String receiptNo = dto.getReceiptNo() != null ? dto.getReceiptNo() : "receipt-" + paymentId;
+            String filename  = "receipt-" + receiptNo + ".pdf";
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setContentLength(pdfBytes.length);
+            return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Could not generate receipt PDF: " + ex.getMessage()));
         }
     }
 }

@@ -70,6 +70,9 @@ dependencies {
 	implementation platform('software.amazon.awssdk:bom:2.29.52')
 	implementation 'software.amazon.awssdk:s3'
 	implementation 'software.amazon.awssdk:url-connection-client'
+
+	// PDF generation (OpenPDF - open-source iText fork)
+	implementation 'com.github.librepdf:openpdf:1.3.43'
 }
 
 tasks.named('test') {
