@@ -17,6 +17,10 @@ public class FeePaymentDTO {
     private Integer schoolId;
     private Integer studentId;
     private String studentName;
+    /** Admission number of the student — for display on receipt. */
+    private String studentAdmissionNo;
+    /** Class/section label, e.g. "Grade 7 - A" — for display on receipt. */
+    private String classGroupName;
     private String receiptNo;
     private BigDecimal amount;
     private String paymentMode;
@@ -25,6 +29,8 @@ public class FeePaymentDTO {
     private String notes;
     private String status;
     private Integer collectedByUserId;
+    /** Outstanding balance for this student AFTER this payment (for receipt display). */
+    private BigDecimal outstandingBalance;
     private Instant createdAt;
     private Instant updatedAt;
     private List<FeePaymentAllocationDTO> allocations;

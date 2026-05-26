@@ -12,6 +12,8 @@ import {
   CreateStudentLoginModal,
 } from '../components/students/StudentProfileFlows';
 import '../components/students/studentsWorkspace.css';
+import { SelectKeeper } from '../components/SelectKeeper';
+import { DateKeeper } from '../components/DateKeeper';
 
 // ─── Types matching StudentProfileSummaryDTO ─────────────────────────────────
 
@@ -1354,6 +1356,9 @@ type FeePaymentAllocation = {
   id: number;
   demandId: number;
   demandNo: string;
+  feeHeadName?: string | null;
+  feeHeadCode?: string | null;
+  installmentName?: string | null;
   allocatedAmount: number | string;
   demandPayableAmount: number | string;
   demandPaidAmount: number | string;
@@ -1376,6 +1381,8 @@ type FeePayment = {
   schoolId: number;
   studentId: number;
   studentName: string;
+  studentAdmissionNo?: string | null;
+  classGroupName?: string | null;
   receiptNo: string;
   amount: number | string;
   paymentMode: string;
@@ -1384,6 +1391,7 @@ type FeePayment = {
   notes?: string | null;
   status: SPPaymentStatus;
   collectedByUserId?: number | null;
+  outstandingBalance?: number | string | null;
   createdAt: string;
   updatedAt: string;
   allocations?: FeePaymentAllocation[];
@@ -1451,67 +1459,206 @@ const FEE_DEMAND_STATUS_PILL: Record<StudentFeeDemandStatus, { bg: string; color
 
 // ─── Inline Collect Payment Modal (for student profile) ───────────────────────
 
+/** Format date as "26 May 2026" */
+function fmtHumanDate(raw: string | null | undefined): string {
+  if (!raw) return '—';
+  try {
+    const d = new Date(raw);
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+  } catch { return raw; }
+}
+
+/** School name — read from window or a simple fallback */
+const SCHOOL_NAME = (window as unknown as Record<string, string>)['SCHOOL_NAME'] ?? 'School';
+
+function printReceipt(payment: FeePayment) {
+  const w = window.open('', '_blank', 'width=700,height=900');
+  if (!w) return;
+  const allocs = payment.allocations ?? [];
+  const rows = allocs.map(a => `
+    <tr>
+      <td>${a.feeHeadName ?? a.feeHeadCode ?? '—'}</td>
+      <td>${a.installmentName ?? '—'}</td>
+      <td style="font-family:monospace;font-size:12px">${a.demandNo}</td>
+      <td style="text-align:right;font-weight:700">₹${toNum(a.allocatedAmount).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
+    </tr>`).join('');
+  w.document.write(`<!DOCTYPE html>
+<html><head><title>Receipt ${payment.receiptNo}</title>
+<style>
+  body{font-family:Arial,sans-serif;color:#111;padding:24px;font-size:13px}
+  h2{margin:0 0 4px;font-size:18px}
+  .meta{color:#555;font-size:12px;margin-bottom:16px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;margin-bottom:16px}
+  .lbl{font-size:11px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .val{font-weight:600;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin-bottom:12px}
+  th{text-align:left;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #ddd;padding:5px 6px}
+  td{padding:7px 6px;border-bottom:1px solid #f0f0f0;vertical-align:top}
+  .total-row{font-weight:800;background:#f8f8f8}
+  .footer{font-size:11px;color:#aaa;margin-top:8px;border-top:1px solid #eee;padding-top:8px}
+  @media print{body{padding:0}}
+</style></head><body>
+<h2>${SCHOOL_NAME}</h2>
+<div class="meta">Fee Payment Receipt · ${fmtHumanDate(new Date().toISOString())}</div>
+<div style="border:1px solid #ddd;border-radius:6px;padding:16px;margin-bottom:16px">
+  <div style="font-weight:800;font-size:15px;margin-bottom:10px">Receipt: ${payment.receiptNo}</div>
+  <div class="grid">
+    <div><div class="lbl">Student</div><div class="val">${payment.studentName}</div></div>
+    <div><div class="lbl">Admission No</div><div class="val">${payment.studentAdmissionNo ?? '—'}</div></div>
+    <div><div class="lbl">Class / Section</div><div class="val">${payment.classGroupName ?? '—'}</div></div>
+    <div><div class="lbl">Amount Paid</div><div class="val" style="color:#166534;font-size:16px">₹${toNum(payment.amount).toLocaleString('en-IN',{minimumFractionDigits:2})}</div></div>
+    <div><div class="lbl">Payment Mode</div><div class="val">${SP_MODE_LABELS[payment.paymentMode as PaymentMode] ?? payment.paymentMode}</div></div>
+    <div><div class="lbl">Payment Date</div><div class="val">${fmtHumanDate(payment.paymentDate)}</div></div>
+    ${payment.referenceNo ? `<div><div class="lbl">Reference No</div><div class="val" style="font-family:monospace">${payment.referenceNo}</div></div>` : ''}
+    ${payment.outstandingBalance != null ? `<div><div class="lbl">Outstanding After</div><div class="val" style="color:${toNum(payment.outstandingBalance)>0?'#b91c1c':'#166534'}">₹${toNum(payment.outstandingBalance).toLocaleString('en-IN',{minimumFractionDigits:2})}</div></div>` : ''}
+  </div>
+</div>
+${allocs.length > 0 ? `<table>
+  <thead><tr><th>Fee Head</th><th>Installment</th><th>Demand No</th><th style="text-align:right">Amount</th></tr></thead>
+  <tbody>${rows}<tr class="total-row"><td colspan="3" style="text-align:right;padding:7px 6px">Total</td><td style="text-align:right;padding:7px 6px">₹${toNum(payment.amount).toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr></tbody>
+</table>` : ''}
+<div class="footer">Generated: ${new Date().toLocaleString('en-IN')} · This is a computer-generated receipt.</div>
+</body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); }, 400);
+}
+
 function SPReceiptModal({ payment, onClose }: { payment: FeePayment; onClose: () => void }) {
   const r = payment.receipt;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
       onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 520, width: '100%', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 48px rgba(15,23,42,0.2)', maxHeight: '90vh', overflowY: 'auto' }}
+      <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 560, width: '100%', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 48px rgba(15,23,42,0.2)', maxHeight: '92vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
         <div style={{ textAlign: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: 14 }}>
           <div style={{ fontSize: 32, marginBottom: 4 }}>🧾</div>
           <div style={{ fontWeight: 700, fontSize: 16, color: '#166534' }}>Payment Successful</div>
-          {r && <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>Receipt: <strong style={{ fontFamily: 'monospace' }}>{r.receiptNo}</strong></div>}
+          {r && <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>Receipt No: <strong style={{ fontFamily: 'monospace' }}>{r.receiptNo}</strong></div>}
+          {payment.receipt?.cancelledAt && (
+            <div style={{ marginTop: 6, padding: '4px 10px', background: '#fee2e2', borderRadius: 6, color: '#991b1b', fontSize: 12, fontWeight: 700, display: 'inline-block' }}>
+              ⚠ CANCELLED
+            </div>
+          )}
         </div>
+
+        {/* Student details */}
+        <div style={{ background: '#f8fafc', borderRadius: 10, padding: '12px 14px', border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>Student</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 13 }}>
+            {[
+              ['Name', payment.studentName],
+              ['Admission No', payment.studentAdmissionNo ?? '—'],
+              ['Class / Section', payment.classGroupName ?? '—'],
+            ].map(([l, v]) => (
+              <div key={l}>
+                <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{l}</div>
+                <div style={{ fontWeight: 600, marginTop: 2 }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Payment details */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: 13 }}>
-          {[
-            ['Amount', fmtMoney(payment.amount)],
+          {([
+            ['Amount', `₹${toNum(payment.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`],
             ['Mode', SP_MODE_LABELS[payment.paymentMode as PaymentMode] ?? payment.paymentMode],
-            ['Date', payment.paymentDate],
+            ['Date', fmtHumanDate(payment.paymentDate)],
             ['Reference', payment.referenceNo ?? '—'],
-          ].map(([label, value]) => (
+            ...(payment.outstandingBalance != null ? [['Outstanding After', `₹${toNum(payment.outstandingBalance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`]] : []),
+          ] as [string, string][]).map(([label, value]) => (
             <div key={label}>
               <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</div>
               <div style={{ fontWeight: 600, marginTop: 2 }}>{value}</div>
             </div>
           ))}
         </div>
+
+        {/* Allocations table */}
         {payment.allocations && payment.allocations.length > 0 && (
           <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>Allocations</div>
-            {payment.allocations.map(a => (
-              <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid #f1f5f9' }}>
-                <span style={{ fontFamily: 'monospace', color: '#475569' }}>{a.demandNo}</span>
-                <span style={{ fontWeight: 700, color: '#166534' }}>{fmtMoney(a.allocatedAmount)}</span>
-              </div>
-            ))}
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>Allocated to Demands</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#94a3b8' }}>
+                  {['Fee Head', 'Installment', 'Demand No', 'Amount'].map(h => (
+                    <th key={h} style={{ padding: '5px 8px', textAlign: 'left', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {payment.allocations.map(a => (
+                  <tr key={a.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '6px 8px' }}>
+                      <div style={{ fontWeight: 600 }}>{a.feeHeadName ?? '—'}</div>
+                      {a.feeHeadCode && <div style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>{a.feeHeadCode}</div>}
+                    </td>
+                    <td style={{ padding: '6px 8px', color: '#475569' }}>{a.installmentName ?? '—'}</td>
+                    <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: '#6366f1', fontSize: 11 }}>{a.demandNo}</td>
+                    <td style={{ padding: '6px 8px', fontWeight: 700, color: '#166534', textAlign: 'right' }}>
+                      ₹{toNum(a.allocatedAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ background: '#f8fafc', fontWeight: 800 }}>
+                  <td colSpan={3} style={{ padding: '6px 8px', textAlign: 'right', fontSize: 12 }}>Total</td>
+                  <td style={{ padding: '6px 8px', fontWeight: 800, color: '#166534', textAlign: 'right' }}>
+                    ₹{toNum(payment.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         )}
+
+        {/* PDF notice */}
         <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
-          📄 Receipt PDF generation is not enabled yet.
+          PDF receipt generation is not enabled yet.
         </div>
+
+        {/* Actions */}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-          <button type="button" disabled style={{ opacity: 0.5, cursor: 'not-allowed', padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13 }}>🖨 Print</button>
-          <button type="button" disabled style={{ opacity: 0.5, cursor: 'not-allowed', padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13 }}>⬇ Download</button>
-          <button type="button" onClick={onClose} style={{ padding: '8px 20px', borderRadius: 8, background: 'var(--color-primary, #4f46e5)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Close</button>
+          <button type="button" onClick={() => printReceipt(payment)}
+            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+            🖨 Print
+          </button>
+          <button type="button" disabled
+            style={{ opacity: 0.5, cursor: 'not-allowed', padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13 }}>
+            ⬇ Download PDF
+          </button>
+          <button type="button" onClick={onClose}
+            style={{ padding: '8px 20px', borderRadius: 8, background: 'var(--color-primary, #4f46e5)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+            Close
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function SPCollectModal({ studentId, studentName, demands, onClose, onSuccess }: {
+function SPCollectModal({ studentId, studentName, demands, preselectedDemandId, onClose, onSuccess }: {
   studentId: number; studentName: string; demands: StudentFeeDemand[];
+  preselectedDemandId?: number | null;
   onClose: () => void; onSuccess: (p: FeePayment) => void;
 }) {
   const today = new Date().toISOString().split('T')[0];
   const [paymentDate, setPaymentDate] = useState(today);
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('CASH');
   const [referenceNo, setReferenceNo] = useState('');
-  const [allocations, setAllocations] = useState<Record<number, string>>({});
+  const outstanding = demands.filter(d => d.status === 'UNPAID' || d.status === 'PARTIAL');
+  const [allocations, setAllocations] = useState<Record<number, string>>(() => {
+    // Pre-fill only the preselected demand (if provided) with its balance
+    if (preselectedDemandId) {
+      const d = outstanding.find(x => x.id === preselectedDemandId);
+      if (d) return { [d.id]: String(toNum(d.balanceAmount)) };
+    }
+    return {};
+  });
   const [submitErr, setSubmitErr] = useState('');
 
-  const outstanding = demands.filter(d => d.status === 'UNPAID' || d.status === 'PARTIAL');
   const totalAllocated = Object.values(allocations).reduce((s, v) => s + (parseFloat(v) || 0), 0);
   const refRequired = SP_REF_REQUIRED.has(paymentMode);
 
@@ -1557,15 +1704,15 @@ function SPCollectModal({ studentId, studentName, demands, onClose, onSuccess }:
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 130, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Payment Date *</label>
-            <input type="date" value={paymentDate} max={today} onChange={e => setPaymentDate(e.target.value)}
-              style={{ padding: '8px 10px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13 }} />
+            <DateKeeper value={paymentDate} onChange={setPaymentDate} />
           </div>
           <div style={{ flex: 1, minWidth: 150, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Payment Mode *</label>
-            <select value={paymentMode} onChange={e => setPaymentMode(e.target.value as PaymentMode)}
-              style={{ padding: '8px 10px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13 }}>
-              {SP_PAYMENT_MODES.map(m => <option key={m} value={m}>{SP_MODE_LABELS[m]}</option>)}
-            </select>
+            <SelectKeeper
+              value={paymentMode}
+              onChange={v => setPaymentMode(v as PaymentMode)}
+              options={SP_PAYMENT_MODES.map(m => ({ value: m, label: SP_MODE_LABELS[m] }))}
+            />
           </div>
           <div style={{ flex: 2, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Reference {refRequired ? '*' : '(optional)'}</label>
@@ -1654,6 +1801,7 @@ function SPCollectModal({ studentId, studentName, demands, onClose, onSuccess }:
 
 function FeesTab({ studentId, studentName }: { studentId: number; studentName: string }) {
   const [collectOpen, setCollectOpen] = useState(false);
+  const [collectPreselect, setCollectPreselect] = useState<number | null>(null);
   const [receiptPayment, setReceiptPayment] = useState<FeePayment | null>(null);
   const [cancelTarget, setCancelTarget] = useState<FeePayment | null>(null);
   const [cancelReason, setCancelReason] = useState('');
@@ -1693,19 +1841,22 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
   const payments = paymentsQ.data ?? [];
   const today = new Date().toISOString().split('T')[0];
 
-  const totalDue     = demands.reduce((s, d) => s + toNum(d.payableAmount), 0);
-  const totalPaid    = demands.reduce((s, d) => s + toNum(d.paidAmount), 0);
-  const totalBalance = demands.reduce((s, d) => s + toNum(d.balanceAmount), 0);
-  const overdueCount = demands.filter(d => {
+  const totalFees      = demands.reduce((s, d) => s + toNum(d.payableAmount), 0);
+  const totalPaid      = demands.reduce((s, d) => s + toNum(d.paidAmount), 0);
+  const totalOutstanding = demands.reduce((s, d) => s + toNum(d.balanceAmount), 0);
+  const overdueDemands = demands.filter(d => {
     const raw = String(d.dueDate ?? '');
     return raw && raw < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
-  }).length;
+  });
+  const overdueAmount = overdueDemands.reduce((s, d) => s + toNum(d.balanceAmount), 0);
 
   const summaryCards = [
-    { label: 'Total Due',    value: fmtMoney(totalDue),     color: '#6366f1' },
-    { label: 'Paid',         value: fmtMoney(totalPaid),    color: '#16a34a' },
-    { label: 'Balance',      value: fmtMoney(totalBalance), color: '#f59e0b' },
-    { label: 'Overdue',      value: String(overdueCount),   color: '#dc2626' },
+    { label: 'Total Fees',    value: fmtMoney(totalFees),         sub: 'Total payable',   color: '#6366f1' },
+    { label: 'Paid',          value: fmtMoney(totalPaid),         sub: 'Collected so far', color: '#16a34a' },
+    { label: 'Outstanding',   value: fmtMoney(totalOutstanding),  sub: 'Unpaid balance',  color: '#f59e0b' },
+    { label: 'Overdue',       value: String(overdueDemands.length),
+      sub: overdueAmount > 0 ? fmtMoney(overdueAmount) : (overdueDemands.length === 0 ? 'None overdue' : '—'),
+      color: overdueDemands.length > 0 ? '#dc2626' : '#94a3b8' },
   ];
 
   if (feesQ.isLoading) {
@@ -1725,34 +1876,35 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      {/* Summary tiles */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
+      {/* ─── Summary tiles ─────────────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
         {summaryCards.map(c => (
           <div key={c.label} style={{ background: 'rgba(15,23,42,0.03)', border: '1px solid rgba(15,23,42,0.07)', borderRadius: 10, borderTop: `3px solid ${c.color}`, padding: '10px 14px' }}>
             <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>{c.label}</div>
             <div style={{ fontSize: 18, fontWeight: 900, color: c.color, marginTop: 2 }}>{c.value}</div>
+            {c.sub && <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', marginTop: 2 }}>{c.sub}</div>}
           </div>
         ))}
       </div>
 
-      {/* Collect Payment button */}
+      {/* ─── Global Collect Payment button ─────────────────────────────────── */}
       {demands.some(d => d.status === 'UNPAID' || d.status === 'PARTIAL') && (
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="button" onClick={() => setCollectOpen(true)}
+          <button type="button" onClick={() => { setCollectPreselect(null); setCollectOpen(true); }}
             style={{ padding: '9px 18px', borderRadius: 8, background: '#166534', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
             💳 Collect Payment
           </button>
         </div>
       )}
 
-      {/* Demands table */}
+      {/* ─── Demands table ─────────────────────────────────────────────────── */}
       <Card style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '12px 14px 8px', fontWeight: 700, fontSize: 13, borderBottom: '1px solid rgba(15,23,42,0.07)' }}>Fee Demands</div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr>
-                {['Fee Head', 'Plan', 'Installment', 'Due Date', 'Payable', 'Paid', 'Balance', 'Status'].map(h => (
+                {['Fee Head', 'Plan', 'Installment', 'Due Date', 'Payable', 'Paid', 'Outstanding', 'Status', ''].map(h => (
                   <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.5)', borderBottom: '1px solid rgba(15,23,42,0.07)', background: 'rgba(250,250,249,0.98)', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
@@ -1764,6 +1916,7 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
                 const sp = FEE_DEMAND_STATUS_PILL[d.status] ?? { bg: '#f1f5f9', color: '#64748b' };
                 const dueDateRaw = String(d.dueDate ?? '');
                 const isOverdue  = dueDateRaw && dueDateRaw < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
+                const canCollect = d.status === 'UNPAID' || d.status === 'PARTIAL';
                 return (
                   <tr key={d.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', background: isOverdue ? 'rgba(220,38,38,0.025)' : undefined }}>
                     <td style={{ padding: '10px 12px' }}>
@@ -1773,7 +1926,7 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
                     <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.55)' }}>{d.feePlanName}</td>
                     <td style={{ padding: '10px 12px', fontSize: 12 }}>{d.installmentName}</td>
                     <td style={{ padding: '10px 12px', fontSize: 12, color: isOverdue ? '#b91c1c' : 'rgba(15,23,42,0.65)', fontWeight: isOverdue ? 700 : 400 }}>
-                      {fmtDate(dueDateRaw)}{isOverdue ? ' ⚠' : ''}
+                      {fmtHumanDate(dueDateRaw)}{isOverdue ? ' ⚠' : ''}
                     </td>
                     <td style={{ padding: '10px 12px', fontWeight: 700 }}>{fmtMoney(d.payableAmount)}</td>
                     <td style={{ padding: '10px 12px', color: '#166534' }}>{fmtMoney(d.paidAmount)}</td>
@@ -1783,6 +1936,15 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
                         {d.status}
                       </span>
                     </td>
+                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                      {canCollect && (
+                        <button type="button"
+                          onClick={() => { setCollectPreselect(d.id); setCollectOpen(true); }}
+                          style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid rgba(22,163,74,0.3)', background: 'rgba(22,163,74,0.07)', color: '#166534', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                          💳 Collect
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -1791,7 +1953,7 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
         </div>
       </Card>
 
-      {/* Payment History */}
+      {/* ─── Payment History ─────────────────────────────────────────────────── */}
       <Card style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '12px 14px 8px', fontWeight: 700, fontSize: 13, borderBottom: '1px solid rgba(15,23,42,0.07)' }}>Payment History</div>
         {paymentsQ.isLoading ? (
@@ -1814,26 +1976,30 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
                 {payments.map(p => {
                   const sp = SP_STATUS_PILL[p.status] ?? { bg: '#f1f5f9', color: '#94a3b8' };
                   return (
-                    <tr key={p.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
+                    <tr key={p.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', opacity: p.status === 'CANCELLED' ? 0.6 : 1 }}>
                       <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 700, color: '#4f46e5' }}>{p.receiptNo}</td>
                       <td style={{ padding: '10px 12px', fontWeight: 700 }}>{fmtMoney(p.amount)}</td>
                       <td style={{ padding: '10px 12px', fontSize: 12 }}>{SP_MODE_LABELS[p.paymentMode as PaymentMode] ?? p.paymentMode}</td>
-                      <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.65)' }}>{p.paymentDate}</td>
-                      <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.55)' }}>{p.referenceNo ?? '—'}</td>
+                      <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.65)' }}>{fmtHumanDate(p.paymentDate)}</td>
+                      <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.55)', fontFamily: p.referenceNo ? 'monospace' : undefined }}>{p.referenceNo ?? '—'}</td>
                       <td style={{ padding: '10px 12px' }}>
                         <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: sp.bg, color: sp.color }}>
                           {p.status}
                         </span>
                       </td>
                       <td style={{ padding: '10px 12px' }}>
-                        <div style={{ display: 'flex', gap: 6 }}>
+                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                           <button type="button" onClick={() => setReceiptPayment(p)}
-                            style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11 }}>
+                            style={{ padding: '4px 9px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
                             👁 View
+                          </button>
+                          <button type="button" onClick={() => printReceipt(p)}
+                            style={{ padding: '4px 9px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                            🖨 Print
                           </button>
                           {p.status === 'SUCCESS' && (
                             <button type="button" onClick={() => { setCancelTarget(p); setCancelReason(''); setCancelErr(''); }}
-                              style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #fecaca', background: '#fef2f2', cursor: 'pointer', fontSize: 11, color: '#b91c1c' }}>
+                              style={{ padding: '4px 9px', borderRadius: 7, border: '1px solid #fecaca', background: '#fef2f2', cursor: 'pointer', fontSize: 11, color: '#b91c1c', fontWeight: 600 }}>
                               ✕ Cancel
                             </button>
                           )}
@@ -1850,7 +2016,6 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
 
       {/* ─── Fee Ledger ────────────────────────────────────────────────────── */}
       <Card style={{ padding: 0, overflow: 'hidden' }}>
-        {/* Header with summary totals */}
         <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid rgba(15,23,42,0.07)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
           <div style={{ fontWeight: 700, fontSize: 13 }}>Fee Ledger</div>
           {ledgerQ.data && (
@@ -1870,7 +2035,6 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
           )}
         </div>
 
-        {/* Body */}
         {ledgerQ.isLoading ? (
           <div className="muted" style={{ textAlign: 'center', padding: 20 }}>Loading ledger…</div>
         ) : ledgerQ.error ? (
@@ -1878,121 +2042,82 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
             {(ledgerQ.error as Error)?.message ?? 'Failed to load ledger.'}
           </div>
         ) : !ledgerQ.data || ledgerQ.data.entries.length === 0 ? (
-          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '28px 0' }}>
-            No fee ledger entries yet.
-          </div>
+          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '28px 0' }}>No fee ledger entries yet.</div>
         ) : (
-          <div>
-            {/* Ledger entries */}
-            {ledgerQ.data.entries.map((entry, idx) => {
-              const cfg = LEDGER_TYPE_CONFIG[entry.type] ?? LEDGER_TYPE_CONFIG.ADJUSTMENT;
-              const balance = toNum(entry.balanceAfter);
-              const isLast = idx === ledgerQ.data!.entries.length - 1;
-              return (
-                <div key={idx} style={{
-                  borderBottom: isLast ? 'none' : '1px solid rgba(15,23,42,0.055)',
-                  padding: '11px 16px',
-                  display: 'grid',
-                  gridTemplateColumns: '90px 1fr auto',
-                  gap: '0 12px',
-                  alignItems: 'start',
-                }}>
-                  {/* Date + type badge */}
-                  <div>
-                    <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.45)', fontVariantNumeric: 'tabular-nums', marginBottom: 5 }}>
-                      {entry.date ?? '—'}
-                    </div>
-                    <span style={{
-                      display: 'inline-block', padding: '2px 7px', borderRadius: 999,
-                      fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color,
-                      textTransform: 'uppercase', letterSpacing: '0.03em',
-                    }}>
-                      {cfg.label}
-                    </span>
-                  </div>
-
-                  {/* Reference + description */}
-                  <div style={{ minWidth: 0 }}>
-                    {entry.referenceNo && (
-                      <div style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: '#4f46e5', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {entry.referenceNo}
-                      </div>
-                    )}
-                    {entry.description && (
-                      <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.6)', marginTop: entry.referenceNo ? 2 : 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {entry.description}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Debit / Credit / Balance */}
-                  <div style={{ textAlign: 'right', minWidth: 120 }}>
-                    {/* Debit — red / amber */}
-                    {entry.debit != null ? (
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#b45309' }}>
-                        − {fmtMoney(entry.debit)}
-                      </div>
-                    ) : (
-                      /* Credit — green */
-                      entry.credit != null ? (
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>
-                          + {fmtMoney(entry.credit)}
-                        </div>
-                      ) : null
-                    )}
-                    {/* Running balance */}
-                    <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.38)', marginTop: 3 }}>
-                      Bal{' '}
-                      <span style={{ fontWeight: 700, color: balance > 0 ? '#b91c1c' : balance < 0 ? '#166534' : 'rgba(15,23,42,0.5)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  {['Date', 'Type', 'Reference', 'Description', 'Debit', 'Credit', 'Balance'].map(h => (
+                    <th key={h} style={{ padding: '9px 12px', textAlign: h === 'Debit' || h === 'Credit' || h === 'Balance' ? 'right' : 'left', fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(15,23,42,0.5)', borderBottom: '1px solid rgba(15,23,42,0.07)', background: 'rgba(250,250,249,0.98)', whiteSpace: 'nowrap' }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ledgerQ.data.entries.map((entry, idx) => {
+                  const cfg = LEDGER_TYPE_CONFIG[entry.type] ?? LEDGER_TYPE_CONFIG.ADJUSTMENT;
+                  const balance = toNum(entry.balanceAfter);
+                  return (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(15,23,42,0.055)' }}>
+                      <td style={{ padding: '9px 12px', color: 'rgba(15,23,42,0.55)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                        {fmtHumanDate(entry.date)}
+                      </td>
+                      <td style={{ padding: '9px 12px' }}>
+                        <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color, textTransform: 'uppercase', letterSpacing: '.03em' }}>
+                          {cfg.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '9px 12px', fontFamily: entry.referenceNo ? 'monospace' : undefined, color: entry.referenceNo ? '#4f46e5' : 'rgba(15,23,42,0.3)', fontSize: entry.referenceNo ? 12 : 11 }}>
+                        {entry.referenceNo ?? '—'}
+                      </td>
+                      <td style={{ padding: '9px 12px', color: 'rgba(15,23,42,0.6)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {entry.description ?? '—'}
+                      </td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: '#b45309' }}>
+                        {entry.debit != null ? `₹${toNum(entry.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                      </td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: '#166534' }}>
+                        {entry.credit != null ? `₹${toNum(entry.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                      </td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 800, color: balance > 0 ? '#b91c1c' : balance < 0 ? '#166534' : 'rgba(15,23,42,0.5)' }}>
                         {fmtMoney(balance)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Totals footer */}
-            <div style={{
-              borderTop: '2px solid rgba(15,23,42,0.09)',
-              background: 'rgba(15,23,42,0.025)',
-              padding: '10px 16px',
-              display: 'grid',
-              gridTemplateColumns: '90px 1fr auto',
-              gap: '0 12px',
-              alignItems: 'center',
-            }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(15,23,42,0.5)', textTransform: 'uppercase', letterSpacing: '.04em', gridColumn: '1 / 3' }}>
-                Totals
-              </div>
-              <div style={{ textAlign: 'right', minWidth: 120 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#b45309' }}>
-                  − {fmtMoney(ledgerQ.data.totalDebit)}
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 800, color: '#166534', marginTop: 2 }}>
-                  + {fmtMoney(ledgerQ.data.totalCredit)}
-                </div>
-                <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.38)', marginTop: 4 }}>
-                  Net{' '}
-                  <span style={{ fontWeight: 800, color: toNum(ledgerQ.data.balance) > 0 ? '#b91c1c' : '#166534' }}>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {/* Totals footer */}
+                <tr style={{ background: 'rgba(15,23,42,0.025)', borderTop: '2px solid rgba(15,23,42,0.09)', fontWeight: 800 }}>
+                  <td colSpan={4} style={{ padding: '9px 12px', fontSize: 11, color: 'rgba(15,23,42,0.5)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Totals</td>
+                  <td style={{ padding: '9px 12px', textAlign: 'right', color: '#b45309' }}>
+                    ₹{toNum(ledgerQ.data.totalDebit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ padding: '9px 12px', textAlign: 'right', color: '#166534' }}>
+                    ₹{toNum(ledgerQ.data.totalCredit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ padding: '9px 12px', textAlign: 'right', color: toNum(ledgerQ.data.balance) > 0 ? '#b91c1c' : '#166534' }}>
                     {fmtMoney(ledgerQ.data.balance)}
-                  </span>
-                </div>
-              </div>
-            </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
 
-      {/* Collect Payment Modal */}
+      {/* ─── Modals ──────────────────────────────────────────────────────────── */}
+
       {collectOpen && (
         <SPCollectModal
           studentId={studentId}
           studentName={studentName}
           demands={demands}
-          onClose={() => setCollectOpen(false)}
+          preselectedDemandId={collectPreselect}
+          onClose={() => { setCollectOpen(false); setCollectPreselect(null); }}
           onSuccess={(payment) => {
             setCollectOpen(false);
+            setCollectPreselect(null);
             setReceiptPayment(payment);
             qc.invalidateQueries({ queryKey: ['student-fee-demands', studentId] });
             qc.invalidateQueries({ queryKey: ['student-fee-payments', studentId] });
@@ -2001,31 +2126,41 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
         />
       )}
 
-      {/* Receipt modal */}
       {receiptPayment && <SPReceiptModal payment={receiptPayment} onClose={() => setReceiptPayment(null)} />}
 
-      {/* Cancel confirmation */}
       {cancelTarget && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
           onClick={() => { if (!cancelMut.isPending) setCancelTarget(null); }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 440, width: '100%', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 48px rgba(15,23,42,0.2)' }}
+          <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 460, width: '100%', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 48px rgba(15,23,42,0.2)' }}
             onClick={e => e.stopPropagation()}>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>Cancel Payment {cancelTarget.receiptNo}?</div>
-            <div style={{ fontSize: 13, color: '#64748b' }}>This will reverse all allocations and restore the demand balances.</div>
+            {/* Warning header */}
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 20, flexShrink: 0 }}>⚠️</span>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 14, color: '#b91c1c', marginBottom: 4 }}>Cancel Payment {cancelTarget.receiptNo}?</div>
+                <div style={{ fontSize: 12, color: '#b91c1c' }}>
+                  This will reverse all demand allocations, restore balances, and mark the receipt as cancelled.
+                  This action cannot be undone.
+                </div>
+              </div>
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>Cancel Reason *</label>
               <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={3}
-                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, resize: 'vertical' }} />
+                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, resize: 'vertical' }}
+                placeholder="Enter reason for cancellation…" />
             </div>
             {cancelErr && <div style={{ color: '#b91c1c', fontSize: 13 }}>{cancelErr}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" disabled={cancelMut.isPending || !cancelReason.trim()}
                 onClick={() => cancelMut.mutate({ id: cancelTarget.id, reason: cancelReason })}
-                style={{ flex: 1, padding: '10px 0', borderRadius: 8, background: '#dc2626', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+                style={{ flex: 1, padding: '10px 0', borderRadius: 8, background: !cancelReason.trim() || cancelMut.isPending ? '#94a3b8' : '#dc2626', color: '#fff', border: 'none', cursor: !cancelReason.trim() || cancelMut.isPending ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 13 }}>
                 {cancelMut.isPending ? 'Cancelling…' : 'Confirm Cancel'}
               </button>
               <button type="button" disabled={cancelMut.isPending} onClick={() => setCancelTarget(null)}
-                style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Back</button>
+                style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
+                Back
+              </button>
             </div>
           </div>
         </div>

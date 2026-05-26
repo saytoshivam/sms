@@ -13,6 +13,12 @@ public class FeePaymentAllocationDTO {
     private Long id;
     private Long demandId;
     private String demandNo;
+    /** Human-readable fee head name, e.g. "Tuition Fee". */
+    private String feeHeadName;
+    /** Short fee head code, e.g. "TUI". */
+    private String feeHeadCode;
+    /** Installment label, e.g. "Term 1". */
+    private String installmentName;
     private BigDecimal allocatedAmount;
     private BigDecimal demandPayableAmount;
     private BigDecimal demandPaidAmount;

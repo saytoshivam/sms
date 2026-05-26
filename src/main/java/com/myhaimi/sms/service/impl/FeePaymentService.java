@@ -338,6 +338,17 @@ public class FeePaymentService {
         if (receipt != null) {
             dto.setReceipt(toReceiptDTO(receipt));
         }
+        // Compute outstanding balance from the student's current demands
+        try {
+            Integer schoolId = p.getSchool().getId();
+            Integer studentId = p.getStudent().getId();
+            List<com.myhaimi.sms.entity.StudentFeeDemand> allDemands =
+                    demandRepo.findBySchool_IdAndStudent_Id(schoolId, studentId);
+            BigDecimal outstanding = allDemands.stream()
+                    .map(d -> d.getBalanceAmount() != null ? d.getBalanceAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            dto.setOutstandingBalance(outstanding);
+        } catch (Exception ignored) { /* non-critical */ }
         return dto;
     }
 
@@ -359,6 +370,13 @@ public class FeePaymentService {
         String firstName = p.getStudent().getFirstName();
         String lastName  = p.getStudent().getLastName();
         dto.setStudentName(firstName + (lastName != null ? " " + lastName : ""));
+        dto.setStudentAdmissionNo(p.getStudent().getAdmissionNo());
+        // Class/section label
+        var cg = p.getStudent().getClassGroup();
+        if (cg != null) {
+            String label = cg.getDisplayName() != null ? cg.getDisplayName() : cg.getCode();
+            dto.setClassGroupName(label);
+        }
         dto.setReceiptNo(p.getReceiptNo());
         dto.setAmount(p.getAmount());
         dto.setPaymentMode(p.getPaymentMode().name());
@@ -378,6 +396,15 @@ public class FeePaymentService {
         StudentFeeDemand d = a.getStudentFeeDemand();
         dto.setDemandId(d.getId());
         dto.setDemandNo(d.getDemandNo());
+        // Fee head details for human-readable receipt
+        if (d.getFeeHead() != null) {
+            dto.setFeeHeadName(d.getFeeHead().getName());
+            dto.setFeeHeadCode(d.getFeeHead().getCode());
+        }
+        // Installment name
+        if (d.getInstallment() != null) {
+            dto.setInstallmentName(d.getInstallment().getName());
+        }
         dto.setAllocatedAmount(a.getAllocatedAmount());
         dto.setDemandPayableAmount(d.getPayableAmount());
         dto.setDemandPaidAmount(d.getPaidAmount());
