@@ -525,7 +525,7 @@ public class StaffService {
                 uploadedBy);
 
         // Store only the FileObject id — never set photoUrl to a /download-url path
-        staff.setProfilePhotoFileId(fo.getId());
+        staff.setProfilePhotoFileId(fo.getId() != null ? fo.getId().intValue() : null);
         staffRepo.save(staff);
 
         // Return a lightweight summary DTO
