@@ -303,4 +303,30 @@ public class StaffController {
             return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
         }
     }
+
+    // ── Profile photo ─────────────────────────────────────────────────────────
+
+    /**
+     * Upload a profile photo for a staff member.
+     * Stores FileObject id in staff.profilePhotoFileId.
+     * Frontend must call GET /api/files/{profilePhotoFileId}/content to get the image blob.
+     * POST /api/staff/{staffId}/profile-photo
+     */
+    @PostMapping("/{staffId:[0-9]+}/profile-photo")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','PRINCIPAL','VICE_PRINCIPAL','HOD')")
+    public ResponseEntity<?> uploadProfilePhoto(
+            @PathVariable Integer staffId,
+            @RequestParam("file") MultipartFile file,
+            Authentication auth) {
+        try {
+            return ResponseEntity.ok(staffService.uploadProfilePhoto(staffId, file, auth));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", ex.getMessage()));
+        } catch (org.springframework.security.access.AccessDeniedException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Upload failed: " + ex.getMessage()));
+        }
+    }
 }

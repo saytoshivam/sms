@@ -7,7 +7,7 @@
  * Tabs: Overview · Employment · Academics · Timetable ·
  *       Documents · Access · Leave · Payroll · Activity Log
  */
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -27,6 +27,8 @@ interface StaffProfile {
   phone: string | null;
   email: string | null;
   photoUrl: string | null;
+  /** FK to file_objects.id — fetch via GET /api/files/{id}/content as blob */
+  profilePhotoFileId: number | null;
   staffType: string | null;       // TEACHING | NON_TEACHING | ADMIN | SUPPORT
   status: string | null;          // DRAFT | ACTIVE | INACTIVE | EXITED | SUSPENDED | ON_LEAVE
   employmentType: string | null;
@@ -182,8 +184,80 @@ function fmtInstant(d: string | null): string {
   catch { return d; }
 }
 
-function InfoRow({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) {
+// ─── Staff Profile Avatar ─────────────────────────────────────────────────────
+
+function StaffProfileAvatar({
+  profile, size = 52, canEdit = false, onUpload,
+}: {
+  profile: StaffProfile; size?: number; canEdit?: boolean; onUpload?: () => void;
+}) {
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [imgBroken, setImgBroken] = useState(false);
+
+  // Fetch profile photo as an authenticated blob so the Authorization header is sent
+  useEffect(() => {
+    setSignedUrl(null);
+    setImgBroken(false);
+    if (!profile.profilePhotoFileId) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    api.get(`/api/files/${profile.profilePhotoFileId}/content`, { responseType: 'blob' })
+      .then(r => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(r.data as Blob);
+        setSignedUrl(objectUrl);
+      })
+      .catch(() => { /* show initials fallback on error */ });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [profile.profilePhotoFileId]);
+
+  const hasPhoto = !!signedUrl && !imgBroken;
+  const bg = avatarColor(profile.fullName);
+  const radius = size >= 64 ? 14 : '50%';
+
+  const avatarStyle: React.CSSProperties = {
+    width: size, height: size, borderRadius: radius, objectFit: 'cover', flexShrink: 0,
+    border: '2px solid rgba(15,23,42,0.08)',
+  };
+  const fallbackStyle: React.CSSProperties = {
+    width: size, height: size, borderRadius: radius, flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: bg, color: '#fff', fontWeight: 900,
+    fontSize: Math.max(14, Math.round(size * 0.36)),
+    border: '2px solid rgba(15,23,42,0.07)',
+    userSelect: 'none',
+  };
+
   return (
+    <div style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}>
+      {hasPhoto
+        ? <img src={signedUrl!} alt="" onError={() => setImgBroken(true)} style={avatarStyle} />
+        : <div aria-hidden style={fallbackStyle}>{initials(profile.fullName)}</div>
+      }
+      {canEdit && onUpload && (
+        <button
+          type="button"
+          onClick={onUpload}
+          title="Change profile photo"
+          style={{
+            position: 'absolute', bottom: 0, right: 0,
+            width: 22, height: 22, borderRadius: '50%',
+            background: 'rgba(15,23,42,0.75)', border: '1.5px solid #fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', padding: 0,
+          }}
+        >
+          <span style={{ fontSize: 11 }}>📷</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+function InfoRow({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) {  return (
     <div style={{ display: 'flex', gap: 8, padding: '7px 0', borderBottom: '1px solid rgba(15,23,42,0.05)' }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(15,23,42,0.42)', minWidth: 160, flexShrink: 0 }}>{label}</div>
       <div style={{ fontSize: 13, color: value ? 'rgba(15,23,42,0.82)' : 'rgba(15,23,42,0.28)', fontFamily: mono ? 'monospace' : undefined, letterSpacing: mono ? '0.03em' : undefined }}>
@@ -2120,6 +2194,11 @@ export function StaffProfilePage() {
   const activeTab: TabId = (searchParams.get('tab') as TabId | null) ?? 'overview';
   const [_moreOpen] = useState(false);
 
+  // ── Photo upload state ───────────────────────────────────────────────────────
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
   // ── Queries ──────────────────────────────────────────────────────────────────
 
   const profileQ = useQuery({
@@ -2226,7 +2305,6 @@ export function StaffProfilePage() {
 
   const sc  = statusColor(profile.status);
   const tc  = typeColor(profile.staffType);
-  const bg  = avatarColor(profile.fullName);
 
   // ── Profile header ───────────────────────────────────────────────────────────
 
@@ -2246,12 +2324,58 @@ export function StaffProfilePage() {
       {/* ── Profile header card — compact ────────────────────────────────────── */}
       <div style={{ background: '#fff', borderRadius: 14, border: '1px solid rgba(15,23,42,0.1)', padding: '16px 20px', marginBottom: 14, boxShadow: '0 1px 8px rgba(15,23,42,0.05)' }}>
 
+        {/* Hidden file input for profile photo */}
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display: 'none' }}
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            if (file.size > 2 * 1024 * 1024) {
+              setPhotoError('File size must be under 2 MB.');
+              if (photoInputRef.current) photoInputRef.current.value = '';
+              return;
+            }
+            if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+              setPhotoError('Only JPG, PNG, or WEBP images are allowed.');
+              if (photoInputRef.current) photoInputRef.current.value = '';
+              return;
+            }
+            setPhotoUploading(true);
+            setPhotoError(null);
+            try {
+              const form = new FormData();
+              form.append('file', file);
+              await api.post(`/api/staff/${id}/profile-photo`, form, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+              });
+              qc.invalidateQueries({ queryKey: ['staff-profile', id] });
+              qc.invalidateQueries({ queryKey: ['staff'] });
+            } catch (err: unknown) {
+              const e = err as { response?: { data?: { error?: string } }; message?: string };
+              setPhotoError(e?.response?.data?.error ?? e?.message ?? 'Upload failed.');
+            } finally {
+              setPhotoUploading(false);
+              if (photoInputRef.current) photoInputRef.current.value = '';
+            }
+          }}
+        />
+
         {/* Row 1: avatar, name, status, eligibility + actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
 
-          {/* Avatar — compact 52px */}
-          <div style={{ width: 52, height: 52, borderRadius: '50%', background: bg, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 900, fontSize: 19, userSelect: 'none' }}>
-            {initials(profile.fullName)}
+          {/* Avatar with photo support */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            <StaffProfileAvatar
+              profile={profile}
+              size={52}
+              canEdit={true}
+              onUpload={() => { setPhotoError(null); photoInputRef.current?.click(); }}
+            />
+            {photoUploading && <span style={{ fontSize: 10, color: 'rgba(15,23,42,0.45)' }}>Uploading…</span>}
+            {photoError && <span style={{ fontSize: 10, color: '#b91c1c', maxWidth: 80, textAlign: 'center' }}>{photoError}</span>}
           </div>
 
           {/* Name + primary badges */}

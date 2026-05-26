@@ -23,6 +23,8 @@ public class StaffSummaryDTO {
     private String  phone;
     private String  email;
     private String  photoUrl;
+    /** FK to file_objects.id — use GET /api/files/{id}/content to fetch the blob. Null if no photo uploaded. */
+    private Integer profilePhotoFileId;
 
     // Classification
     private StaffType      staffType;

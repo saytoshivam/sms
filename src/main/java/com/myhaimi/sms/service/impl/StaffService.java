@@ -12,8 +12,12 @@ import com.myhaimi.sms.entity.StaffDocument;
 import com.myhaimi.sms.entity.StaffRoleMapping;
 import com.myhaimi.sms.entity.enums.DocumentCollectionStatus;
 import com.myhaimi.sms.entity.enums.DocumentVerificationStatus;
+import com.myhaimi.sms.entity.enums.FileCategory;
+import com.myhaimi.sms.entity.enums.FileVisibility;
 import com.myhaimi.sms.entity.enums.StaffStatus;
 import com.myhaimi.sms.entity.enums.StaffType;
+import com.myhaimi.sms.modules.files.FileObjectDTO;
+import com.myhaimi.sms.modules.files.FileService;
 import com.myhaimi.sms.repository.SchoolRepo;
 import com.myhaimi.sms.repository.StaffDocumentRepo;
 import com.myhaimi.sms.repository.StaffRepo;
@@ -28,8 +32,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -49,6 +56,7 @@ public class StaffService {
     private final StaffRoleMappingRepository    staffRoleMappingRepository;
     private final StaffDocumentRepo             staffDocumentRepo;
     private final ObjectMapper                  objectMapper;
+    private final FileService                   fileService;
 
     // ── Tenant helper ──────────────────────────────────────────────────────────
 
@@ -180,6 +188,7 @@ public class StaffService {
         dto.setPhone(s.getPhone());
         dto.setEmail(s.getEmail());
         dto.setPhotoUrl(s.getPhotoUrl());
+        dto.setProfilePhotoFileId(s.getProfilePhotoFileId());
         dto.setStaffType(s.getStaffType());
         dto.setStatus(s.getStatus());
         dto.setEmploymentType(s.getEmploymentType());
@@ -483,5 +492,56 @@ public class StaffService {
         dto.setProfileCompleteness(computeProfileCompleteness(s, roles, subjects, user, schoolDefaultWeeklyLoad));
 
         return dto;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // File integration — staff profile photo upload
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Upload a profile photo for a staff member and store only the FileObject id.
+     * The frontend must call GET /api/files/{profilePhotoFileId}/content
+     * to obtain the image bytes for display.
+     *
+     * POST /api/staff/{staffId}/profile-photo
+     */
+    @Transactional
+    public StaffSummaryDTO uploadProfilePhoto(Integer staffId, MultipartFile file, Authentication auth) {
+        Integer schoolId = requireSchoolId();
+
+        Staff staff = staffRepo.findById(staffId)
+                .filter(s -> s.getSchool().getId().equals(schoolId))
+                .orElseThrow(() -> new IllegalArgumentException("Staff not found."));
+
+        Integer uploadedBy = resolveUserId(auth);
+
+        // FileService enforces: jpeg/png/webp only, max 2 MB
+        FileObjectDTO fo = fileService.uploadForModule(
+                file,
+                FileCategory.PROFILE_PHOTO,
+                "STAFF",
+                staffId.toString(),
+                FileVisibility.STUDENT_VISIBLE,
+                uploadedBy);
+
+        // Store only the FileObject id — never set photoUrl to a /download-url path
+        staff.setProfilePhotoFileId(fo.getId());
+        staffRepo.save(staff);
+
+        // Return a lightweight summary DTO
+        StaffSummaryDTO dto = new StaffSummaryDTO();
+        dto.setId(staff.getId());
+        dto.setFullName(staff.getFullName());
+        dto.setProfilePhotoFileId(staff.getProfilePhotoFileId());
+        return dto;
+    }
+
+    // ── helper: resolve userId from authentication ────────────────────────────
+
+    private Integer resolveUserId(Authentication auth) {
+        if (auth == null) return null;
+        return userRepo.findFirstByEmailIgnoreCase(auth.getName())
+                .map(User::getId)
+                .orElse(null);
     }
 }

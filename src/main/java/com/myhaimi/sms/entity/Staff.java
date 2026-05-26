@@ -50,6 +50,14 @@ public class Staff {
     @Column(name = "photo_url", length = 512)
     private String photoUrl;
 
+    /**
+     * FK to file_objects.id — uploaded profile photo.
+     * Use GET /api/files/{profilePhotoFileId}/content (blob) to display.
+     * Null = no photo uploaded yet.
+     */
+    @Column(name = "profile_photo_file_id")
+    private Integer profilePhotoFileId;
+
     // ── Staff classification ──────────────────────────────────────────────────
 
     @Enumerated(EnumType.STRING)
