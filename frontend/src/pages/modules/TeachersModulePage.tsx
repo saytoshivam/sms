@@ -157,6 +157,7 @@ function EF({ label, flex, children }: { label: string; flex?: string; children:
 
 function EditModal({ staffId, initial, subjects, busy, onSave, onClose }: { staffId: number; initial: EditDraft; subjects: SubjectCatalogRow[]; busy: boolean; onSave: (id: number, body: object) => void; onClose: () => void; }) {
   const [d, setD] = useState(initial);
+  const [subjectSearch, setSubjectSearch] = useState('');
 
   const save = () => {
     if (!d.fullName.trim()) { toast.error('Validation', 'Full name is required.'); return; }
@@ -238,17 +239,62 @@ function EditModal({ staffId, initial, subjects, busy, onSave, onClose }: { staf
 
         {d.roles.includes('TEACHER') && (
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Teachable Subjects ({d.teachableSubjectIds.length})</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 150, overflowY: 'auto', padding: 6, border: '1px solid rgba(15,23,42,0.08)', borderRadius: 8 }}>
-              {subjects.length === 0
-                ? <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)' }}>No subjects yet.</span>
-                : subjects.map(s => { const on = d.teachableSubjectIds.includes(s.id); return (
-                    <button key={s.id} type="button" title={s.name} onClick={() => toggleSub(s.id)}
-                      style={{ padding: '3px 9px', borderRadius: 999, border: on ? '1.5px solid #16a34a' : '1px solid rgba(15,23,42,0.13)', background: on ? 'rgba(22,163,74,0.1)' : '#fff', color: on ? '#166534' : '#475569', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-                      {s.code}
-                    </button>
-                  ); })}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(15,23,42,0.45)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Teachable Subjects
+                {d.teachableSubjectIds.length > 0 && (
+                  <span style={{ marginLeft: 6, background: 'rgba(22,163,74,0.12)', color: '#166534', borderRadius: 999, padding: '1px 7px', fontSize: 11, fontWeight: 800 }}>
+                    {d.teachableSubjectIds.length} selected
+                  </span>
+                )}
+              </div>
+              {d.teachableSubjectIds.length > 0 && (
+                <button type="button" onClick={() => setD(p => ({ ...p, teachableSubjectIds: [] }))}
+                  style={{ fontSize: 11, color: '#b91c1c', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 700 }}>
+                  Clear all
+                </button>
+              )}
             </div>
+            {subjects.length === 0 ? (
+              <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)' }}>No subjects configured yet.</span>
+            ) : (
+              <div style={{ border: '1px solid rgba(15,23,42,0.1)', borderRadius: 10, overflow: 'hidden' }}>
+                {/* Search input */}
+                <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(15,23,42,0.07)', background: 'rgba(15,23,42,0.02)' }}>
+                  <input
+                    value={subjectSearch}
+                    onChange={e => setSubjectSearch(e.target.value)}
+                    placeholder="Search subject by name or code…"
+                    style={{ width: '100%', fontSize: 13, padding: '5px 10px', border: '1px solid rgba(15,23,42,0.12)', borderRadius: 7, outline: 'none', background: '#fff', boxSizing: 'border-box' }}
+                  />
+                </div>
+                {/* Subject chips */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 160, overflowY: 'auto', padding: 8 }}>
+                  {subjects
+                    .filter(s => {
+                      const q = subjectSearch.trim().toLowerCase();
+                      return !q || s.code.toLowerCase().includes(q) || s.name.toLowerCase().includes(q);
+                    })
+                    .map(s => {
+                      const on = d.teachableSubjectIds.includes(s.id);
+                      return (
+                        <button key={s.id} type="button" title={s.name} onClick={() => toggleSub(s.id)}
+                          style={{ padding: '4px 11px', borderRadius: 999, border: on ? '1.5px solid #16a34a' : '1px solid rgba(15,23,42,0.13)', background: on ? 'rgba(22,163,74,0.1)' : '#fff', color: on ? '#166534' : '#475569', fontWeight: 700, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {on && <span style={{ fontSize: 10 }}>✓</span>}
+                          <span>{s.code}</span>
+                          <span style={{ fontWeight: 400, color: on ? '#15803d' : 'rgba(15,23,42,0.4)', fontSize: 11 }}>{s.name}</span>
+                        </button>
+                      );
+                    })}
+                  {subjects.filter(s => {
+                    const q = subjectSearch.trim().toLowerCase();
+                    return !q || s.code.toLowerCase().includes(q) || s.name.toLowerCase().includes(q);
+                  }).length === 0 && (
+                    <span style={{ fontSize: 12, color: 'rgba(15,23,42,0.4)', padding: '4px 2px' }}>No subjects match "{subjectSearch}"</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
