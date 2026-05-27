@@ -9,7 +9,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.BindingResult;
@@ -187,6 +189,37 @@ public class FeeSetupController {
                 academicYearId, feePlanId, feeHeadId,
                 status, dueFrom, dueTo, search);
         return ResponseEntity.ok(summary);
+    }
+
+    /**
+     * CSV export of all demands matching the given filters (no pagination).
+     * Accepts the same filter params as {@code GET /demands}.
+     * Returns {@code text/csv} with a {@code Content-Disposition: attachment} header.
+     */
+    @GetMapping("/demands/export")
+    public ResponseEntity<byte[]> exportDemandsCsv(
+            @RequestParam(required = false) Integer studentId,
+            @RequestParam(required = false) Integer classGroupId,
+            @RequestParam(required = false) Integer gradeLevel,
+            @RequestParam(required = false) String  sectionName,
+            @RequestParam(required = false) Integer academicYearId,
+            @RequestParam(required = false) Integer feePlanId,
+            @RequestParam(required = false) Integer feeHeadId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueTo) {
+
+        String csv = feeDemandService.exportDemandsCsv(
+                studentId, classGroupId, gradeLevel, sectionName,
+                academicYearId, feePlanId, feeHeadId,
+                status, dueFrom, dueTo, search);
+        byte[] bytes = csv.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"student-dues.csv\"")
+                .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))
+                .contentLength(bytes.length)
+                .body(bytes);
     }
 
     // ─── Fee Plan Items ───────────────────────────────────────────────────────

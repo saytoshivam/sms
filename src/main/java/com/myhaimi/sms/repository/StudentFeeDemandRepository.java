@@ -73,6 +73,43 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
             @Param("dueTo")          LocalDate dueTo);
 
     /**
+     * Full (un-paginated) demand list with the same filters as {@link #findFilteredPaged}.
+     * Used for CSV export — returns all matching rows ordered by due date.
+     */
+    @Query("""
+            SELECT d FROM StudentFeeDemand d
+            WHERE d.school.id = :schoolId
+              AND (:studentId      IS NULL OR d.student.id                     = :studentId)
+              AND (:academicYearId IS NULL OR d.academicYear.id               = :academicYearId)
+              AND (:feePlanId      IS NULL OR d.feePlan.id                     = :feePlanId)
+              AND (:feeHeadId      IS NULL OR d.feeHead.id                     = :feeHeadId)
+              AND (:classGroupId   IS NULL OR d.student.classGroup.id          = :classGroupId)
+              AND (:gradeLevel     IS NULL OR d.student.classGroup.gradeLevel  = :gradeLevel)
+              AND (:sectionName    IS NULL OR d.student.classGroup.section     = :sectionName)
+              AND (:status         IS NULL OR d.status                         = :status)
+              AND (:dueFrom        IS NULL OR d.dueDate                       >= :dueFrom)
+              AND (:dueTo          IS NULL OR d.dueDate                       <= :dueTo)
+              AND (:search         IS NULL OR LOWER(d.student.firstName)   LIKE :search
+                                          OR LOWER(d.student.lastName)    LIKE :search
+                                          OR LOWER(d.student.admissionNo) LIKE :search
+                                          OR LOWER(d.demandNo)            LIKE :search)
+            ORDER BY d.dueDate ASC, d.id ASC
+            """)
+    List<StudentFeeDemand> findFilteredAll(
+            @Param("schoolId")       Integer schoolId,
+            @Param("studentId")      Integer studentId,
+            @Param("academicYearId") Integer academicYearId,
+            @Param("feePlanId")      Integer feePlanId,
+            @Param("feeHeadId")      Integer feeHeadId,
+            @Param("classGroupId")   Integer classGroupId,
+            @Param("gradeLevel")     Integer gradeLevel,
+            @Param("sectionName")    String sectionName,
+            @Param("status")         StudentFeeDemandStatus status,
+            @Param("dueFrom")        LocalDate dueFrom,
+            @Param("dueTo")          LocalDate dueTo,
+            @Param("search")         String search);
+
+    /**
      * Paginated demand list with full filter support.
      * {@code classGroupId} = exact class+section; {@code gradeLevel} = class only;
      * {@code sectionName} = section only.  At most one of the three is non-null at a time.

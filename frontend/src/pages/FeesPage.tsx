@@ -637,6 +637,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   const [searchInput, setSearchInput]       = useState('');
   const [search, setSearch]                 = useState(''); // debounced
   const [moreOpen, setMoreOpen]             = useState(false);
+  const [exporting, setExporting]           = useState(false);
 
   // ── Pagination state ──────────────────────────────────────────────────────
   const [page, setPage]         = useState(0);
@@ -804,6 +805,26 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
     setSearchInput(''); setSearch(''); setPage(0);
   }
 
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const qs = buildQs();
+      const resp = await api.get<string>(`/api/fees/demands/export?${qs}`, {
+        responseType: 'blob' as const,
+      });
+      const url  = URL.createObjectURL(new Blob([resp.data as unknown as BlobPart], { type: 'text/csv' }));
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'student-dues.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error('Export failed', formatApiError(e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="stack">
 
@@ -936,10 +957,11 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
               : `Showing ${firstItem}–${lastItem} of ${totalElements.toLocaleString('en-IN')}`
           }
         </div>
-        <button type="button" className="btn secondary" disabled
-          title="Export will be available after report export is enabled."
-          style={{ fontSize: 12, padding: '6px 12px', opacity: 0.5, cursor: 'not-allowed' }}>
-          ⬇ Export CSV
+        <button type="button" className="btn secondary"
+          disabled={exporting || totalElements === 0}
+          onClick={exportCsv}
+          style={{ fontSize: 12, padding: '6px 12px' }}>
+          {exporting ? '⏳ Exporting…' : '⬇ Export CSV'}
         </button>
       </div>
 

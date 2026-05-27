@@ -380,6 +380,58 @@ public class FeeDemandService {
         return result;
     }
 
+    // ─── CSV Export ───────────────────────────────────────────────────────────
+
+    /**
+     * Builds a UTF-8 CSV string for all demands matching the given filters.
+     * Columns: Demand No, Student Name, Admission No, Class/Section,
+     *          Fee Plan, Fee Head, Installment, Due Date,
+     *          Payable, Paid, Balance, Status.
+     */
+    @Transactional(readOnly = true)
+    public String exportDemandsCsv(
+            Integer studentId, Integer classGroupId, Integer gradeLevel, String sectionName,
+            Integer academicYearId, Integer feePlanId, Integer feeHeadId, String statusStr,
+            LocalDate dueFrom, LocalDate dueTo, String search) {
+
+        Integer schoolId = requireSchoolId();
+        StudentFeeDemandStatus status = statusStr != null
+                ? StudentFeeDemandStatus.valueOf(statusStr.toUpperCase()) : null;
+        String searchPat = (search != null && !search.isBlank())
+                ? "%" + search.trim().toLowerCase() + "%" : null;
+
+        List<StudentFeeDemand> demands = demandRepository.findFilteredAll(
+                schoolId, studentId, academicYearId, feePlanId, feeHeadId,
+                classGroupId, gradeLevel, sectionName, status, dueFrom, dueTo, searchPat);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Demand No,Student Name,Admission No,Class / Section,Fee Plan,Fee Head,Installment,Due Date,Payable (INR),Paid (INR),Balance (INR),Status\n");
+        for (StudentFeeDemand d : demands) {
+            sb.append(csvCell(d.getDemandNo())).append(',');
+            String name = (d.getStudent().getFirstName()
+                    + (d.getStudent().getLastName() != null ? " " + d.getStudent().getLastName() : "")).trim();
+            sb.append(csvCell(name)).append(',');
+            sb.append(csvCell(d.getStudent().getAdmissionNo())).append(',');
+            com.myhaimi.sms.entity.ClassGroup cg = d.getStudent().getClassGroup();
+            sb.append(csvCell(cg != null ? cg.getDisplayName() : "")).append(',');
+            sb.append(csvCell(d.getFeePlan().getName())).append(',');
+            sb.append(csvCell(d.getFeeHead().getName())).append(',');
+            sb.append(csvCell(d.getInstallment() != null ? d.getInstallment().getName() : "")).append(',');
+            sb.append(csvCell(d.getDueDate() != null ? d.getDueDate().toString() : "")).append(',');
+            sb.append(d.getPayableAmount()).append(',');
+            sb.append(d.getPaidAmount()).append(',');
+            sb.append(d.getBalanceAmount()).append(',');
+            sb.append(csvCell(d.getStatus().name())).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** Quotes a CSV cell and escapes internal double-quotes. */
+    private static String csvCell(String v) {
+        if (v == null) return "\"\"";
+        return "\"" + v.replace("\"", "\"\"") + "\"";
+    }
+
     // ─── Query methods ────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
