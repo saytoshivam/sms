@@ -75,6 +75,7 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
     /**
      * Full (un-paginated) demand list with the same filters as {@link #findFilteredPaged}.
      * Used for CSV export — returns all matching rows ordered by due date.
+     * {@code statusIn} must never be null/empty — pass all statuses for "no filter".
      */
     @Query("""
             SELECT d FROM StudentFeeDemand d
@@ -86,7 +87,11 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
               AND (:classGroupId   IS NULL OR d.student.classGroup.id          = :classGroupId)
               AND (:gradeLevel     IS NULL OR d.student.classGroup.gradeLevel  = :gradeLevel)
               AND (:sectionName    IS NULL OR d.student.classGroup.section     = :sectionName)
-              AND (:status         IS NULL OR d.status                         = :status)
+              AND d.status IN :statusIn
+              AND (:qsMinBalance   IS NULL OR d.balanceAmount                  > :qsMinBalance)
+              AND (:qsDueBefore    IS NULL OR d.dueDate                        < :qsDueBefore)
+              AND (:qsDueAfter     IS NULL OR d.dueDate                        > :qsDueAfter)
+              AND (:qsDueOn        IS NULL OR d.dueDate                        = :qsDueOn)
               AND (:dueFrom        IS NULL OR d.dueDate                       >= :dueFrom)
               AND (:dueTo          IS NULL OR d.dueDate                       <= :dueTo)
               AND (:search         IS NULL OR LOWER(d.student.firstName)   LIKE :search
@@ -104,16 +109,19 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
             @Param("classGroupId")   Integer classGroupId,
             @Param("gradeLevel")     Integer gradeLevel,
             @Param("sectionName")    String sectionName,
-            @Param("status")         StudentFeeDemandStatus status,
+            @Param("statusIn")       java.util.Collection<StudentFeeDemandStatus> statusIn,
+            @Param("qsMinBalance")   java.math.BigDecimal qsMinBalance,
+            @Param("qsDueBefore")    LocalDate qsDueBefore,
+            @Param("qsDueAfter")     LocalDate qsDueAfter,
+            @Param("qsDueOn")        LocalDate qsDueOn,
             @Param("dueFrom")        LocalDate dueFrom,
             @Param("dueTo")          LocalDate dueTo,
             @Param("search")         String search);
 
     /**
      * Paginated demand list with full filter support.
-     * {@code classGroupId} = exact class+section; {@code gradeLevel} = class only;
-     * {@code sectionName} = section only.  At most one of the three is non-null at a time.
-     * Pass {@code search} as a pre-built LIKE pattern (e.g. {@code %term%}) or null.
+     * {@code statusIn} must never be null/empty — pass all statuses for "no filter".
+     * Quick-status conditions: {@code qsMinBalance} (balance > x), {@code qsDueBefore/After/On}.
      */
     @Query(value = """
             SELECT d FROM StudentFeeDemand d
@@ -125,7 +133,11 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
               AND (:classGroupId   IS NULL OR d.student.classGroup.id          = :classGroupId)
               AND (:gradeLevel     IS NULL OR d.student.classGroup.gradeLevel  = :gradeLevel)
               AND (:sectionName    IS NULL OR d.student.classGroup.section     = :sectionName)
-              AND (:status         IS NULL OR d.status                         = :status)
+              AND d.status IN :statusIn
+              AND (:qsMinBalance   IS NULL OR d.balanceAmount                  > :qsMinBalance)
+              AND (:qsDueBefore    IS NULL OR d.dueDate                        < :qsDueBefore)
+              AND (:qsDueAfter     IS NULL OR d.dueDate                        > :qsDueAfter)
+              AND (:qsDueOn        IS NULL OR d.dueDate                        = :qsDueOn)
               AND (:dueFrom        IS NULL OR d.dueDate                       >= :dueFrom)
               AND (:dueTo          IS NULL OR d.dueDate                       <= :dueTo)
               AND (:search         IS NULL OR LOWER(d.student.firstName)   LIKE :search
@@ -143,7 +155,11 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
               AND (:classGroupId   IS NULL OR d.student.classGroup.id          = :classGroupId)
               AND (:gradeLevel     IS NULL OR d.student.classGroup.gradeLevel  = :gradeLevel)
               AND (:sectionName    IS NULL OR d.student.classGroup.section     = :sectionName)
-              AND (:status         IS NULL OR d.status                         = :status)
+              AND d.status IN :statusIn
+              AND (:qsMinBalance   IS NULL OR d.balanceAmount                  > :qsMinBalance)
+              AND (:qsDueBefore    IS NULL OR d.dueDate                        < :qsDueBefore)
+              AND (:qsDueAfter     IS NULL OR d.dueDate                        > :qsDueAfter)
+              AND (:qsDueOn        IS NULL OR d.dueDate                        = :qsDueOn)
               AND (:dueFrom        IS NULL OR d.dueDate                       >= :dueFrom)
               AND (:dueTo          IS NULL OR d.dueDate                       <= :dueTo)
               AND (:search         IS NULL OR LOWER(d.student.firstName)   LIKE :search
@@ -160,7 +176,11 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
             @Param("classGroupId")   Integer classGroupId,
             @Param("gradeLevel")     Integer gradeLevel,
             @Param("sectionName")    String sectionName,
-            @Param("status")         StudentFeeDemandStatus status,
+            @Param("statusIn")       java.util.Collection<StudentFeeDemandStatus> statusIn,
+            @Param("qsMinBalance")   java.math.BigDecimal qsMinBalance,
+            @Param("qsDueBefore")    LocalDate qsDueBefore,
+            @Param("qsDueAfter")     LocalDate qsDueAfter,
+            @Param("qsDueOn")        LocalDate qsDueOn,
             @Param("dueFrom")        LocalDate dueFrom,
             @Param("dueTo")          LocalDate dueTo,
             @Param("search")         String search,

@@ -380,29 +380,68 @@ public class FeeDemandService {
         return result;
     }
 
+    // ─── Quick-status resolution ──────────────────────────────────────────────
+
+    private static final List<StudentFeeDemandStatus> ALL_DEMAND_STATUSES =
+            List.of(StudentFeeDemandStatus.values());
+
+    private record QuickStatusFilter(
+            List<StudentFeeDemandStatus> statusIn,
+            BigDecimal qsMinBalance,
+            LocalDate qsDueBefore,
+            LocalDate qsDueAfter,
+            LocalDate qsDueOn) {}
+
+    /**
+     * Translates the frontend {@code quickStatus} string (e.g. "OVERDUE", "DUE_TODAY")
+     * into repository-level filter parameters.
+     */
+    private QuickStatusFilter resolveQuickStatus(String quickStatus) {
+        LocalDate today = LocalDate.now();
+        if (quickStatus == null) return new QuickStatusFilter(ALL_DEMAND_STATUSES, null, null, null, null);
+        return switch (quickStatus.toUpperCase()) {
+            case "UNPAID"      -> new QuickStatusFilter(List.of(StudentFeeDemandStatus.UNPAID),    null,            null,  null,  null);
+            case "PARTIAL"     -> new QuickStatusFilter(List.of(StudentFeeDemandStatus.PARTIAL),   null,            null,  null,  null);
+            case "COLLECTED"   -> new QuickStatusFilter(List.of(StudentFeeDemandStatus.PAID),      null,            null,  null,  null);
+            case "CANCELLED"   -> new QuickStatusFilter(List.of(StudentFeeDemandStatus.CANCELLED), null,            null,  null,  null);
+            case "WAIVED"      -> new QuickStatusFilter(List.of(StudentFeeDemandStatus.WAIVED),    null,            null,  null,  null);
+            case "OUTSTANDING" -> new QuickStatusFilter(
+                    List.of(StudentFeeDemandStatus.UNPAID, StudentFeeDemandStatus.PARTIAL),
+                    BigDecimal.ZERO, null, null, null);
+            case "OVERDUE"     -> new QuickStatusFilter(
+                    List.of(StudentFeeDemandStatus.UNPAID, StudentFeeDemandStatus.PARTIAL),
+                    BigDecimal.ZERO, today, null, null);
+            case "DUE_TODAY"   -> new QuickStatusFilter(
+                    List.of(StudentFeeDemandStatus.UNPAID, StudentFeeDemandStatus.PARTIAL),
+                    BigDecimal.ZERO, null, null, today);
+            case "UPCOMING"    -> new QuickStatusFilter(
+                    List.of(StudentFeeDemandStatus.UNPAID, StudentFeeDemandStatus.PARTIAL),
+                    BigDecimal.ZERO, null, today, null);
+            default            -> new QuickStatusFilter(ALL_DEMAND_STATUSES, null, null, null, null);
+        };
+    }
+
     // ─── CSV Export ───────────────────────────────────────────────────────────
 
     /**
      * Builds a UTF-8 CSV string for all demands matching the given filters.
-     * Columns: Demand No, Student Name, Admission No, Class/Section,
-     *          Fee Plan, Fee Head, Installment, Due Date,
-     *          Payable, Paid, Balance, Status.
      */
     @Transactional(readOnly = true)
     public String exportDemandsCsv(
             Integer studentId, Integer classGroupId, Integer gradeLevel, String sectionName,
-            Integer academicYearId, Integer feePlanId, Integer feeHeadId, String statusStr,
+            Integer academicYearId, Integer feePlanId, Integer feeHeadId, String quickStatus,
             LocalDate dueFrom, LocalDate dueTo, String search) {
 
         Integer schoolId = requireSchoolId();
-        StudentFeeDemandStatus status = statusStr != null
-                ? StudentFeeDemandStatus.valueOf(statusStr.toUpperCase()) : null;
+        QuickStatusFilter qs = resolveQuickStatus(quickStatus);
         String searchPat = (search != null && !search.isBlank())
                 ? "%" + search.trim().toLowerCase() + "%" : null;
 
         List<StudentFeeDemand> demands = demandRepository.findFilteredAll(
                 schoolId, studentId, academicYearId, feePlanId, feeHeadId,
-                classGroupId, gradeLevel, sectionName, status, dueFrom, dueTo, searchPat);
+                classGroupId, gradeLevel, sectionName,
+                qs.statusIn(), qs.qsMinBalance(), qs.qsDueBefore(), qs.qsDueAfter(), qs.qsDueOn(),
+                dueFrom, dueTo, searchPat);
 
         StringBuilder sb = new StringBuilder();
         sb.append("Demand No,Student Name,Admission No,Class / Section,Fee Plan,Fee Head,Installment,Due Date,Payable (INR),Paid (INR),Balance (INR),Status\n");
@@ -460,19 +499,19 @@ public class FeeDemandService {
 
     /**
      * Paginated demand list for the Student Dues admin screen.
+     * {@code quickStatus} maps operational view (OVERDUE, DUE_TODAY, OUTSTANDING, …) to SQL conditions.
      * Pass {@code classGroupId} for exact class+section, {@code gradeLevel} for class-only,
-     * {@code sectionName} for section-only.  At most one of the three should be non-null.
+     * {@code sectionName} for section-only.
      */
     @Transactional(readOnly = true)
     public Page<StudentFeeDemandDTO> listDemandsPaged(
             Integer studentId, Integer classGroupId, Integer gradeLevel, String sectionName,
-            Integer academicYearId, Integer feePlanId, Integer feeHeadId, String statusStr,
+            Integer academicYearId, Integer feePlanId, Integer feeHeadId, String quickStatus,
             LocalDate dueFrom, LocalDate dueTo, String search,
             int page, int size) {
 
         Integer schoolId = requireSchoolId();
-        StudentFeeDemandStatus status = statusStr != null
-                ? StudentFeeDemandStatus.valueOf(statusStr.toUpperCase()) : null;
+        QuickStatusFilter qs = resolveQuickStatus(quickStatus);
         String searchPat = (search != null && !search.isBlank())
                 ? "%" + search.trim().toLowerCase() + "%" : null;
 
@@ -482,7 +521,8 @@ public class FeeDemandService {
         return demandRepository.findFilteredPaged(
                 schoolId, studentId, academicYearId, feePlanId, feeHeadId,
                 classGroupId, gradeLevel, sectionName,
-                status, dueFrom, dueTo, searchPat, pageable)
+                qs.statusIn(), qs.qsMinBalance(), qs.qsDueBefore(), qs.qsDueAfter(), qs.qsDueOn(),
+                dueFrom, dueTo, searchPat, pageable)
                 .map(this::toDTO);
     }
 

@@ -19,7 +19,7 @@ type FeeFrequency = 'ONE_TIME' | 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY' | 'YEAR
 
 const FEE_TYPES: FeeType[] = ['TUITION', 'ADMISSION', 'EXAM', 'LIBRARY', 'LAB', 'TRANSPORT', 'HOSTEL', 'ACTIVITY', 'ANNUAL', 'OTHER'];
 const FEE_FREQUENCIES: FeeFrequency[] = ['ONE_TIME', 'MONTHLY', 'QUARTERLY', 'HALF_YEARLY', 'YEARLY', 'CUSTOM'];
-const SCOPE_TYPES: ApplicableScopeType[] = ['SCHOOL', 'CLASS', 'SECTION', 'STUDENT'];
+// SCOPE_TYPES used for iteration in UI when needed
 
 const FEE_TYPE_LABELS: Record<FeeType, string> = {
   TUITION: 'Tuition', ADMISSION: 'Admission', EXAM: 'Exam', LIBRARY: 'Library',
@@ -253,7 +253,7 @@ type ReceiptRegisterRow = {
   cancelledAt?: string | null;
 };
 
-// ─── Permission helpers ───────────────────────────────────────────────────────
+// ─── Permission helpers ────────────────────────���──────────────────────────────
 
 type FeePermissions = {
   canEdit: boolean;     // SCHOOL_ADMIN | ACCOUNTANT — fee heads, plans, plan items
@@ -414,7 +414,7 @@ function ReceiptSummaryModal({ payment, onClose }: { payment: FeePaymentDTO; onC
   );
 }
 
-// ─── Collect Payment Modal ─────────────────────────────────────────────────────
+// ─── Collect Payment Modal ──────────────────────────────────────��──────────────
 
 interface CollectPaymentModalProps {
   studentId: number;
@@ -630,7 +630,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   const [feePlanFilter, setFeePlanFilter]   = useState('');
   const [gradeFilter, setGradeFilter]       = useState('');
   const [sectionFilter, setSectionFilter]   = useState('');
-  const [statusFilter, setStatusFilter]     = useState('');
+  const [quickStatus, setQuickStatus]       = useState('');   // operational status filter
   const [feeHeadFilter, setFeeHeadFilter]   = useState('');
   const [dueFrom, setDueFrom]               = useState('');
   const [dueTo, setDueTo]                   = useState('');
@@ -654,7 +654,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   }, [searchInput]);
 
   // Reset to page 0 on any filter change
-  useEffect(() => { setPage(0); }, [academicYearId, feePlanFilter, gradeFilter, sectionFilter, statusFilter, feeHeadFilter, dueFrom, dueTo]);
+  useEffect(() => { setPage(0); }, [academicYearId, feePlanFilter, gradeFilter, sectionFilter, quickStatus, feeHeadFilter, dueFrom, dueTo]);
 
   // ── Reference data ────────────────────────────────────────────────────────
   const academicYearsQ = useQuery({
@@ -705,19 +705,14 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
     return match ? String(match.id) : '';
   }, [classGroups, gradeFilter, sectionFilter]);
 
-  // ── Build query string (shared by both queries) ───────────────────────────
-  // Strategy:
-  //   grade + section selected → resolve exact classGroupId (server filters by PK)
-  //   grade only              → send gradeLevel  param (server filters by grade_level column)
-  //   section only            → send sectionName param (server filters by section column)
-  //   neither                 → no class filter
-  const buildQs = useCallback((extra?: Record<string, string>) => {
+  // ── Build query string ────────────────────────────────────────────────────
+  // skipQuickStatus=true → used by the summary endpoint (KPI cards are always global)
+  const buildQs = useCallback((extra?: Record<string, string>, skipQuickStatus = false) => {
     const p = new URLSearchParams();
     if (academicYearId) p.append('academicYearId', academicYearId);
     if (feePlanFilter)  p.append('feePlanId', feePlanFilter);
     if (feeHeadFilter)  p.append('feeHeadId', feeHeadFilter);
     if (gradeFilter && sectionFilter) {
-      // Both selected: use resolved exact classGroupId when found, else fall back to both params
       if (apiClassGroupId) {
         p.append('classGroupId', apiClassGroupId);
       } else {
@@ -729,17 +724,17 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
     } else if (sectionFilter) {
       p.append('sectionName', sectionFilter);
     }
-    if (statusFilter) p.append('status', statusFilter);
-    if (dueFrom)      p.append('dueFrom', dueFrom);
-    if (dueTo)        p.append('dueTo', dueTo);
+    if (!skipQuickStatus && quickStatus) p.append('quickStatus', quickStatus);
+    if (dueFrom)       p.append('dueFrom', dueFrom);
+    if (dueTo)         p.append('dueTo', dueTo);
     if (search.trim()) p.append('search', search.trim());
     if (extra) Object.entries(extra).forEach(([k, v]) => p.append(k, v));
     return p.toString();
-  }, [academicYearId, feePlanFilter, feeHeadFilter, apiClassGroupId, gradeFilter, sectionFilter, statusFilter, dueFrom, dueTo, search]);
+  }, [academicYearId, feePlanFilter, feeHeadFilter, apiClassGroupId, gradeFilter, sectionFilter, quickStatus, dueFrom, dueTo, search]);
 
-  // ── Paginated demands query ───��───────────────────────────────────────────
+  // ── Paginated demands query ───────────────────────────────────────��────────
   const demandsQ = useQuery({
-    queryKey: ['fee-demands-paged', academicYearId, feePlanFilter, feeHeadFilter, gradeFilter, sectionFilter, apiClassGroupId, statusFilter, dueFrom, dueTo, search, page, pageSize],
+    queryKey: ['fee-demands-paged', academicYearId, feePlanFilter, feeHeadFilter, gradeFilter, sectionFilter, apiClassGroupId, quickStatus, dueFrom, dueTo, search, page, pageSize],
     queryFn: async () => {
       const qs = buildQs({ page: String(page), size: String(pageSize) });
       return (await api.get<SpringPage<StudentFeeDemand>>(`/api/fees/demands?${qs}`)).data;
@@ -750,14 +745,14 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   const demands       = demandsQ.data?.content ?? [];
   const totalElements = demandsQ.data?.totalElements ?? 0;
   const totalPages    = demandsQ.data?.totalPages ?? 1;
-  // All filtering is now fully server-side; no client-side post-filter needed.
   const visibleDemands = demands;
+
+  // ── Summary KPI query — does NOT include quickStatus (KPIs show global totals) ──
   const summaryQ = useQuery({
-    queryKey: ['fee-demands-summary', academicYearId, feePlanFilter, feeHeadFilter, gradeFilter, sectionFilter, apiClassGroupId, statusFilter, dueFrom, dueTo, search],
+    queryKey: ['fee-demands-summary', academicYearId, feePlanFilter, feeHeadFilter, gradeFilter, sectionFilter, apiClassGroupId, dueFrom, dueTo, search],
     queryFn: async () => {
-      const qs = buildQs();
+      const qs = buildQs(undefined, true); // skipQuickStatus=true
       const data = (await api.get<DemandSummary>(`/api/fees/demands/summary?${qs}`)).data;
-      // safety: backend might return null/empty; guard it
       if (!data || typeof data !== 'object') throw new Error('Empty summary response');
       return data;
     },
@@ -797,11 +792,11 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   // ── Pagination helpers ────────────────────────────────────────────────────
   const firstItem  = totalElements === 0 ? 0 : page * pageSize + 1;
   const lastItem   = Math.min((page + 1) * pageSize, totalElements);
-  const hasFilters = !!(academicYearId || feePlanFilter || feeHeadFilter || gradeFilter || sectionFilter || statusFilter || dueFrom || dueTo || searchInput);
+  const hasFilters = !!(academicYearId || feePlanFilter || feeHeadFilter || gradeFilter || sectionFilter || quickStatus || dueFrom || dueTo || searchInput);
 
   function clearFilters() {
     setAcademicYearId(''); setFeePlanFilter(''); setGradeFilter(''); setSectionFilter('');
-    setStatusFilter(''); setFeeHeadFilter(''); setDueFrom(''); setDueTo('');
+    setQuickStatus(''); setFeeHeadFilter(''); setDueFrom(''); setDueTo('');
     setSearchInput(''); setSearch(''); setPage(0);
   }
 
@@ -828,52 +823,53 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   return (
     <div className="stack">
 
-      {/* ── KPI Cards ─────────────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10 }}>
-        {/* Total Demands */}
-        <div className="card" style={{ borderTop: '3px solid #6366f1', padding: '12px 14px' }}>
-          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Total Demands</div>
-          {summaryIsLoading
-            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#6366f1' }}>…</div>
-            : <div style={{ fontSize: 20, fontWeight: 800, color: '#6366f1', lineHeight: 1.3 }}>{(summary?.totalDemands ?? totalElements).toLocaleString('en-IN')}</div>
-          }
-        </div>
-        {/* Outstanding */}
-        <div className="card" style={{ borderTop: '3px solid #f59e0b', padding: '12px 14px' }}>
-          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Outstanding</div>
-          {summaryIsLoading
-            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#f59e0b' }}>…</div>
-            : <div style={{ fontSize: 20, fontWeight: 800, color: '#f59e0b', lineHeight: 1.3 }}>{fmtCompact(summary?.totalOutstanding)}</div>
-          }
-        </div>
-        {/* Collected */}
-        <div className="card" style={{ borderTop: '3px solid #16a34a', padding: '12px 14px' }}>
-          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Collected</div>
-          {summaryIsLoading
-            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#16a34a' }}>…</div>
-            : <div style={{ fontSize: 20, fontWeight: 800, color: '#16a34a', lineHeight: 1.3 }}>{fmtCompact(summary?.totalPaid)}</div>
-          }
-        </div>
-        {/* Overdue */}
-        <div className="card" style={{ borderTop: '3px solid #dc2626', padding: '12px 14px' }}>
-          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Overdue</div>
-          {summaryIsLoading
-            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#dc2626' }}>…</div>
-            : <>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#dc2626', lineHeight: 1.3 }}>{fmtCompact(summary?.overdueAmount)}</div>
-                <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{(summary?.overdueCount ?? 0).toLocaleString('en-IN')} demands</div>
-              </>
-          }
-        </div>
-        {/* Partial Outstanding */}
-        <div className="card" style={{ borderTop: '3px solid #3b82f6', padding: '12px 14px' }}>
-          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Partial Outstanding</div>
-          {summaryIsLoading
-            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#3b82f6' }}>…</div>
-            : <div style={{ fontSize: 20, fontWeight: 800, color: '#3b82f6', lineHeight: 1.3 }}>{fmtCompact(summary?.partialBalance)}</div>
-          }
-        </div>
-      </div>
+      {/* ── KPI Cards (clickable — apply quickStatus filter) ─────────────── */}
+      {(() => {
+        const kpiCard = (
+          label: string, color: string, qs: string,
+          content: React.ReactNode, sub?: React.ReactNode
+        ) => {
+          const isActive = quickStatus === qs;
+          return (
+            <div key={label} className="card" onClick={() => setQuickStatus(isActive ? '' : qs)}
+              style={{
+                borderTop: `3px solid ${color}`, padding: '12px 14px', cursor: 'pointer',
+                boxShadow: isActive ? `0 0 0 2px ${color}` : undefined,
+                background: isActive ? `${color}12` : undefined,
+                transition: 'box-shadow .15s, background .15s',
+              }}>
+              <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>
+                {label}{isActive && <span style={{ marginLeft: 6, color, fontSize: 9, fontWeight: 800 }}>▶ ACTIVE</span>}
+              </div>
+              {summaryIsLoading ? <div style={{ fontSize: 18, fontWeight: 800, color }}>…</div> : content}
+              {sub && !summaryIsLoading && sub}
+            </div>
+          );
+        };
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10 }}>
+            {kpiCard('Total Demands', '#6366f1', '', (
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#6366f1', lineHeight: 1.3 }}>
+                {(summary?.totalDemands ?? totalElements).toLocaleString('en-IN')}
+              </div>
+            ))}
+            {kpiCard('Outstanding', '#f59e0b', 'OUTSTANDING', (
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#f59e0b', lineHeight: 1.3 }}>{fmtCompact(summary?.totalOutstanding)}</div>
+            ))}
+            {kpiCard('Collected', '#16a34a', 'COLLECTED', (
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#16a34a', lineHeight: 1.3 }}>{fmtCompact(summary?.totalPaid)}</div>
+            ))}
+            {kpiCard('Overdue', '#dc2626', 'OVERDUE', (
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#dc2626', lineHeight: 1.3 }}>{fmtCompact(summary?.overdueAmount)}</div>
+            ), (
+              <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{(summary?.overdueCount ?? 0).toLocaleString('en-IN')} demands</div>
+            ))}
+            {kpiCard('Partial Outstanding', '#3b82f6', 'PARTIAL', (
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#3b82f6', lineHeight: 1.3 }}>{fmtCompact(summary?.partialBalance)}</div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* ── Filters ────────────────────────────────────────────────────��──── */}
       <div className="card" style={{ padding: '14px 16px' }}>
@@ -904,15 +900,25 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
               emptyValueLabel="All sections" />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 120 }}>
-            <label style={{ fontSize: 12 }}>Status</label>
-            <SelectKeeper value={statusFilter} onChange={setStatusFilter}
-              options={(['UNPAID', 'PARTIAL', 'PAID', 'WAIVED', 'CANCELLED'] as StudentFeeDemandStatus[]).map(s => ({ value: s, label: s }))}
+            <label style={{ fontSize: 12 }}>Quick Status</label>
+            <SelectKeeper value={quickStatus} onChange={v => { setQuickStatus(v); setPage(0); }}
+              options={[
+                { value: 'OUTSTANDING', label: 'Outstanding' },
+                { value: 'UNPAID',      label: 'Unpaid' },
+                { value: 'PARTIAL',     label: 'Partial' },
+                { value: 'COLLECTED',   label: 'Collected' },
+                { value: 'OVERDUE',     label: 'Overdue' },
+                { value: 'DUE_TODAY',   label: 'Due Today' },
+                { value: 'UPCOMING',    label: 'Upcoming' },
+                { value: 'CANCELLED',   label: 'Cancelled' },
+                { value: 'WAIVED',      label: 'Waived' },
+              ]}
               emptyValueLabel="All" />
           </div>
           <div className="stack" style={{ flex: 2, minWidth: 200 }}>
             <label style={{ fontSize: 12 }}>Search</label>
             <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
-              placeholder="Student name, admission no, demand no…" />
+              placeholder="Search student name, admission no, demand no..." />
           </div>
           <div className="row" style={{ gap: 6, alignSelf: 'flex-end' }}>
             <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '8px 12px' }}
@@ -994,9 +1000,13 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
               <tbody>
                 {visibleDemands.map(d => {
                   const sp = DEMAND_STATUS_PILL[d.status] ?? { bg: '#f1f5f9', color: '#64748b' };
-                  const dueDateStr = formatJsonDate(d.dueDate);
-                  const isOverdue = dueDateStr < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
-                  const humanDate = fmtHumanDate(d.dueDate);
+                  const dueDateStr  = formatJsonDate(d.dueDate);
+                  const humanDate   = fmtHumanDate(d.dueDate);
+                  const bal         = toNum(d.balanceAmount);
+                  const hasBalance  = bal > 0 && (d.status === 'UNPAID' || d.status === 'PARTIAL');
+                  const isOverdue   = hasBalance && dueDateStr < today;
+                  const isDueToday  = hasBalance && dueDateStr === today;
+                  const isUpcoming  = hasBalance && dueDateStr > today;
                   const hasEnrollment = !!d.classGroupName;
                   return (
                     <tr key={d.id} style={{ borderBottom: '1px solid #f1f5f9', background: isOverdue ? 'rgba(220,38,38,0.03)' : undefined }}>
@@ -1015,16 +1025,33 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                         <div style={{ color: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}>{d.feeHeadCode}</div>
                       </td>
                       <td style={{ padding: '8px 10px', fontSize: 12 }}>{d.installmentName}</td>
-                      <td style={{ padding: '8px 10px', fontSize: 12, color: isOverdue ? '#b91c1c' : '#475569', fontWeight: isOverdue ? 600 : 400, whiteSpace: 'nowrap' }}>
-                        {humanDate}{isOverdue && <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#dc2626' }}>· Overdue</span>}
+                      <td style={{ padding: '8px 10px', fontSize: 12, whiteSpace: 'nowrap' }}>
+                        <span style={{ color: isOverdue ? '#b91c1c' : isDueToday ? '#b45309' : '#475569', fontWeight: (isOverdue || isDueToday) ? 600 : 400 }}>
+                          {humanDate}
+                        </span>
+                        {isOverdue  && <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#dc2626' }}>· Overdue</span>}
+                        {isDueToday && <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#b45309' }}>· Due Today</span>}
+                        {isUpcoming && <span style={{ marginLeft: 4, fontSize: 10, color: '#64748b' }}>· Upcoming</span>}
                       </td>
                       <td style={{ padding: '8px 10px', fontWeight: 600 }}>{fmt(d.payableAmount)}</td>
                       <td style={{ padding: '8px 10px', color: '#16a34a' }}>{fmt(d.paidAmount)}</td>
                       <td style={{ padding: '8px 10px', fontWeight: 600, color: toNum(d.balanceAmount) > 0 ? '#b45309' : '#166534' }}>{fmt(d.balanceAmount)}</td>
                       <td style={{ padding: '8px 10px' }}>
-                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700, background: sp.bg, color: sp.color }}>
-                          {d.status}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700, background: sp.bg, color: sp.color, width: 'fit-content' }}>
+                            {d.status}
+                          </span>
+                          {isOverdue && (
+                            <span style={{ display: 'inline-block', padding: '2px 6px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: '#fee2e2', color: '#991b1b', width: 'fit-content' }}>
+                              OVERDUE
+                            </span>
+                          )}
+                          {isDueToday && (
+                            <span style={{ display: 'inline-block', padding: '2px 6px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e', width: 'fit-content' }}>
+                              DUE TODAY
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: '8px 4px' }}>
                         <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
@@ -1350,7 +1377,7 @@ function TabFeeHeads({ perms }: { perms: FeePermissions }) {
   );
 }
 
-// ─── Installment editor ────────────────────────────────────────────────────────
+// ─── Installment editor ──────────────────────────────────────────────────���─────
 
 type InstDraft = { name: string; dueDate: string; amount: string; sequence: number };
 
@@ -1456,13 +1483,12 @@ interface FeeRulesGroupedProps {
   installmentItem: FeePlanItem | null;
   setInstallmentItem: (it: FeePlanItem | null) => void;
   scheduleStatus: (it: FeePlanItem) => 'missing' | 'invalid' | 'ready';
-  itemTargetLabel: (it: FeePlanItem) => string;
   overrideBadge: (it: FeePlanItem) => string | null;
   openEditItem: (it: FeePlanItem) => void;
   setDeleteItemTarget: (it: FeePlanItem) => void;
 }
 
-function FeeRulesGrouped({ items, classGroups, students, isEditable, installmentItem, setInstallmentItem, scheduleStatus, itemTargetLabel, overrideBadge, openEditItem, setDeleteItemTarget }: FeeRulesGroupedProps) {
+function FeeRulesGrouped({ items, classGroups, students, isEditable, installmentItem, setInstallmentItem, scheduleStatus, overrideBadge, openEditItem, setDeleteItemTarget }: FeeRulesGroupedProps) {
 
   function renderRow(it: FeePlanItem) {
     const instCount = it.installments?.length ?? 0;
@@ -2055,7 +2081,6 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
             installmentItem={installmentItem}
             setInstallmentItem={setInstallmentItem}
             scheduleStatus={scheduleStatus}
-            itemTargetLabel={itemTargetLabel}
             overrideBadge={overrideBadge}
             openEditItem={openEditItem}
             setDeleteItemTarget={setDeleteItemTarget}
@@ -2276,7 +2301,7 @@ function TabFeePlans({ schoolId, perms }: { schoolId: number | undefined; perms:
             <button type="button" className="btn" disabled={createMut.isPending} onClick={() => createMut.mutate()}>
               {createMut.isPending ? 'Creating…' : 'Create Plan'}
             </button>
-            <button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>Cancel</button>
+            <button type="button" className="btn secondary" onClick={() => { setShowCreate(false); setDraft(EMPTY_PLAN); }}>Cancel</button>
           </div>
         </div>
       )}

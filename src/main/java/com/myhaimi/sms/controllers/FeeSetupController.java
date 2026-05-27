@@ -152,8 +152,8 @@ public class FeeSetupController {
             @RequestParam(required = false) Integer academicYearId,
             @RequestParam(required = false) Integer feePlanId,
             @RequestParam(required = false) Integer feeHeadId,
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String  quickStatus,
+            @RequestParam(required = false) String  search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueTo,
             @RequestParam(defaultValue = "0") int page,
@@ -162,7 +162,7 @@ public class FeeSetupController {
         Page<StudentFeeDemandDTO> result = feeDemandService.listDemandsPaged(
                 studentId, classGroupId, gradeLevel, sectionName,
                 academicYearId, feePlanId, feeHeadId,
-                status, dueFrom, dueTo, search, page, size);
+                quickStatus, dueFrom, dueTo, search, page, size);
         return ResponseEntity.ok(result);
     }
 
@@ -205,15 +205,15 @@ public class FeeSetupController {
             @RequestParam(required = false) Integer academicYearId,
             @RequestParam(required = false) Integer feePlanId,
             @RequestParam(required = false) Integer feeHeadId,
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String  quickStatus,
+            @RequestParam(required = false) String  search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueTo) {
 
         String csv = feeDemandService.exportDemandsCsv(
                 studentId, classGroupId, gradeLevel, sectionName,
                 academicYearId, feePlanId, feeHeadId,
-                status, dueFrom, dueTo, search);
+                quickStatus, dueFrom, dueTo, search);
         byte[] bytes = csv.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"student-dues.csv\"")

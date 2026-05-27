@@ -1468,7 +1468,7 @@ function fmtHumanDate(raw: string | null | undefined): string {
   } catch { return raw; }
 }
 
-function printReceipt(payment: FeePayment, schoolName: string = 'School') {
+function _printReceipt(payment: FeePayment, schoolName: string = 'School') {
   const w = window.open('', '_blank', 'width=700,height=900');
   if (!w) return;
   const allocs = payment.allocations ?? [];
