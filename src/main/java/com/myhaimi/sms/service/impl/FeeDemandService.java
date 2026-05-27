@@ -418,6 +418,14 @@ public class FeeDemandService {
         String fullName = (d.getStudent().getFirstName()
                 + (d.getStudent().getLastName() != null ? " " + d.getStudent().getLastName() : "")).trim();
         dto.setStudentName(fullName);
+        // Populate class-group info for frontend filtering
+        com.myhaimi.sms.entity.ClassGroup cg = d.getStudent().getClassGroup();
+        if (cg != null) {
+            dto.setClassGroupId(cg.getId());
+            dto.setClassGroupName(cg.getDisplayName());
+            dto.setClassGroupGradeLevel(cg.getGradeLevel());
+            dto.setClassGroupSection(cg.getSection());
+        }
         dto.setAcademicYearId(d.getAcademicYear().getId());
         dto.setAcademicYearLabel(d.getAcademicYear().getLabel());
         dto.setFeePlanId(d.getFeePlan().getId());

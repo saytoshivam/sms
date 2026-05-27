@@ -13,6 +13,10 @@ public class StudentFeeDemandDTO {
     private Integer schoolId;
     private Integer studentId;
     private String studentName;
+    private Integer classGroupId;
+    private String classGroupName;
+    private Integer classGroupGradeLevel;
+    private String classGroupSection;
     private Integer academicYearId;
     private String academicYearLabel;
     private Integer feePlanId;

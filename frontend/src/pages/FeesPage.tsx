@@ -90,6 +90,10 @@ type StudentFeeDemand = {
   demandNo: string;
   studentId: number;
   studentName: string;
+  classGroupId?: number | null;
+  classGroupName?: string | null;
+  classGroupGradeLevel?: number | null;
+  classGroupSection?: string | null;
   academicYearLabel: string;
   feePlanId: number;
   feePlanName: string;
@@ -588,7 +592,8 @@ function CollectPaymentModal({ studentId, studentName, preSelectDemandId, onClos
 function TabStudentDues({ perms }: { perms: FeePermissions }) {
   const qc = useQueryClient();
   const [academicYearId, setAcademicYearId] = useState('');
-  const [classGroupId, setClassGroupId] = useState('');
+  const [gradeFilter, setGradeFilter] = useState('');
+  const [sectionFilter, setSectionFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dueFrom, setDueFrom] = useState('');
   const [dueTo, setDueTo] = useState('');
@@ -609,18 +614,47 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   });
   const classGroups = pageContent(classGroupsQ.data);
 
+  // Unique sorted grade levels for the Class dropdown
+  const uniqueGrades = useMemo(() => {
+    const grades = classGroups
+      .map(cg => cg.gradeLevel)
+      .filter((g): g is number => g != null);
+    return [...new Set(grades)].sort((a, b) => a - b);
+  }, [classGroups]);
+
+  // Sections available for the selected grade (or all unique sections if no grade selected)
+  const availableSections = useMemo(() => {
+    const cgFiltered = gradeFilter
+      ? classGroups.filter(cg => String(cg.gradeLevel) === gradeFilter)
+      : classGroups;
+    const sections = cgFiltered
+      .map(cg => cg.section)
+      .filter((s): s is string => !!s);
+    return [...new Set(sections)].sort();
+  }, [classGroups, gradeFilter]);
+
+  // Derive classGroupId for API when both grade and section are selected
+  const apiClassGroupId = useMemo(() => {
+    if (!gradeFilter || !sectionFilter) return '';
+    const match = classGroups.find(
+      cg => String(cg.gradeLevel) === gradeFilter && cg.section === sectionFilter,
+    );
+    return match ? String(match.id) : '';
+  }, [classGroups, gradeFilter, sectionFilter]);
+
   const buildQs = useCallback(() => {
     const p = new URLSearchParams();
     if (academicYearId) p.append('academicYearId', academicYearId);
-    if (classGroupId) p.append('classGroupId', classGroupId);
+    // Pass classGroupId only when both grade+section are selected (exact match)
+    if (apiClassGroupId) p.append('classGroupId', apiClassGroupId);
     if (statusFilter) p.append('status', statusFilter);
     if (dueFrom) p.append('dueFrom', dueFrom);
     if (dueTo) p.append('dueTo', dueTo);
     return p.toString();
-  }, [academicYearId, classGroupId, statusFilter, dueFrom, dueTo]);
+  }, [academicYearId, apiClassGroupId, statusFilter, dueFrom, dueTo]);
 
   const demandsQ = useQuery({
-    queryKey: ['fee-demands', academicYearId, classGroupId, statusFilter, dueFrom, dueTo],
+    queryKey: ['fee-demands', academicYearId, gradeFilter, sectionFilter, statusFilter, dueFrom, dueTo],
     queryFn: async () => {
       const qs = buildQs();
       return (await api.get<StudentFeeDemand[]>(`/api/fees/demands${qs ? '?' + qs : ''}`)).data;
@@ -628,12 +662,25 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   });
 
   const allDemands = demandsQ.data ?? [];
+
+  // Client-side grade/section filtering (when only one of grade/section is selected)
+  const gradeAndSectionFiltered = useMemo(() => {
+    let result = allDemands;
+    if (gradeFilter && !apiClassGroupId) {
+      result = result.filter(d => String(d.classGroupGradeLevel) === gradeFilter);
+    }
+    if (sectionFilter && !apiClassGroupId) {
+      result = result.filter(d => d.classGroupSection === sectionFilter);
+    }
+    return result;
+  }, [allDemands, gradeFilter, sectionFilter, apiClassGroupId]);
+
   const filtered = search.trim()
-    ? allDemands.filter(d =>
+    ? gradeAndSectionFiltered.filter(d =>
         (d.studentName ?? '').toLowerCase().includes(search.toLowerCase()) ||
         (d.demandNo ?? '').toLowerCase().includes(search.toLowerCase()),
       )
-    : allDemands;
+    : gradeAndSectionFiltered;
 
   const today = new Date().toISOString().split('T')[0];
   const totalDemands  = filtered.length;
@@ -674,11 +721,17 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
               options={academicYears.map(y => ({ value: String(y.id), label: y.label }))}
               emptyValueLabel="All years" />
           </div>
-          <div className="stack" style={{ flex: 2, minWidth: 180 }}>
-            <label style={{ fontSize: 12 }}>Class / Section</label>
-            <SmartSelect value={classGroupId} onChange={setClassGroupId}
-              options={classGroups.map(cg => ({ value: String(cg.id), label: cg.displayName }))}
-              placeholder="All sections" searchable allowClear clearLabel="All sections" />
+          <div className="stack" style={{ flex: 1, minWidth: 140 }}>
+            <label style={{ fontSize: 12 }}>Class</label>
+            <SelectKeeper value={gradeFilter} onChange={v => { setGradeFilter(v); setSectionFilter(''); }}
+              options={uniqueGrades.map(g => ({ value: String(g), label: `Class ${g}` }))}
+              emptyValueLabel="All classes" />
+          </div>
+          <div className="stack" style={{ flex: 1, minWidth: 130 }}>
+            <label style={{ fontSize: 12 }}>Section</label>
+            <SelectKeeper value={sectionFilter} onChange={setSectionFilter}
+              options={availableSections.map(s => ({ value: s, label: `Section ${s}` }))}
+              emptyValueLabel="All sections" />
           </div>
           <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             <label style={{ fontSize: 12 }}>Status</label>
@@ -698,9 +751,9 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
             <label style={{ fontSize: 12 }}>Search student / demand no.</label>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Type to search…" />
           </div>
-          {(academicYearId || classGroupId || statusFilter || dueFrom || dueTo || search) && (
+          {(academicYearId || gradeFilter || sectionFilter || statusFilter || dueFrom || dueTo || search) && (
             <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '8px 12px', alignSelf: 'flex-end' }}
-              onClick={() => { setAcademicYearId(''); setClassGroupId(''); setStatusFilter(''); setDueFrom(''); setDueTo(''); setSearch(''); }}>
+              onClick={() => { setAcademicYearId(''); setGradeFilter(''); setSectionFilter(''); setStatusFilter(''); setDueFrom(''); setDueTo(''); setSearch(''); }}>
               Clear
             </button>
           )}
@@ -747,7 +800,9 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                         <div style={{ fontWeight: 600 }}>{d.studentName}</div>
                         <div style={{ color: '#94a3b8', fontSize: 11 }}>{d.demandNo}</div>
                       </td>
-                      <td style={{ padding: '8px 10px', fontSize: 12, color: '#475569' }}>{d.academicYearLabel}</td>
+                      <td style={{ padding: '8px 10px', fontSize: 12, color: '#475569' }}>
+                        {d.classGroupName ?? '—'}
+                      </td>
                       <td style={{ padding: '8px 10px' }}>
                         <div style={{ fontWeight: 600 }}>{d.feeHeadName}</div>
                         <div style={{ color: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}>{d.feeHeadCode}</div>
