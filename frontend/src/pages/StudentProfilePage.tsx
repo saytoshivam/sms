@@ -1524,7 +1524,30 @@ ${allocs.length > 0 ? `<table>
 function SPReceiptModal({ payment, schoolName, onClose }: { payment: FeePayment; schoolName: string; onClose: () => void }) {
   const r = payment.receipt;
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
   const [downloadErr, setDownloadErr] = useState('');
+
+  /** Fetch server PDF blob and trigger browser print dialog. */
+  async function printPdf() {
+    setDownloadErr('');
+    setIsPrinting(true);
+    try {
+      const resp = await api.get(`/api/fees/payments/${payment.id}/receipt/pdf`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([resp.data as BlobPart], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const w = window.open(url);
+      if (w) {
+        w.onload = () => { w.print(); };
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+    } catch {
+      setDownloadErr('Could not load receipt PDF for printing.');
+    } finally {
+      setIsPrinting(false);
+    }
+  }
 
   async function downloadPdf() {
     setDownloadErr('');
@@ -1646,12 +1669,12 @@ function SPReceiptModal({ payment, schoolName, onClose }: { payment: FeePayment;
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-          <button type="button" onClick={() => printReceipt(payment, schoolName)}
-            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
-            🖨 Print
+          <button type="button" onClick={printPdf} disabled={isPrinting || isDownloading}
+            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, cursor: (isPrinting || isDownloading) ? 'wait' : 'pointer', fontWeight: 600, opacity: isPrinting ? 0.7 : 1 }}>
+            {isPrinting ? '⏳ Opening…' : '🖨 Print'}
           </button>
-          <button type="button" onClick={downloadPdf} disabled={isDownloading}
-            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, cursor: isDownloading ? 'wait' : 'pointer', fontWeight: 600, opacity: isDownloading ? 0.7 : 1 }}>
+          <button type="button" onClick={downloadPdf} disabled={isDownloading || isPrinting}
+            style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: 13, cursor: (isDownloading || isPrinting) ? 'wait' : 'pointer', fontWeight: 600, opacity: isDownloading ? 0.7 : 1 }}>
             {isDownloading ? '⏳ Downloading…' : '⬇ Download PDF'}
           </button>
           <button type="button" onClick={onClose}
@@ -2027,7 +2050,15 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
                             style={{ padding: '4px 9px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
                             👁 View
                           </button>
-                          <button type="button" onClick={() => printReceipt(p)}
+                          <button type="button" onClick={async () => {
+                              try {
+                                const resp = await api.get(`/api/fees/payments/${p.id}/receipt/pdf`, { responseType: 'blob' });
+                                const blob = new Blob([resp.data as BlobPart], { type: 'application/pdf' });
+                                const url = URL.createObjectURL(blob);
+                                const w = window.open(url);
+                                if (w) { w.onload = () => w.print(); setTimeout(() => URL.revokeObjectURL(url), 60_000); }
+                              } catch { /* silently ignore */ }
+                            }}
                             style={{ padding: '4px 9px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
                             🖨 Print
                           </button>
