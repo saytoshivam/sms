@@ -408,11 +408,13 @@ public class FeeDemandService {
 
     /**
      * Paginated demand list for the Student Dues admin screen.
+     * Pass {@code classGroupId} for exact class+section, {@code gradeLevel} for class-only,
+     * {@code sectionName} for section-only.  At most one of the three should be non-null.
      */
     @Transactional(readOnly = true)
     public Page<StudentFeeDemandDTO> listDemandsPaged(
-            Integer studentId, Integer classGroupId, Integer academicYearId,
-            Integer feePlanId, Integer feeHeadId, String statusStr,
+            Integer studentId, Integer classGroupId, Integer gradeLevel, String sectionName,
+            Integer academicYearId, Integer feePlanId, Integer feeHeadId, String statusStr,
             LocalDate dueFrom, LocalDate dueTo, String search,
             int page, int size) {
 
@@ -427,7 +429,8 @@ public class FeeDemandService {
 
         return demandRepository.findFilteredPaged(
                 schoolId, studentId, academicYearId, feePlanId, feeHeadId,
-                classGroupId, status, dueFrom, dueTo, searchPat, pageable)
+                classGroupId, gradeLevel, sectionName,
+                status, dueFrom, dueTo, searchPat, pageable)
                 .map(this::toDTO);
     }
 
@@ -436,8 +439,8 @@ public class FeeDemandService {
      */
     @Transactional(readOnly = true)
     public DemandSummaryDTO getDemandSummary(
-            Integer studentId, Integer classGroupId, Integer academicYearId,
-            Integer feePlanId, Integer feeHeadId, String statusStr,
+            Integer studentId, Integer classGroupId, Integer gradeLevel, String sectionName,
+            Integer academicYearId, Integer feePlanId, Integer feeHeadId, String statusStr,
             LocalDate dueFrom, LocalDate dueTo, String search) {
 
         Integer schoolId = requireSchoolId();
@@ -447,7 +450,8 @@ public class FeeDemandService {
 
         List<Object[]> rows = demandRepository.summarizeFiltered(
                 schoolId, studentId, academicYearId, feePlanId, feeHeadId,
-                classGroupId, statusVal, dueFrom, dueTo, searchPat, LocalDate.now());
+                classGroupId, gradeLevel, sectionName,
+                statusVal, dueFrom, dueTo, searchPat, LocalDate.now());
 
         DemandSummaryDTO dto = new DemandSummaryDTO();
         if (rows == null || rows.isEmpty()) {

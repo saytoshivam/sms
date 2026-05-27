@@ -73,21 +73,24 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
             @Param("dueTo")          LocalDate dueTo);
 
     /**
-     * Paginated demand list with full filter support (classGroupId, feeHeadId, search).
-     * Searching matches student firstName, lastName, admissionNo, and demandNo.
+     * Paginated demand list with full filter support.
+     * {@code classGroupId} = exact class+section; {@code gradeLevel} = class only;
+     * {@code sectionName} = section only.  At most one of the three is non-null at a time.
      * Pass {@code search} as a pre-built LIKE pattern (e.g. {@code %term%}) or null.
      */
     @Query(value = """
             SELECT d FROM StudentFeeDemand d
             WHERE d.school.id = :schoolId
-              AND (:studentId      IS NULL OR d.student.id         = :studentId)
-              AND (:academicYearId IS NULL OR d.academicYear.id    = :academicYearId)
-              AND (:feePlanId      IS NULL OR d.feePlan.id         = :feePlanId)
-              AND (:feeHeadId      IS NULL OR d.feeHead.id         = :feeHeadId)
-              AND (:classGroupId   IS NULL OR d.student.classGroup.id = :classGroupId)
-              AND (:status         IS NULL OR d.status             = :status)
-              AND (:dueFrom        IS NULL OR d.dueDate            >= :dueFrom)
-              AND (:dueTo          IS NULL OR d.dueDate            <= :dueTo)
+              AND (:studentId      IS NULL OR d.student.id                     = :studentId)
+              AND (:academicYearId IS NULL OR d.academicYear.id               = :academicYearId)
+              AND (:feePlanId      IS NULL OR d.feePlan.id                     = :feePlanId)
+              AND (:feeHeadId      IS NULL OR d.feeHead.id                     = :feeHeadId)
+              AND (:classGroupId   IS NULL OR d.student.classGroup.id          = :classGroupId)
+              AND (:gradeLevel     IS NULL OR d.student.classGroup.gradeLevel  = :gradeLevel)
+              AND (:sectionName    IS NULL OR d.student.classGroup.section     = :sectionName)
+              AND (:status         IS NULL OR d.status                         = :status)
+              AND (:dueFrom        IS NULL OR d.dueDate                       >= :dueFrom)
+              AND (:dueTo          IS NULL OR d.dueDate                       <= :dueTo)
               AND (:search         IS NULL OR LOWER(d.student.firstName)   LIKE :search
                                           OR LOWER(d.student.lastName)    LIKE :search
                                           OR LOWER(d.student.admissionNo) LIKE :search
@@ -96,14 +99,16 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
             countQuery = """
             SELECT COUNT(d) FROM StudentFeeDemand d
             WHERE d.school.id = :schoolId
-              AND (:studentId      IS NULL OR d.student.id         = :studentId)
-              AND (:academicYearId IS NULL OR d.academicYear.id    = :academicYearId)
-              AND (:feePlanId      IS NULL OR d.feePlan.id         = :feePlanId)
-              AND (:feeHeadId      IS NULL OR d.feeHead.id         = :feeHeadId)
-              AND (:classGroupId   IS NULL OR d.student.classGroup.id = :classGroupId)
-              AND (:status         IS NULL OR d.status             = :status)
-              AND (:dueFrom        IS NULL OR d.dueDate            >= :dueFrom)
-              AND (:dueTo          IS NULL OR d.dueDate            <= :dueTo)
+              AND (:studentId      IS NULL OR d.student.id                     = :studentId)
+              AND (:academicYearId IS NULL OR d.academicYear.id               = :academicYearId)
+              AND (:feePlanId      IS NULL OR d.feePlan.id                     = :feePlanId)
+              AND (:feeHeadId      IS NULL OR d.feeHead.id                     = :feeHeadId)
+              AND (:classGroupId   IS NULL OR d.student.classGroup.id          = :classGroupId)
+              AND (:gradeLevel     IS NULL OR d.student.classGroup.gradeLevel  = :gradeLevel)
+              AND (:sectionName    IS NULL OR d.student.classGroup.section     = :sectionName)
+              AND (:status         IS NULL OR d.status                         = :status)
+              AND (:dueFrom        IS NULL OR d.dueDate                       >= :dueFrom)
+              AND (:dueTo          IS NULL OR d.dueDate                       <= :dueTo)
               AND (:search         IS NULL OR LOWER(d.student.firstName)   LIKE :search
                                           OR LOWER(d.student.lastName)    LIKE :search
                                           OR LOWER(d.student.admissionNo) LIKE :search
@@ -116,6 +121,8 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
             @Param("feePlanId")      Integer feePlanId,
             @Param("feeHeadId")      Integer feeHeadId,
             @Param("classGroupId")   Integer classGroupId,
+            @Param("gradeLevel")     Integer gradeLevel,
+            @Param("sectionName")    String sectionName,
             @Param("status")         StudentFeeDemandStatus status,
             @Param("dueFrom")        LocalDate dueFrom,
             @Param("dueTo")          LocalDate dueTo,
@@ -146,6 +153,8 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
               AND (:feePlanId      IS NULL OR sfd.fee_plan_id       = :feePlanId)
               AND (:feeHeadId      IS NULL OR sfd.fee_head_id       = :feeHeadId)
               AND (:classGroupId   IS NULL OR s.class_group_id      = :classGroupId)
+              AND (:gradeLevel     IS NULL OR cg.grade_level        = :gradeLevel)
+              AND (:sectionName    IS NULL OR cg.section            = :sectionName)
               AND (:status         IS NULL OR sfd.status            = :status)
               AND (:dueFrom        IS NULL OR sfd.due_date          >= :dueFrom)
               AND (:dueTo          IS NULL OR sfd.due_date          <= :dueTo)
@@ -160,6 +169,8 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
             @Param("feePlanId")      Integer feePlanId,
             @Param("feeHeadId")      Integer feeHeadId,
             @Param("classGroupId")   Integer classGroupId,
+            @Param("gradeLevel")     Integer gradeLevel,
+            @Param("sectionName")    String sectionName,
             @Param("status")         String status,
             @Param("dueFrom")        LocalDate dueFrom,
             @Param("dueTo")          LocalDate dueTo,

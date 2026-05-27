@@ -135,14 +135,18 @@ public class FeeSetupController {
     /**
      * Paginated demand list for Student Dues screen.
      *
-     * <p>Query params: {@code studentId}, {@code classGroupId}, {@code academicYearId},
-     * {@code feePlanId}, {@code feeHeadId}, {@code status}, {@code search},
-     * {@code dueFrom} (yyyy-MM-dd), {@code dueTo}, {@code page} (0-based), {@code size}.</p>
+     * <p>Query params: {@code studentId}, {@code classGroupId} (exact class+section),
+     * {@code gradeLevel} (class only), {@code sectionName} (section only),
+     * {@code academicYearId}, {@code feePlanId}, {@code feeHeadId}, {@code status},
+     * {@code search}, {@code dueFrom} (yyyy-MM-dd), {@code dueTo},
+     * {@code page} (0-based), {@code size}.</p>
      */
     @GetMapping("/demands")
     public ResponseEntity<Page<StudentFeeDemandDTO>> listDemands(
             @RequestParam(required = false) Integer studentId,
             @RequestParam(required = false) Integer classGroupId,
+            @RequestParam(required = false) Integer gradeLevel,
+            @RequestParam(required = false) String  sectionName,
             @RequestParam(required = false) Integer academicYearId,
             @RequestParam(required = false) Integer feePlanId,
             @RequestParam(required = false) Integer feeHeadId,
@@ -154,7 +158,8 @@ public class FeeSetupController {
             @RequestParam(defaultValue = "25") int size) {
 
         Page<StudentFeeDemandDTO> result = feeDemandService.listDemandsPaged(
-                studentId, classGroupId, academicYearId, feePlanId, feeHeadId,
+                studentId, classGroupId, gradeLevel, sectionName,
+                academicYearId, feePlanId, feeHeadId,
                 status, dueFrom, dueTo, search, page, size);
         return ResponseEntity.ok(result);
     }
@@ -167,6 +172,8 @@ public class FeeSetupController {
     public ResponseEntity<DemandSummaryDTO> getDemandSummary(
             @RequestParam(required = false) Integer studentId,
             @RequestParam(required = false) Integer classGroupId,
+            @RequestParam(required = false) Integer gradeLevel,
+            @RequestParam(required = false) String  sectionName,
             @RequestParam(required = false) Integer academicYearId,
             @RequestParam(required = false) Integer feePlanId,
             @RequestParam(required = false) Integer feeHeadId,
@@ -176,7 +183,8 @@ public class FeeSetupController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueTo) {
 
         DemandSummaryDTO summary = feeDemandService.getDemandSummary(
-                studentId, classGroupId, academicYearId, feePlanId, feeHeadId,
+                studentId, classGroupId, gradeLevel, sectionName,
+                academicYearId, feePlanId, feeHeadId,
                 status, dueFrom, dueTo, search);
         return ResponseEntity.ok(summary);
     }

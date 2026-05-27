@@ -705,25 +705,28 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   }, [classGroups, gradeFilter, sectionFilter]);
 
   // ── Build query string (shared by both queries) ───────────────────────────
+  // Strategy:
+  //   grade + section selected → resolve exact classGroupId (server filters by PK)
+  //   grade only              → send gradeLevel  param (server filters by grade_level column)
+  //   section only            → send sectionName param (server filters by section column)
+  //   neither                 → no class filter
   const buildQs = useCallback((extra?: Record<string, string>) => {
     const p = new URLSearchParams();
     if (academicYearId) p.append('academicYearId', academicYearId);
     if (feePlanFilter)  p.append('feePlanId', feePlanFilter);
     if (feeHeadFilter)  p.append('feeHeadId', feeHeadFilter);
-    if (apiClassGroupId) p.append('classGroupId', apiClassGroupId);
-    else if (gradeFilter && !sectionFilter) {
-      // Only grade selected — pass all classGroupIds of that grade
-      const ids = classGroups
-        .filter(cg => String(cg.gradeLevel) === gradeFilter)
-        .map(cg => String(cg.id));
-      if (ids.length === 1) p.append('classGroupId', ids[0]);
-      // If multiple sections exist for that grade, we need to pass them all;
-      // backend only supports single classGroupId so we do client-side filter after fetch
-    } else if (sectionFilter && !gradeFilter) {
-      const ids = classGroups
-        .filter(cg => cg.section === sectionFilter)
-        .map(cg => String(cg.id));
-      if (ids.length === 1) p.append('classGroupId', ids[0]);
+    if (gradeFilter && sectionFilter) {
+      // Both selected: use resolved exact classGroupId when found, else fall back to both params
+      if (apiClassGroupId) {
+        p.append('classGroupId', apiClassGroupId);
+      } else {
+        p.append('gradeLevel', gradeFilter);
+        p.append('sectionName', sectionFilter);
+      }
+    } else if (gradeFilter) {
+      p.append('gradeLevel', gradeFilter);
+    } else if (sectionFilter) {
+      p.append('sectionName', sectionFilter);
     }
     if (statusFilter) p.append('status', statusFilter);
     if (dueFrom)      p.append('dueFrom', dueFrom);
@@ -731,7 +734,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
     if (search.trim()) p.append('search', search.trim());
     if (extra) Object.entries(extra).forEach(([k, v]) => p.append(k, v));
     return p.toString();
-  }, [academicYearId, feePlanFilter, feeHeadFilter, apiClassGroupId, gradeFilter, sectionFilter, classGroups, statusFilter, dueFrom, dueTo, search]);
+  }, [academicYearId, feePlanFilter, feeHeadFilter, apiClassGroupId, gradeFilter, sectionFilter, statusFilter, dueFrom, dueTo, search]);
 
   // ── Paginated demands query ───��───────────────────────────────────────────
   const demandsQ = useQuery({
@@ -743,11 +746,11 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
     placeholderData: (prev) => prev,
   });
 
-  const demands   = demandsQ.data?.content ?? [];
+  const demands       = demandsQ.data?.content ?? [];
   const totalElements = demandsQ.data?.totalElements ?? 0;
   const totalPages    = demandsQ.data?.totalPages ?? 1;
-
-  // ── Summary KPI query (global — not page-scoped) ──────────────────────────
+  // All filtering is now fully server-side; no client-side post-filter needed.
+  const visibleDemands = demands;
   const summaryQ = useQuery({
     queryKey: ['fee-demands-summary', academicYearId, feePlanFilter, feeHeadFilter, gradeFilter, sectionFilter, apiClassGroupId, statusFilter, dueFrom, dueTo, search],
     queryFn: async () => {
@@ -787,15 +790,6 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
 
   const summary = summaryQ.data ?? pageFallbackSummary;
   const summaryIsLoading = summaryQ.isLoading && !summaryQ.isError;
-
-  // ── Client-side grade/section filter (when only one of the two is chosen) ─
-  const visibleDemands = useMemo(() => {
-    if (apiClassGroupId) return demands; // already server-filtered
-    let result = demands;
-    if (gradeFilter) result = result.filter(d => String(d.classGroupGradeLevel) === gradeFilter);
-    if (sectionFilter) result = result.filter(d => d.classGroupSection === sectionFilter);
-    return result;
-  }, [demands, gradeFilter, sectionFilter, apiClassGroupId]);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -2410,13 +2404,14 @@ function TabCollections({ perms }: { perms: FeePermissions }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
         {[
           { label: 'Total Payments', value: String(allPayments.filter(p => p.status === 'SUCCESS').length), color: '#6366f1' },
-          { label: 'Collected Today', value: fmt(totalToday), color: '#16a34a' },
-          { label: 'Collected This Month', value: fmt(totalMonth), color: '#0ea5e9' },
+          { label: 'Collected Today', value: fmtCompact(totalToday), sub: fmt(totalToday), color: '#16a34a' },
+          { label: 'Collected This Month', value: fmtCompact(totalMonth), sub: fmt(totalMonth), color: '#0ea5e9' },
           { label: 'Cancelled', value: String(allPayments.filter(p => p.status === 'CANCELLED').length), color: '#94a3b8' },
         ].map(k => (
           <div key={k.label} className="card" style={{ borderTop: `3px solid ${k.color}`, padding: '12px 14px' }}>
             <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>{k.label}</div>
             <div style={{ fontSize: 20, fontWeight: 800, color: k.color, lineHeight: 1.3 }}>{k.value}</div>
+            {'sub' in k && k.sub && <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>{k.sub}</div>}
           </div>
         ))}
       </div>
@@ -2719,10 +2714,10 @@ function TabOverview({ onGoToHeads, onGoToPlans, onGoToDues }: { onGoToHeads: ()
   const loading = dashboardQ.isLoading;
 
   const kpis = [
-    { label: 'Total Expected', value: loading ? '…' : fmt(d?.totalExpected), color: '#6366f1', sub: 'gross payable' },
-    { label: 'Total Collected', value: loading ? '…' : fmt(d?.totalCollected), color: '#16a34a', sub: 'confirmed payments' },
-    { label: 'Outstanding', value: loading ? '…' : fmt(d?.totalOutstanding), color: '#dc2626', sub: 'unpaid + partial' },
-    { label: 'Overdue', value: loading ? '…' : fmt(d?.overdueAmount), color: '#b45309', sub: 'past due date' },
+    { label: 'Total Expected', value: loading ? '…' : fmtCompact(d?.totalExpected), color: '#6366f1', sub: loading ? '' : fmt(d?.totalExpected) },
+    { label: 'Total Collected', value: loading ? '…' : fmtCompact(d?.totalCollected), color: '#16a34a', sub: loading ? '' : fmt(d?.totalCollected) },
+    { label: 'Outstanding', value: loading ? '…' : fmtCompact(d?.totalOutstanding), color: '#dc2626', sub: loading ? '' : fmt(d?.totalOutstanding) },
+    { label: 'Overdue', value: loading ? '…' : fmtCompact(d?.overdueAmount), color: '#b45309', sub: loading ? '' : fmt(d?.overdueAmount) },
     { label: 'Collection Rate', value: loading ? '…' : `${toNum(d?.collectionRate).toFixed(1)}%`, color: '#0ea5e9', sub: 'of expected' },
     { label: 'Students with Dues', value: loading ? '…' : String(d?.studentsWithDues ?? 0), color: '#7c3aed', sub: 'have balance > 0', onClick: onGoToDues },
   ];
@@ -2769,8 +2764,8 @@ function TabOverview({ onGoToHeads, onGoToPlans, onGoToDues }: { onGoToHeads: ()
             <div style={{ height: '100%', width: `${Math.min(100, toNum(d.collectionRate))}%`, background: 'linear-gradient(90deg, #6366f1, #0ea5e9)', borderRadius: 6, transition: 'width .4s' }} />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#64748b' }}>
-            <span>Collected: {fmt(d.totalCollected)}</span>
-            <span>Expected: {fmt(d.totalExpected)}</span>
+            <span>Collected: {fmtCompact(d.totalCollected)}</span>
+            <span>Expected: {fmtCompact(d.totalExpected)}</span>
           </div>
         </div>
       )}
