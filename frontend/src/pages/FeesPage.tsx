@@ -752,11 +752,41 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
     queryKey: ['fee-demands-summary', academicYearId, feePlanFilter, feeHeadFilter, gradeFilter, sectionFilter, apiClassGroupId, statusFilter, dueFrom, dueTo, search],
     queryFn: async () => {
       const qs = buildQs();
-      return (await api.get<DemandSummary>(`/api/fees/demands/summary?${qs}`)).data;
+      const data = (await api.get<DemandSummary>(`/api/fees/demands/summary?${qs}`)).data;
+      // safety: backend might return null/empty; guard it
+      if (!data || typeof data !== 'object') throw new Error('Empty summary response');
+      return data;
     },
     staleTime: 60_000,
+    retry: 1,
   });
-  const summary = summaryQ.data;
+
+  // Fallback: compute approximate KPIs from current page when summary endpoint fails
+  const pageFallbackSummary: DemandSummary | undefined = useMemo(() => {
+    if (!summaryQ.isError || demands.length === 0) return undefined;
+    const todStr = new Date().toISOString().split('T')[0];
+    const outstanding = demands.reduce((s, d) => (d.status === 'UNPAID' || d.status === 'PARTIAL') ? s + toNum(d.balanceAmount) : s, 0);
+    const overdueCount = demands.filter(d => {
+      const ds = formatJsonDate(d.dueDate);
+      return ds < todStr && (d.status === 'UNPAID' || d.status === 'PARTIAL');
+    }).length;
+    const overdueAmount = demands.reduce((s, d) => {
+      const ds = formatJsonDate(d.dueDate);
+      return (ds < todStr && (d.status === 'UNPAID' || d.status === 'PARTIAL')) ? s + toNum(d.balanceAmount) : s;
+    }, 0);
+    return {
+      totalDemands: totalElements,
+      totalPayable: demands.reduce((s, d) => s + toNum(d.payableAmount), 0),
+      totalPaid: demands.reduce((s, d) => s + toNum(d.paidAmount), 0),
+      totalOutstanding: outstanding,
+      overdueAmount,
+      overdueCount,
+      partialBalance: demands.reduce((s, d) => d.status === 'PARTIAL' ? s + toNum(d.balanceAmount) : s, 0),
+    };
+  }, [summaryQ.isError, demands, totalElements]);
+
+  const summary = summaryQ.data ?? pageFallbackSummary;
+  const summaryIsLoading = summaryQ.isLoading && !summaryQ.isError;
 
   // ── Client-side grade/section filter (when only one of the two is chosen) ─
   const visibleDemands = useMemo(() => {
@@ -788,15 +818,15 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
         {/* Total Demands */}
         <div className="card" style={{ borderTop: '3px solid #6366f1', padding: '12px 14px' }}>
           <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Total Demands</div>
-          {summaryQ.isLoading
+          {summaryIsLoading
             ? <div style={{ fontSize: 18, fontWeight: 800, color: '#6366f1' }}>…</div>
-            : <div style={{ fontSize: 20, fontWeight: 800, color: '#6366f1', lineHeight: 1.3 }}>{(summary?.totalDemands ?? 0).toLocaleString('en-IN')}</div>
+            : <div style={{ fontSize: 20, fontWeight: 800, color: '#6366f1', lineHeight: 1.3 }}>{(summary?.totalDemands ?? totalElements).toLocaleString('en-IN')}</div>
           }
         </div>
         {/* Outstanding */}
         <div className="card" style={{ borderTop: '3px solid #f59e0b', padding: '12px 14px' }}>
           <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Outstanding</div>
-          {summaryQ.isLoading
+          {summaryIsLoading
             ? <div style={{ fontSize: 18, fontWeight: 800, color: '#f59e0b' }}>…</div>
             : <div style={{ fontSize: 20, fontWeight: 800, color: '#f59e0b', lineHeight: 1.3 }}>{fmtCompact(summary?.totalOutstanding)}</div>
           }
@@ -804,7 +834,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
         {/* Collected */}
         <div className="card" style={{ borderTop: '3px solid #16a34a', padding: '12px 14px' }}>
           <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Collected</div>
-          {summaryQ.isLoading
+          {summaryIsLoading
             ? <div style={{ fontSize: 18, fontWeight: 800, color: '#16a34a' }}>…</div>
             : <div style={{ fontSize: 20, fontWeight: 800, color: '#16a34a', lineHeight: 1.3 }}>{fmtCompact(summary?.totalPaid)}</div>
           }
@@ -812,7 +842,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
         {/* Overdue */}
         <div className="card" style={{ borderTop: '3px solid #dc2626', padding: '12px 14px' }}>
           <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Overdue</div>
-          {summaryQ.isLoading
+          {summaryIsLoading
             ? <div style={{ fontSize: 18, fontWeight: 800, color: '#dc2626' }}>…</div>
             : <>
                 <div style={{ fontSize: 20, fontWeight: 800, color: '#dc2626', lineHeight: 1.3 }}>{fmtCompact(summary?.overdueAmount)}</div>
@@ -823,7 +853,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
         {/* Partial Outstanding */}
         <div className="card" style={{ borderTop: '3px solid #3b82f6', padding: '12px 14px' }}>
           <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Partial Outstanding</div>
-          {summaryQ.isLoading
+          {summaryIsLoading
             ? <div style={{ fontSize: 18, fontWeight: 800, color: '#3b82f6' }}>…</div>
             : <div style={{ fontSize: 20, fontWeight: 800, color: '#3b82f6', lineHeight: 1.3 }}>{fmtCompact(summary?.partialBalance)}</div>
           }

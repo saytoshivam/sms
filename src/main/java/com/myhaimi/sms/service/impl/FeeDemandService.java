@@ -445,11 +445,22 @@ public class FeeDemandService {
         String searchPat = (search != null && !search.isBlank())
                 ? "%" + search.trim().toLowerCase() + "%" : null;
 
-        Object[] row = demandRepository.summarizeFiltered(
+        List<Object[]> rows = demandRepository.summarizeFiltered(
                 schoolId, studentId, academicYearId, feePlanId, feeHeadId,
                 classGroupId, statusVal, dueFrom, dueTo, searchPat, LocalDate.now());
 
         DemandSummaryDTO dto = new DemandSummaryDTO();
+        if (rows == null || rows.isEmpty()) {
+            dto.setTotalDemands(0L);
+            dto.setTotalPayable(BigDecimal.ZERO);
+            dto.setTotalPaid(BigDecimal.ZERO);
+            dto.setTotalOutstanding(BigDecimal.ZERO);
+            dto.setOverdueAmount(BigDecimal.ZERO);
+            dto.setOverdueCount(0L);
+            dto.setPartialBalance(BigDecimal.ZERO);
+            return dto;
+        }
+        Object[] row = rows.get(0);
         dto.setTotalDemands(row[0] == null ? 0L : ((Number) row[0]).longValue());
         dto.setTotalPayable(toBD(row[1]));
         dto.setTotalPaid(toBD(row[2]));

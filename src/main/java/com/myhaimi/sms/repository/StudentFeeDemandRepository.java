@@ -130,13 +130,13 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
      */
     @Query(value = """
             SELECT
-              COUNT(*),
-              COALESCE(SUM(sfd.payable_amount), 0),
-              COALESCE(SUM(sfd.paid_amount), 0),
-              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') THEN sfd.balance_amount ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') AND sfd.due_date < :today THEN sfd.balance_amount ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') AND sfd.due_date < :today THEN 1 ELSE 0 END), 0),
-              COALESCE(SUM(CASE WHEN sfd.status = 'PARTIAL' THEN sfd.balance_amount ELSE 0 END), 0)
+              COUNT(*)                                                                                               AS cnt,
+              COALESCE(SUM(sfd.payable_amount), 0)                                                                 AS total_payable,
+              COALESCE(SUM(sfd.paid_amount), 0)                                                                    AS total_paid,
+              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') THEN sfd.balance_amount ELSE 0 END), 0)   AS total_outstanding,
+              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') AND sfd.due_date < :today THEN sfd.balance_amount ELSE 0 END), 0) AS overdue_amount,
+              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') AND sfd.due_date < :today THEN 1 ELSE 0 END), 0)                 AS overdue_count,
+              COALESCE(SUM(CASE WHEN sfd.status = 'PARTIAL' THEN sfd.balance_amount ELSE 0 END), 0)               AS partial_balance
             FROM student_fee_demands sfd
             JOIN students s ON sfd.student_id = s.id
             LEFT JOIN class_groups cg ON s.class_group_id = cg.id
@@ -153,7 +153,7 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
                                           OR LOWER(s.admission_no)  LIKE :search
                                           OR LOWER(sfd.demand_no)   LIKE :search)
             """, nativeQuery = true)
-    Object[] summarizeFiltered(
+    List<Object[]> summarizeFiltered(
             @Param("schoolId")       Integer schoolId,
             @Param("studentId")      Integer studentId,
             @Param("academicYearId") Integer academicYearId,
