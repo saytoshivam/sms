@@ -1006,7 +1006,6 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                   const hasBalance  = bal > 0 && (d.status === 'UNPAID' || d.status === 'PARTIAL');
                   const isOverdue   = hasBalance && dueDateStr < today;
                   const isDueToday  = hasBalance && dueDateStr === today;
-                  const isUpcoming  = hasBalance && dueDateStr > today;
                   const hasEnrollment = !!d.classGroupName;
                   return (
                     <tr key={d.id} style={{ borderBottom: '1px solid #f1f5f9', background: isOverdue ? 'rgba(220,38,38,0.03)' : undefined }}>
@@ -1025,14 +1024,11 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                         <div style={{ color: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}>{d.feeHeadCode}</div>
                       </td>
                       <td style={{ padding: '8px 10px', fontSize: 12 }}>{d.installmentName}</td>
-                      <td style={{ padding: '8px 10px', fontSize: 12, whiteSpace: 'nowrap' }}>
-                        <span style={{ color: isOverdue ? '#b91c1c' : isDueToday ? '#b45309' : '#475569', fontWeight: (isOverdue || isDueToday) ? 600 : 400 }}>
-                          {humanDate}
-                        </span>
-                        {isOverdue  && <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#dc2626' }}>· Overdue</span>}
-                        {isDueToday && <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#b45309' }}>· Due Today</span>}
-                        {isUpcoming && <span style={{ marginLeft: 4, fontSize: 10, color: '#64748b' }}>· Upcoming</span>}
-                      </td>
+                       <td style={{ padding: '8px 10px', fontSize: 12, whiteSpace: 'nowrap' }}>
+                         <span style={{ color: isOverdue ? '#b91c1c' : isDueToday ? '#b45309' : '#475569', fontWeight: (isOverdue || isDueToday) ? 600 : 400 }}>
+                           {humanDate}
+                         </span>
+                       </td>
                       <td style={{ padding: '8px 10px', fontWeight: 600 }}>{fmt(d.payableAmount)}</td>
                       <td style={{ padding: '8px 10px', color: '#16a34a' }}>{fmt(d.paidAmount)}</td>
                       <td style={{ padding: '8px 10px', fontWeight: 600, color: toNum(d.balanceAmount) > 0 ? '#b45309' : '#166534' }}>{fmt(d.balanceAmount)}</td>
@@ -1122,7 +1118,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                   <div className="fee-card-item__row">
                     <span className="fee-card-item__label">Due</span>
                     <span style={{ fontSize: 12, color: isOverdue ? '#b91c1c' : '#475569', fontWeight: isOverdue ? 600 : 400 }}>
-                      {humanDate}{isOverdue && <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#dc2626' }}>· Overdue</span>}
+                      {humanDate}
                     </span>
                   </div>
                   <div className="fee-card-item__row">
