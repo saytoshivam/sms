@@ -85,11 +85,22 @@ type Student = { id: number; admissionNo: string; firstName: string; lastName?: 
 
 type StudentFeeDemandStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'WAIVED' | 'CANCELLED';
 
+type DemandSummary = {
+  totalDemands: number;
+  totalPayable: number | string;
+  totalPaid: number | string;
+  totalOutstanding: number | string;
+  overdueAmount: number | string;
+  overdueCount: number;
+  partialBalance: number | string;
+};
+
 type StudentFeeDemand = {
   id: number;
   demandNo: string;
   studentId: number;
   studentName: string;
+  studentAdmissionNo?: string | null;
   classGroupId?: number | null;
   classGroupName?: string | null;
   classGroupGradeLevel?: number | null;
@@ -268,6 +279,28 @@ function fmt(v: number | string | undefined | null): string {
   if (v == null) return '—';
   const n = typeof v === 'string' ? parseFloat(v) : v;
   return isNaN(n) ? '—' : `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Indian compact currency: ₹12.60 Cr / ₹15.25 L / ₹35,000 */
+function fmtCompact(v: number | string | undefined | null): string {
+  if (v == null) return '—';
+  const n = typeof v === 'string' ? parseFloat(v) : v;
+  if (isNaN(n)) return '—';
+  if (n >= 1_00_00_000) return `₹${(n / 1_00_00_000).toFixed(2)} Cr`;
+  if (n >= 1_00_000)   return `₹${(n / 1_00_000).toFixed(2)} L`;
+  return `₹${Math.round(n).toLocaleString('en-IN')}`;
+}
+
+const _MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+/** Format ISO date "2026-05-23" → "23 May 2026" */
+function fmtHumanDate(value: unknown): string {
+  const raw = formatJsonDate(value);
+  if (!raw || raw === '—') return '—';
+  const parts = raw.split('-');
+  if (parts.length !== 3) return raw;
+  const [y, m, d] = parts.map(Number);
+  if (!_MONTHS_SHORT[m - 1]) return raw;
+  return `${d} ${_MONTHS_SHORT[m - 1]} ${y}`;
 }
 
 function toNum(v: number | string | undefined | null): number {
@@ -591,15 +624,38 @@ function CollectPaymentModal({ studentId, studentName, preSelectDemandId, onClos
 
 function TabStudentDues({ perms }: { perms: FeePermissions }) {
   const qc = useQueryClient();
+
+  // ── Filter state ──────────────────────────────────────────────────────────
   const [academicYearId, setAcademicYearId] = useState('');
-  const [gradeFilter, setGradeFilter] = useState('');
-  const [sectionFilter, setSectionFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [dueFrom, setDueFrom] = useState('');
-  const [dueTo, setDueTo] = useState('');
-  const [search, setSearch] = useState('');
+  const [feePlanFilter, setFeePlanFilter]   = useState('');
+  const [gradeFilter, setGradeFilter]       = useState('');
+  const [sectionFilter, setSectionFilter]   = useState('');
+  const [statusFilter, setStatusFilter]     = useState('');
+  const [feeHeadFilter, setFeeHeadFilter]   = useState('');
+  const [dueFrom, setDueFrom]               = useState('');
+  const [dueTo, setDueTo]                   = useState('');
+  const [searchInput, setSearchInput]       = useState('');
+  const [search, setSearch]                 = useState(''); // debounced
+  const [moreOpen, setMoreOpen]             = useState(false);
+
+  // ── Pagination state ──────────────────────────────────────────────────────
+  const [page, setPage]         = useState(0);
+  const [pageSize, setPageSize] = useState(25);
+
+  // ── Modal state ───────────────────────────────────────────────────────────
   const [collectTarget, setCollectTarget] = useState<{ studentId: number; studentName: string; demandId?: number } | null>(null);
   const [receiptPayment, setReceiptPayment] = useState<FeePaymentDTO | null>(null);
+
+  // ── Debounce search ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => { setSearch(searchInput); setPage(0); }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Reset to page 0 on any filter change
+  useEffect(() => { setPage(0); }, [academicYearId, feePlanFilter, gradeFilter, sectionFilter, statusFilter, feeHeadFilter, dueFrom, dueTo]);
+
+  // ── Reference data ────────────────────────────────────────────────────────
   const academicYearsQ = useQuery({
     queryKey: ['academic-years-dues'],
     queryFn: async () => (await api.get<AcademicYear[]>('/api/academic-years')).data,
@@ -614,172 +670,272 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   });
   const classGroups = pageContent(classGroupsQ.data);
 
-  // Unique sorted grade levels for the Class dropdown
+  const feePlansQ = useQuery({
+    queryKey: ['fee-plans-dues'],
+    queryFn: async () => (await api.get<SpringPage<FeePlan>>('/api/fees/plans?size=200&sort=name,asc')).data,
+    staleTime: 300_000,
+  });
+  const feePlans = pageContent(feePlansQ.data);
+
+  const feeHeadsQ = useQuery({
+    queryKey: ['fee-heads-dues'],
+    queryFn: async () => (await api.get<SpringPage<FeeHead>>('/api/fees/heads?size=200&sort=name,asc')).data,
+    staleTime: 300_000,
+  });
+  const feeHeads = pageContent(feeHeadsQ.data);
+
+  // ── Derived dropdowns ─────────────────────────────────────────────────────
   const uniqueGrades = useMemo(() => {
-    const grades = classGroups
-      .map(cg => cg.gradeLevel)
-      .filter((g): g is number => g != null);
+    const grades = classGroups.map(cg => cg.gradeLevel).filter((g): g is number => g != null);
     return [...new Set(grades)].sort((a, b) => a - b);
   }, [classGroups]);
 
-  // Sections available for the selected grade (or all unique sections if no grade selected)
   const availableSections = useMemo(() => {
     const cgFiltered = gradeFilter
       ? classGroups.filter(cg => String(cg.gradeLevel) === gradeFilter)
       : classGroups;
-    const sections = cgFiltered
-      .map(cg => cg.section)
-      .filter((s): s is string => !!s);
+    const sections = cgFiltered.map(cg => cg.section).filter((s): s is string => !!s);
     return [...new Set(sections)].sort();
   }, [classGroups, gradeFilter]);
 
-  // Derive classGroupId for API when both grade and section are selected
   const apiClassGroupId = useMemo(() => {
     if (!gradeFilter || !sectionFilter) return '';
-    const match = classGroups.find(
-      cg => String(cg.gradeLevel) === gradeFilter && cg.section === sectionFilter,
-    );
+    const match = classGroups.find(cg => String(cg.gradeLevel) === gradeFilter && cg.section === sectionFilter);
     return match ? String(match.id) : '';
   }, [classGroups, gradeFilter, sectionFilter]);
 
-  const buildQs = useCallback(() => {
+  // ── Build query string (shared by both queries) ───────────────────────────
+  const buildQs = useCallback((extra?: Record<string, string>) => {
     const p = new URLSearchParams();
     if (academicYearId) p.append('academicYearId', academicYearId);
-    // Pass classGroupId only when both grade+section are selected (exact match)
+    if (feePlanFilter)  p.append('feePlanId', feePlanFilter);
+    if (feeHeadFilter)  p.append('feeHeadId', feeHeadFilter);
     if (apiClassGroupId) p.append('classGroupId', apiClassGroupId);
+    else if (gradeFilter && !sectionFilter) {
+      // Only grade selected — pass all classGroupIds of that grade
+      const ids = classGroups
+        .filter(cg => String(cg.gradeLevel) === gradeFilter)
+        .map(cg => String(cg.id));
+      if (ids.length === 1) p.append('classGroupId', ids[0]);
+      // If multiple sections exist for that grade, we need to pass them all;
+      // backend only supports single classGroupId so we do client-side filter after fetch
+    } else if (sectionFilter && !gradeFilter) {
+      const ids = classGroups
+        .filter(cg => cg.section === sectionFilter)
+        .map(cg => String(cg.id));
+      if (ids.length === 1) p.append('classGroupId', ids[0]);
+    }
     if (statusFilter) p.append('status', statusFilter);
-    if (dueFrom) p.append('dueFrom', dueFrom);
-    if (dueTo) p.append('dueTo', dueTo);
+    if (dueFrom)      p.append('dueFrom', dueFrom);
+    if (dueTo)        p.append('dueTo', dueTo);
+    if (search.trim()) p.append('search', search.trim());
+    if (extra) Object.entries(extra).forEach(([k, v]) => p.append(k, v));
     return p.toString();
-  }, [academicYearId, apiClassGroupId, statusFilter, dueFrom, dueTo]);
+  }, [academicYearId, feePlanFilter, feeHeadFilter, apiClassGroupId, gradeFilter, sectionFilter, classGroups, statusFilter, dueFrom, dueTo, search]);
 
+  // ── Paginated demands query ───��───────────────────────────────────────────
   const demandsQ = useQuery({
-    queryKey: ['fee-demands', academicYearId, gradeFilter, sectionFilter, statusFilter, dueFrom, dueTo],
+    queryKey: ['fee-demands-paged', academicYearId, feePlanFilter, feeHeadFilter, gradeFilter, sectionFilter, apiClassGroupId, statusFilter, dueFrom, dueTo, search, page, pageSize],
     queryFn: async () => {
-      const qs = buildQs();
-      return (await api.get<StudentFeeDemand[]>(`/api/fees/demands${qs ? '?' + qs : ''}`)).data;
+      const qs = buildQs({ page: String(page), size: String(pageSize) });
+      return (await api.get<SpringPage<StudentFeeDemand>>(`/api/fees/demands?${qs}`)).data;
     },
+    placeholderData: (prev) => prev,
   });
 
-  const allDemands = demandsQ.data ?? [];
+  const demands   = demandsQ.data?.content ?? [];
+  const totalElements = demandsQ.data?.totalElements ?? 0;
+  const totalPages    = demandsQ.data?.totalPages ?? 1;
 
-  // Client-side grade/section filtering (when only one of grade/section is selected)
-  const gradeAndSectionFiltered = useMemo(() => {
-    let result = allDemands;
-    if (gradeFilter && !apiClassGroupId) {
-      result = result.filter(d => String(d.classGroupGradeLevel) === gradeFilter);
-    }
-    if (sectionFilter && !apiClassGroupId) {
-      result = result.filter(d => d.classGroupSection === sectionFilter);
-    }
+  // ── Summary KPI query (global — not page-scoped) ──────────────────────────
+  const summaryQ = useQuery({
+    queryKey: ['fee-demands-summary', academicYearId, feePlanFilter, feeHeadFilter, gradeFilter, sectionFilter, apiClassGroupId, statusFilter, dueFrom, dueTo, search],
+    queryFn: async () => {
+      const qs = buildQs();
+      return (await api.get<DemandSummary>(`/api/fees/demands/summary?${qs}`)).data;
+    },
+    staleTime: 60_000,
+  });
+  const summary = summaryQ.data;
+
+  // ── Client-side grade/section filter (when only one of the two is chosen) ─
+  const visibleDemands = useMemo(() => {
+    if (apiClassGroupId) return demands; // already server-filtered
+    let result = demands;
+    if (gradeFilter) result = result.filter(d => String(d.classGroupGradeLevel) === gradeFilter);
+    if (sectionFilter) result = result.filter(d => d.classGroupSection === sectionFilter);
     return result;
-  }, [allDemands, gradeFilter, sectionFilter, apiClassGroupId]);
-
-  const filtered = search.trim()
-    ? gradeAndSectionFiltered.filter(d =>
-        (d.studentName ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        (d.demandNo ?? '').toLowerCase().includes(search.toLowerCase()),
-      )
-    : gradeAndSectionFiltered;
+  }, [demands, gradeFilter, sectionFilter, apiClassGroupId]);
 
   const today = new Date().toISOString().split('T')[0];
-  const totalDemands  = filtered.length;
-  const unpaidAmt     = filtered.filter(d => d.status === 'UNPAID').reduce((s, d) => s + toNum(d.payableAmount), 0);
-  const partialBal    = filtered.filter(d => d.status === 'PARTIAL').reduce((s, d) => s + toNum(d.balanceAmount), 0);
-  const paidAmt       = filtered.reduce((s, d) => s + toNum(d.paidAmount), 0);
-  const overdueCount  = filtered.filter(d => {
-    const dd = formatJsonDate(d.dueDate);
-    return dd < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
-  }).length;
 
-  const kpis = [
-    { label: 'Total Demands',   value: String(totalDemands), color: '#6366f1' },
-    { label: 'Unpaid Amount',   value: fmt(unpaidAmt),        color: '#f59e0b' },
-    { label: 'Partial Balance', value: fmt(partialBal),       color: '#3b82f6' },
-    { label: 'Paid Amount',     value: fmt(paidAmt),          color: '#16a34a' },
-    { label: 'Overdue Demands', value: String(overdueCount),  color: '#dc2626' },
-  ];
+  // ── Pagination helpers ────────────────────────────────────────────────────
+  const firstItem  = totalElements === 0 ? 0 : page * pageSize + 1;
+  const lastItem   = Math.min((page + 1) * pageSize, totalElements);
+  const hasFilters = !!(academicYearId || feePlanFilter || feeHeadFilter || gradeFilter || sectionFilter || statusFilter || dueFrom || dueTo || searchInput);
+
+  function clearFilters() {
+    setAcademicYearId(''); setFeePlanFilter(''); setGradeFilter(''); setSectionFilter('');
+    setStatusFilter(''); setFeeHeadFilter(''); setDueFrom(''); setDueTo('');
+    setSearchInput(''); setSearch(''); setPage(0);
+  }
 
   return (
     <div className="stack">
-      {/* KPI cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
-        {kpis.map(k => (
-          <div key={k.label} className="card" style={{ borderTop: `3px solid ${k.color}`, padding: '12px 14px' }}>
-            <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>{k.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: k.color, lineHeight: 1.3 }}>{k.value}</div>
-          </div>
-        ))}
+
+      {/* ── KPI Cards ─────────────────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 10 }}>
+        {/* Total Demands */}
+        <div className="card" style={{ borderTop: '3px solid #6366f1', padding: '12px 14px' }}>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Total Demands</div>
+          {summaryQ.isLoading
+            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#6366f1' }}>…</div>
+            : <div style={{ fontSize: 20, fontWeight: 800, color: '#6366f1', lineHeight: 1.3 }}>{(summary?.totalDemands ?? 0).toLocaleString('en-IN')}</div>
+          }
+        </div>
+        {/* Outstanding */}
+        <div className="card" style={{ borderTop: '3px solid #f59e0b', padding: '12px 14px' }}>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Outstanding</div>
+          {summaryQ.isLoading
+            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#f59e0b' }}>…</div>
+            : <div style={{ fontSize: 20, fontWeight: 800, color: '#f59e0b', lineHeight: 1.3 }}>{fmtCompact(summary?.totalOutstanding)}</div>
+          }
+        </div>
+        {/* Collected */}
+        <div className="card" style={{ borderTop: '3px solid #16a34a', padding: '12px 14px' }}>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Collected</div>
+          {summaryQ.isLoading
+            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#16a34a' }}>…</div>
+            : <div style={{ fontSize: 20, fontWeight: 800, color: '#16a34a', lineHeight: 1.3 }}>{fmtCompact(summary?.totalPaid)}</div>
+          }
+        </div>
+        {/* Overdue */}
+        <div className="card" style={{ borderTop: '3px solid #dc2626', padding: '12px 14px' }}>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Overdue</div>
+          {summaryQ.isLoading
+            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#dc2626' }}>…</div>
+            : <>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#dc2626', lineHeight: 1.3 }}>{fmtCompact(summary?.overdueAmount)}</div>
+                <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>{(summary?.overdueCount ?? 0).toLocaleString('en-IN')} demands</div>
+              </>
+          }
+        </div>
+        {/* Partial Outstanding */}
+        <div className="card" style={{ borderTop: '3px solid #3b82f6', padding: '12px 14px' }}>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Partial Outstanding</div>
+          {summaryQ.isLoading
+            ? <div style={{ fontSize: 18, fontWeight: 800, color: '#3b82f6' }}>…</div>
+            : <div style={{ fontSize: 20, fontWeight: 800, color: '#3b82f6', lineHeight: 1.3 }}>{fmtCompact(summary?.partialBalance)}</div>
+          }
+        </div>
       </div>
 
-      {/* Filters */}
+      {/* ── Filters ────────────────────────────────────────────────────��──── */}
       <div className="card" style={{ padding: '14px 16px' }}>
+        {/* Main filter row */}
         <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div className="stack" style={{ flex: 1, minWidth: 160 }}>
+          <div className="stack" style={{ flex: 1, minWidth: 150 }}>
             <label style={{ fontSize: 12 }}>Academic Year</label>
             <SelectKeeper value={academicYearId} onChange={setAcademicYearId}
               options={academicYears.map(y => ({ value: String(y.id), label: y.label }))}
               emptyValueLabel="All years" />
           </div>
-          <div className="stack" style={{ flex: 1, minWidth: 140 }}>
+          <div className="stack" style={{ flex: 1, minWidth: 150 }}>
+            <label style={{ fontSize: 12 }}>Fee Plan</label>
+            <SelectKeeper value={feePlanFilter} onChange={setFeePlanFilter}
+              options={feePlans.map(p => ({ value: String(p.id), label: p.name }))}
+              emptyValueLabel="All plans" />
+          </div>
+          <div className="stack" style={{ flex: 1, minWidth: 130 }}>
             <label style={{ fontSize: 12 }}>Class</label>
             <SelectKeeper value={gradeFilter} onChange={v => { setGradeFilter(v); setSectionFilter(''); }}
               options={uniqueGrades.map(g => ({ value: String(g), label: `Class ${g}` }))}
               emptyValueLabel="All classes" />
           </div>
-          <div className="stack" style={{ flex: 1, minWidth: 130 }}>
+          <div className="stack" style={{ flex: 1, minWidth: 120 }}>
             <label style={{ fontSize: 12 }}>Section</label>
             <SelectKeeper value={sectionFilter} onChange={setSectionFilter}
               options={availableSections.map(s => ({ value: s, label: `Section ${s}` }))}
               emptyValueLabel="All sections" />
           </div>
-          <div className="stack" style={{ flex: 1, minWidth: 130 }}>
+          <div className="stack" style={{ flex: 1, minWidth: 120 }}>
             <label style={{ fontSize: 12 }}>Status</label>
             <SelectKeeper value={statusFilter} onChange={setStatusFilter}
               options={(['UNPAID', 'PARTIAL', 'PAID', 'WAIVED', 'CANCELLED'] as StudentFeeDemandStatus[]).map(s => ({ value: s, label: s }))}
-              emptyValueLabel="All statuses" />
+              emptyValueLabel="All" />
           </div>
-          <div className="stack" style={{ flex: 1, minWidth: 130 }}>
-            <label style={{ fontSize: 12 }}>Due From</label>
-            <DateKeeper value={dueFrom} onChange={setDueFrom} clearable emptyLabel="Any date" />
+          <div className="stack" style={{ flex: 2, minWidth: 200 }}>
+            <label style={{ fontSize: 12 }}>Search</label>
+            <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
+              placeholder="Student name, admission no, demand no…" />
           </div>
-          <div className="stack" style={{ flex: 1, minWidth: 130 }}>
-            <label style={{ fontSize: 12 }}>Due To</label>
-            <DateKeeper value={dueTo} onChange={setDueTo} clearable emptyLabel="Any date" />
-          </div>
-          <div className="stack" style={{ flex: 2, minWidth: 180 }}>
-            <label style={{ fontSize: 12 }}>Search student / demand no.</label>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Type to search…" />
-          </div>
-          {(academicYearId || gradeFilter || sectionFilter || statusFilter || dueFrom || dueTo || search) && (
-            <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '8px 12px', alignSelf: 'flex-end' }}
-              onClick={() => { setAcademicYearId(''); setGradeFilter(''); setSectionFilter(''); setStatusFilter(''); setDueFrom(''); setDueTo(''); setSearch(''); }}>
-              Clear
+          <div className="row" style={{ gap: 6, alignSelf: 'flex-end' }}>
+            <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '8px 12px' }}
+              onClick={() => setMoreOpen(o => !o)}>
+              {moreOpen ? '▲ Less' : '▼ More filters'}
             </button>
-          )}
+            {hasFilters && (
+              <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '8px 12px', color: '#dc2626' }}
+                onClick={clearFilters}>Clear</button>
+            )}
+          </div>
         </div>
+
+        {/* More filters (collapsible) */}
+        {moreOpen && (
+          <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
+            <div className="stack" style={{ flex: 1, minWidth: 150 }}>
+              <label style={{ fontSize: 12 }}>Fee Head</label>
+              <SelectKeeper value={feeHeadFilter} onChange={setFeeHeadFilter}
+                options={feeHeads.filter(h => h.active).map(h => ({ value: String(h.id), label: h.name }))}
+                emptyValueLabel="All fee heads" />
+            </div>
+            <div className="stack" style={{ flex: 1, minWidth: 140 }}>
+              <label style={{ fontSize: 12 }}>Due From</label>
+              <DateKeeper value={dueFrom} onChange={setDueFrom} clearable emptyLabel="Any date" />
+            </div>
+            <div className="stack" style={{ flex: 1, minWidth: 140 }}>
+              <label style={{ fontSize: 12 }}>Due To</label>
+              <DateKeeper value={dueTo} onChange={setDueTo} clearable emptyLabel="Any date" />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Table */}
+      {/* ── Toolbar: count + export ────────────────────────────────────────── */}
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: 12, color: '#64748b' }}>
+          {demandsQ.isLoading
+            ? 'Loading…'
+            : totalElements === 0
+              ? 'No demands found'
+              : `Showing ${firstItem}–${lastItem} of ${totalElements.toLocaleString('en-IN')}`
+          }
+        </div>
+        <button type="button" className="btn secondary" disabled
+          title="Export will be available after report export is enabled."
+          style={{ fontSize: 12, padding: '6px 12px', opacity: 0.5, cursor: 'not-allowed' }}>
+          ⬇ Export CSV
+        </button>
+      </div>
+
+      {/* ── Table ─────────────────────────────────────────────────────────── */}
       {demandsQ.isLoading ? (
         <div className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>Loading demands…</div>
       ) : demandsQ.error ? (
         <div style={{ color: '#dc2626', fontSize: 13 }}>{formatApiError(demandsQ.error)}</div>
-      ) : filtered.length === 0 ? (
-        allDemands.length === 0 ? (
-          <div className="fee-empty-state">
-            <div className="fee-empty-state__icon">📋</div>
-            <div className="fee-empty-state__title">No student demands generated yet</div>
+      ) : totalElements === 0 ? (
+        <div className="fee-empty-state">
+          <div className="fee-empty-state__icon">📋</div>
+          <div className="fee-empty-state__title">{hasFilters ? 'No results match your filters' : 'No student demands generated yet'}</div>
+          {!hasFilters && (
             <div className="fee-empty-state__desc">
               Publish a fee plan and click <strong>Generate Student Dues</strong> to create demand records for enrolled students.
             </div>
-          </div>
-        ) : (
-          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '40px 0' }}>No results match your filters.</div>
-        )
+          )}
+        </div>
       ) : (
         <>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>{filtered.length} demand{filtered.length !== 1 ? 's' : ''}</div>
           <div className="fee-table-wrap">
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -790,26 +946,31 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(d => {
+                {visibleDemands.map(d => {
                   const sp = DEMAND_STATUS_PILL[d.status] ?? { bg: '#f1f5f9', color: '#64748b' };
                   const dueDateStr = formatJsonDate(d.dueDate);
                   const isOverdue = dueDateStr < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
+                  const humanDate = fmtHumanDate(d.dueDate);
+                  const hasEnrollment = !!d.classGroupName;
                   return (
                     <tr key={d.id} style={{ borderBottom: '1px solid #f1f5f9', background: isOverdue ? 'rgba(220,38,38,0.03)' : undefined }}>
                       <td style={{ padding: '8px 10px' }}>
                         <div style={{ fontWeight: 600 }}>{d.studentName}</div>
-                        <div style={{ color: '#94a3b8', fontSize: 11 }}>{d.demandNo}</div>
+                        <div style={{ color: '#94a3b8', fontSize: 11 }}>{d.studentAdmissionNo ?? d.demandNo}</div>
                       </td>
-                      <td style={{ padding: '8px 10px', fontSize: 12, color: '#475569' }}>
-                        {d.classGroupName ?? '—'}
+                      <td style={{ padding: '8px 10px', fontSize: 12 }}>
+                        {hasEnrollment
+                          ? <span style={{ color: '#475569' }}>{d.classGroupName}</span>
+                          : <span style={{ color: '#b45309', background: '#fef3c7', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600 }}>⚠ No active enrollment</span>
+                        }
                       </td>
                       <td style={{ padding: '8px 10px' }}>
                         <div style={{ fontWeight: 600 }}>{d.feeHeadName}</div>
                         <div style={{ color: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }}>{d.feeHeadCode}</div>
                       </td>
                       <td style={{ padding: '8px 10px', fontSize: 12 }}>{d.installmentName}</td>
-                      <td style={{ padding: '8px 10px', fontSize: 12, color: isOverdue ? '#b91c1c' : '#475569', fontWeight: isOverdue ? 600 : 400 }}>
-                        {dueDateStr}{isOverdue && ' ⚠'}
+                      <td style={{ padding: '8px 10px', fontSize: 12, color: isOverdue ? '#b91c1c' : '#475569', fontWeight: isOverdue ? 600 : 400, whiteSpace: 'nowrap' }}>
+                        {humanDate}{isOverdue && <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#dc2626' }}>· Overdue</span>}
                       </td>
                       <td style={{ padding: '8px 10px', fontWeight: 600 }}>{fmt(d.payableAmount)}</td>
                       <td style={{ padding: '8px 10px', color: '#16a34a' }}>{fmt(d.paidAmount)}</td>
@@ -819,19 +980,19 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                           {d.status}
                         </span>
                       </td>
-                      <td style={{ padding: '8px 10px' }}>
-                        <div className="row" style={{ gap: 5 }}>
-                          <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }}
-                            title="View student ledger — coming soon"
-                            onClick={() => toast.info('Student ledger', 'Ledger view is coming soon.')}>
-                            📋 Ledger
-                          </button>
+                      <td style={{ padding: '8px 4px' }}>
+                        <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
                           {perms.canCollect && (d.status === 'UNPAID' || d.status === 'PARTIAL') && (
-                            <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 8px', background: '#166634', borderColor: '#166634' }}
+                            <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 8px', background: '#166634', borderColor: '#166634', whiteSpace: 'nowrap' }}
                               onClick={() => setCollectTarget({ studentId: d.studentId, studentName: d.studentName, demandId: d.id })}>
-                              💳 Collect
+                              Collect
                             </button>
                           )}
+                          <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px', whiteSpace: 'nowrap' }}
+                            title="Student ledger — coming soon"
+                            onClick={() => toast.info('Student ledger', 'Ledger view is coming soon.')}>
+                            Ledger
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -841,18 +1002,45 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
             </table>
           </div>
 
+          {/* ── Pagination controls ──────────────────────────────────────── */}
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 4, flexWrap: 'wrap', gap: 8 }}>
+            <div className="row" style={{ gap: 6, alignItems: 'center', fontSize: 12, color: '#64748b' }}>
+              <span>Rows per page:</span>
+              {[25, 50, 100].map(n => (
+                <button key={n} type="button"
+                  className={pageSize === n ? 'btn' : 'btn secondary'}
+                  style={{ fontSize: 12, padding: '4px 10px' }}
+                  onClick={() => { setPageSize(n); setPage(0); }}>
+                  {n}
+                </button>
+              ))}
+            </div>
+            <div className="row" style={{ gap: 6, alignItems: 'center', fontSize: 12 }}>
+              <span style={{ color: '#64748b' }}>{firstItem}–{lastItem} of {totalElements.toLocaleString('en-IN')}</span>
+              <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '4px 10px' }}
+                disabled={page === 0} onClick={() => setPage(p => p - 1)}>← Prev</button>
+              <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '4px 10px' }}
+                disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next →</button>
+            </div>
+          </div>
+
           {/* Mobile card list */}
           <div className="fee-card-list">
-            {filtered.map(d => {
+            {visibleDemands.map(d => {
               const sp = DEMAND_STATUS_PILL[d.status] ?? { bg: '#f1f5f9', color: '#64748b' };
               const dueDateStr = formatJsonDate(d.dueDate);
-              const isOverdue = dueDateStr < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
+              const humanDate  = fmtHumanDate(d.dueDate);
+              const isOverdue  = dueDateStr < today && (d.status === 'UNPAID' || d.status === 'PARTIAL');
+              const hasEnrollment = !!d.classGroupName;
               return (
                 <div key={d.id} className="fee-card-item" style={{ borderLeftColor: isOverdue ? '#dc2626' : undefined }}>
                   <div className="fee-card-item__row">
                     <div>
                       <div style={{ fontWeight: 700 }}>{d.studentName}</div>
                       <div style={{ fontSize: 11, color: '#94a3b8' }}>{d.feeHeadName} · {d.installmentName}</div>
+                      {!hasEnrollment && (
+                        <div style={{ fontSize: 11, color: '#b45309', background: '#fef3c7', borderRadius: 4, padding: '1px 6px', marginTop: 2, display: 'inline-block', fontWeight: 600 }}>⚠ No active enrollment</div>
+                      )}
                     </div>
                     <span style={{ padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 700, background: sp.bg, color: sp.color, whiteSpace: 'nowrap' }}>
                       {d.status}
@@ -860,20 +1048,26 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                   </div>
                   <div className="fee-card-item__row">
                     <span className="fee-card-item__label">Due</span>
-                    <span style={{ fontSize: 12, color: isOverdue ? '#b91c1c' : '#475569', fontWeight: isOverdue ? 600 : 400 }}>{dueDateStr}{isOverdue && ' ⚠'}</span>
+                    <span style={{ fontSize: 12, color: isOverdue ? '#b91c1c' : '#475569', fontWeight: isOverdue ? 600 : 400 }}>
+                      {humanDate}{isOverdue && <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#dc2626' }}>· Overdue</span>}
+                    </span>
                   </div>
                   <div className="fee-card-item__row">
                     <span className="fee-card-item__label">Balance</span>
                     <span style={{ fontWeight: 700, color: toNum(d.balanceAmount) > 0 ? '#b45309' : '#166534' }}>{fmt(d.balanceAmount)}</span>
                   </div>
-                  {perms.canCollect && (d.status === 'UNPAID' || d.status === 'PARTIAL') && (
-                    <div className="fee-card-item__actions">
+                  <div className="fee-card-item__actions">
+                    {perms.canCollect && (d.status === 'UNPAID' || d.status === 'PARTIAL') && (
                       <button type="button" className="btn" style={{ fontSize: 12, background: '#166634', borderColor: '#166634' }}
                         onClick={() => setCollectTarget({ studentId: d.studentId, studentName: d.studentName, demandId: d.id })}>
-                        💳 Collect
+                        Collect
                       </button>
-                    </div>
-                  )}
+                    )}
+                    <button type="button" className="btn secondary" style={{ fontSize: 12 }}
+                      onClick={() => toast.info('Student ledger', 'Ledger view is coming soon.')}>
+                      Ledger
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -890,7 +1084,8 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
           onSuccess={(payment) => {
             setCollectTarget(null);
             setReceiptPayment(payment);
-            qc.invalidateQueries({ queryKey: ['fee-demands'] });
+            qc.invalidateQueries({ queryKey: ['fee-demands-paged'] });
+            qc.invalidateQueries({ queryKey: ['fee-demands-summary'] });
           }}
         />
       )}

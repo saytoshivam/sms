@@ -72,7 +72,101 @@ public interface StudentFeeDemandRepository extends JpaRepository<StudentFeeDema
             @Param("dueFrom")        LocalDate dueFrom,
             @Param("dueTo")          LocalDate dueTo);
 
-    // ─── Dashboard aggregates ─────────────────────────────────────────────────
+    /**
+     * Paginated demand list with full filter support (classGroupId, feeHeadId, search).
+     * Searching matches student firstName, lastName, admissionNo, and demandNo.
+     * Pass {@code search} as a pre-built LIKE pattern (e.g. {@code %term%}) or null.
+     */
+    @Query(value = """
+            SELECT d FROM StudentFeeDemand d
+            WHERE d.school.id = :schoolId
+              AND (:studentId      IS NULL OR d.student.id         = :studentId)
+              AND (:academicYearId IS NULL OR d.academicYear.id    = :academicYearId)
+              AND (:feePlanId      IS NULL OR d.feePlan.id         = :feePlanId)
+              AND (:feeHeadId      IS NULL OR d.feeHead.id         = :feeHeadId)
+              AND (:classGroupId   IS NULL OR d.student.classGroup.id = :classGroupId)
+              AND (:status         IS NULL OR d.status             = :status)
+              AND (:dueFrom        IS NULL OR d.dueDate            >= :dueFrom)
+              AND (:dueTo          IS NULL OR d.dueDate            <= :dueTo)
+              AND (:search         IS NULL OR LOWER(d.student.firstName)   LIKE :search
+                                          OR LOWER(d.student.lastName)    LIKE :search
+                                          OR LOWER(d.student.admissionNo) LIKE :search
+                                          OR LOWER(d.demandNo)            LIKE :search)
+            """,
+            countQuery = """
+            SELECT COUNT(d) FROM StudentFeeDemand d
+            WHERE d.school.id = :schoolId
+              AND (:studentId      IS NULL OR d.student.id         = :studentId)
+              AND (:academicYearId IS NULL OR d.academicYear.id    = :academicYearId)
+              AND (:feePlanId      IS NULL OR d.feePlan.id         = :feePlanId)
+              AND (:feeHeadId      IS NULL OR d.feeHead.id         = :feeHeadId)
+              AND (:classGroupId   IS NULL OR d.student.classGroup.id = :classGroupId)
+              AND (:status         IS NULL OR d.status             = :status)
+              AND (:dueFrom        IS NULL OR d.dueDate            >= :dueFrom)
+              AND (:dueTo          IS NULL OR d.dueDate            <= :dueTo)
+              AND (:search         IS NULL OR LOWER(d.student.firstName)   LIKE :search
+                                          OR LOWER(d.student.lastName)    LIKE :search
+                                          OR LOWER(d.student.admissionNo) LIKE :search
+                                          OR LOWER(d.demandNo)            LIKE :search)
+            """)
+    Page<StudentFeeDemand> findFilteredPaged(
+            @Param("schoolId")       Integer schoolId,
+            @Param("studentId")      Integer studentId,
+            @Param("academicYearId") Integer academicYearId,
+            @Param("feePlanId")      Integer feePlanId,
+            @Param("feeHeadId")      Integer feeHeadId,
+            @Param("classGroupId")   Integer classGroupId,
+            @Param("status")         StudentFeeDemandStatus status,
+            @Param("dueFrom")        LocalDate dueFrom,
+            @Param("dueTo")          LocalDate dueTo,
+            @Param("search")         String search,
+            Pageable pageable);
+
+    /**
+     * Aggregate summary for KPI cards — same filters as {@link #findFilteredPaged}.
+     * Returns one Object[] row with columns:
+     * [0] totalDemands, [1] totalPayable, [2] totalPaid,
+     * [3] totalOutstanding, [4] overdueAmount, [5] overdueCount, [6] partialBalance.
+     */
+    @Query(value = """
+            SELECT
+              COUNT(*),
+              COALESCE(SUM(sfd.payable_amount), 0),
+              COALESCE(SUM(sfd.paid_amount), 0),
+              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') THEN sfd.balance_amount ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') AND sfd.due_date < :today THEN sfd.balance_amount ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN sfd.status IN ('UNPAID','PARTIAL') AND sfd.due_date < :today THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN sfd.status = 'PARTIAL' THEN sfd.balance_amount ELSE 0 END), 0)
+            FROM student_fee_demands sfd
+            JOIN students s ON sfd.student_id = s.id
+            LEFT JOIN class_groups cg ON s.class_group_id = cg.id
+            WHERE sfd.school_id = :schoolId
+              AND (:studentId      IS NULL OR sfd.student_id        = :studentId)
+              AND (:academicYearId IS NULL OR sfd.academic_year_id  = :academicYearId)
+              AND (:feePlanId      IS NULL OR sfd.fee_plan_id       = :feePlanId)
+              AND (:feeHeadId      IS NULL OR sfd.fee_head_id       = :feeHeadId)
+              AND (:classGroupId   IS NULL OR s.class_group_id      = :classGroupId)
+              AND (:status         IS NULL OR sfd.status            = :status)
+              AND (:dueFrom        IS NULL OR sfd.due_date          >= :dueFrom)
+              AND (:dueTo          IS NULL OR sfd.due_date          <= :dueTo)
+              AND (:search         IS NULL OR LOWER(CONCAT(s.first_name,' ',COALESCE(s.last_name,''))) LIKE :search
+                                          OR LOWER(s.admission_no)  LIKE :search
+                                          OR LOWER(sfd.demand_no)   LIKE :search)
+            """, nativeQuery = true)
+    Object[] summarizeFiltered(
+            @Param("schoolId")       Integer schoolId,
+            @Param("studentId")      Integer studentId,
+            @Param("academicYearId") Integer academicYearId,
+            @Param("feePlanId")      Integer feePlanId,
+            @Param("feeHeadId")      Integer feeHeadId,
+            @Param("classGroupId")   Integer classGroupId,
+            @Param("status")         String status,
+            @Param("dueFrom")        LocalDate dueFrom,
+            @Param("dueTo")          LocalDate dueTo,
+            @Param("search")         String search,
+            @Param("today")          LocalDate today);
+
+
 
     @Query("SELECT COALESCE(SUM(d.payableAmount), 0) FROM StudentFeeDemand d WHERE d.school.id = :schoolId AND (:academicYearId IS NULL OR d.academicYear.id = :academicYearId)")
     BigDecimal sumPayableAmount(@Param("schoolId") Integer schoolId, @Param("academicYearId") Integer academicYearId);

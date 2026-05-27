@@ -1,6 +1,7 @@
 package com.myhaimi.sms.service.impl;
 
 import com.myhaimi.sms.DTO.fee.DemandGenerationResultDTO;
+import com.myhaimi.sms.DTO.fee.DemandSummaryDTO;
 import com.myhaimi.sms.DTO.fee.StudentFeeDemandDTO;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.ApplicableScopeType;
@@ -13,6 +14,10 @@ import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -401,6 +406,66 @@ public class FeeDemandService {
         return demands.stream().map(this::toDTO).collect(Collectors.toList());
     }
 
+    /**
+     * Paginated demand list for the Student Dues admin screen.
+     */
+    @Transactional(readOnly = true)
+    public Page<StudentFeeDemandDTO> listDemandsPaged(
+            Integer studentId, Integer classGroupId, Integer academicYearId,
+            Integer feePlanId, Integer feeHeadId, String statusStr,
+            LocalDate dueFrom, LocalDate dueTo, String search,
+            int page, int size) {
+
+        Integer schoolId = requireSchoolId();
+        StudentFeeDemandStatus status = statusStr != null
+                ? StudentFeeDemandStatus.valueOf(statusStr.toUpperCase()) : null;
+        String searchPat = (search != null && !search.isBlank())
+                ? "%" + search.trim().toLowerCase() + "%" : null;
+
+        Pageable pageable = PageRequest.of(page, Math.min(size, 200),
+                Sort.by("dueDate").ascending().and(Sort.by("id").ascending()));
+
+        return demandRepository.findFilteredPaged(
+                schoolId, studentId, academicYearId, feePlanId, feeHeadId,
+                classGroupId, status, dueFrom, dueTo, searchPat, pageable)
+                .map(this::toDTO);
+    }
+
+    /**
+     * Aggregate KPI summary for the full filtered result set (not paginated).
+     */
+    @Transactional(readOnly = true)
+    public DemandSummaryDTO getDemandSummary(
+            Integer studentId, Integer classGroupId, Integer academicYearId,
+            Integer feePlanId, Integer feeHeadId, String statusStr,
+            LocalDate dueFrom, LocalDate dueTo, String search) {
+
+        Integer schoolId = requireSchoolId();
+        String statusVal = statusStr != null ? statusStr.toUpperCase() : null;
+        String searchPat = (search != null && !search.isBlank())
+                ? "%" + search.trim().toLowerCase() + "%" : null;
+
+        Object[] row = demandRepository.summarizeFiltered(
+                schoolId, studentId, academicYearId, feePlanId, feeHeadId,
+                classGroupId, statusVal, dueFrom, dueTo, searchPat, LocalDate.now());
+
+        DemandSummaryDTO dto = new DemandSummaryDTO();
+        dto.setTotalDemands(row[0] == null ? 0L : ((Number) row[0]).longValue());
+        dto.setTotalPayable(toBD(row[1]));
+        dto.setTotalPaid(toBD(row[2]));
+        dto.setTotalOutstanding(toBD(row[3]));
+        dto.setOverdueAmount(toBD(row[4]));
+        dto.setOverdueCount(row[5] == null ? 0L : ((Number) row[5]).longValue());
+        dto.setPartialBalance(toBD(row[6]));
+        return dto;
+    }
+
+    private static BigDecimal toBD(Object o) {
+        if (o == null) return BigDecimal.ZERO;
+        if (o instanceof BigDecimal bd) return bd;
+        return new BigDecimal(o.toString());
+    }
+
     @Transactional(readOnly = true)
     public List<StudentFeeDemandDTO> getStudentDemands(Integer studentId) {
         Integer schoolId = requireSchoolId();
@@ -418,6 +483,7 @@ public class FeeDemandService {
         String fullName = (d.getStudent().getFirstName()
                 + (d.getStudent().getLastName() != null ? " " + d.getStudent().getLastName() : "")).trim();
         dto.setStudentName(fullName);
+        dto.setStudentAdmissionNo(d.getStudent().getAdmissionNo());
         // Populate class-group info for frontend filtering
         com.myhaimi.sms.entity.ClassGroup cg = d.getStudent().getClassGroup();
         if (cg != null) {

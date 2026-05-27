@@ -133,24 +133,52 @@ public class FeeSetupController {
     // ─── Demand Listing ───────────────────────────────────────────────────────
 
     /**
-     * List demands for the current school with optional filters.
+     * Paginated demand list for Student Dues screen.
      *
      * <p>Query params: {@code studentId}, {@code classGroupId}, {@code academicYearId},
-     * {@code feePlanId}, {@code status}, {@code dueFrom} (yyyy-MM-dd), {@code dueTo}.</p>
+     * {@code feePlanId}, {@code feeHeadId}, {@code status}, {@code search},
+     * {@code dueFrom} (yyyy-MM-dd), {@code dueTo}, {@code page} (0-based), {@code size}.</p>
      */
     @GetMapping("/demands")
-    public ResponseEntity<List<StudentFeeDemandDTO>> listDemands(
+    public ResponseEntity<Page<StudentFeeDemandDTO>> listDemands(
             @RequestParam(required = false) Integer studentId,
             @RequestParam(required = false) Integer classGroupId,
             @RequestParam(required = false) Integer academicYearId,
             @RequestParam(required = false) Integer feePlanId,
+            @RequestParam(required = false) Integer feeHeadId,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueTo,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size) {
+
+        Page<StudentFeeDemandDTO> result = feeDemandService.listDemandsPaged(
+                studentId, classGroupId, academicYearId, feePlanId, feeHeadId,
+                status, dueFrom, dueTo, search, page, size);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Aggregate KPI summary for the full filtered demand set (no pagination).
+     * Accepts the same filter params as {@code GET /demands}.
+     */
+    @GetMapping("/demands/summary")
+    public ResponseEntity<DemandSummaryDTO> getDemandSummary(
+            @RequestParam(required = false) Integer studentId,
+            @RequestParam(required = false) Integer classGroupId,
+            @RequestParam(required = false) Integer academicYearId,
+            @RequestParam(required = false) Integer feePlanId,
+            @RequestParam(required = false) Integer feeHeadId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dueTo) {
 
-        List<StudentFeeDemandDTO> demands = feeDemandService.listDemands(
-                studentId, classGroupId, academicYearId, feePlanId, status, dueFrom, dueTo);
-        return ResponseEntity.ok(demands);
+        DemandSummaryDTO summary = feeDemandService.getDemandSummary(
+                studentId, classGroupId, academicYearId, feePlanId, feeHeadId,
+                status, dueFrom, dueTo, search);
+        return ResponseEntity.ok(summary);
     }
 
     // ─── Fee Plan Items ───────────────────────────────────────────────────────
