@@ -331,7 +331,7 @@ public class StaffService {
             if (s.getPhone()    != null && !s.getPhone().isBlank())           score += 35; else miss.add("Phone number is required");
             if (s.getEmail()    != null && !s.getEmail().isBlank())           score += 20; else miss.add("Email not provided (needed for login)");
             if (s.getEmployeeNo() != null && !s.getEmployeeNo().isBlank())    score += 10; else miss.add("Employee number not set");
-            cats.add(new CategoryScore("identity", "Identity", "👤", 20, Math.min(score, 100), miss));
+            cats.add(new CategoryScore("identity", "Identity", "", 20, Math.min(score, 100), miss));
         }
 
         // ── 2. Employment (25%) ───────────────────────────────────────────────
@@ -344,7 +344,7 @@ public class StaffService {
             if (s.getStatus()         != null && s.getStatus() != StaffStatus.DRAFT)     score += 20; else miss.add("Status still DRAFT — activate when ready");
             if (s.getEmploymentType() != null)                                           score += 15; else miss.add("Employment type not set");
             if (s.getDepartment()     != null && !s.getDepartment().isBlank())           score += 10; else miss.add("Department not set");
-            cats.add(new CategoryScore("employment", "Employment", "💼", 25, Math.min(score, 100), miss));
+            cats.add(new CategoryScore("employment", "Employment", "", 25, Math.min(score, 100), miss));
         }
 
         // ── 3. Academics (20%) ────────────────────────────────────────────────
@@ -365,7 +365,7 @@ public class StaffService {
                 // Clear "not applicable" info message so the UI doesn't show it as a blocker
                 miss.clear();
             }
-            cats.add(new CategoryScore("academics", "Academics", "📚", 20, Math.min(score, 100), miss));
+            cats.add(new CategoryScore("academics", "Academics", "", 20, Math.min(score, 100), miss));
         }
 
         // ── 4. Documents (15%) ────────────────────────────────────────────────
@@ -388,7 +388,7 @@ public class StaffService {
                 score = (int) (done * 100L / required.size());
                 if (score < 100) miss.add(String.format("%d of %d required documents collected or verified", done, required.size()));
             }
-            cats.add(new CategoryScore("documents", "Documents", "📄", 15, score, miss));
+            cats.add(new CategoryScore("documents", "Documents", "", 15, score, miss));
         }
 
         // ── 5. Access (10%) ───────────────────────────────────────────────────
@@ -401,7 +401,7 @@ public class StaffService {
             } else {
                 miss.add("No login account created");
             }
-            cats.add(new CategoryScore("access", "Access", "🔐", 10, score, miss));
+            cats.add(new CategoryScore("access", "Access", "", 10, score, miss));
         }
 
         // ── 6. Payroll Prep (10%) ─────────────────────────────────────────────
@@ -422,7 +422,7 @@ public class StaffService {
                 if (acct != null && !acct.isBlank())                              score += 25; else miss.add("Bank account number missing");
                 if (s.getIfsc()        != null && !s.getIfsc().isBlank())         score += 15; else miss.add("IFSC code missing");
             }
-            cats.add(new CategoryScore("payroll", "Payroll Prep", "💰", 10, Math.min(score, 100), miss));
+            cats.add(new CategoryScore("payroll", "Payroll Prep", "", 10, Math.min(score, 100), miss));
         }
 
         // ── Overall weighted score ─────────────────────────────────────────────

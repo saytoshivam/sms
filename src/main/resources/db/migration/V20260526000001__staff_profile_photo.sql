@@ -5,4 +5,3 @@
 ALTER TABLE staff
     ADD COLUMN profile_photo_file_id INT NULL DEFAULT NULL
         COMMENT 'FK to file_objects.id — staff profile photo';
-

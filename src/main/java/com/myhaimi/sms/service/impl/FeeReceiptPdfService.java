@@ -369,4 +369,3 @@ public class FeeReceiptPdfService {
         return (s != null && !s.isBlank()) ? s : "—";
     }
 }
-
