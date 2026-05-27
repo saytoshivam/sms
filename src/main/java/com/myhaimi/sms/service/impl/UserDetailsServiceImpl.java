@@ -25,7 +25,7 @@ public class UserDetailsServiceImpl implements UserDetailsService {
         boolean tenantArchived =
                 !isSuperAdmin && u.getSchool() != null && u.getSchool().isArchived();
         return org.springframework.security.core.userdetails.User.builder()
-                .username(u.getEmail())
+                .username(u.getUsername())
                 .password(u.getPassword())
                 .disabled(!u.isEnabled() || tenantArchived)
                 .roles(u.getRoles().stream().map(Role::getName).toArray(String[]::new))

@@ -1,4 +1,4 @@
-# Debugging Login Issue (Status: In Progress)
+# Debugging Login Issue (Status: RESOLVED)
 
 ## Summary
 
@@ -31,13 +31,22 @@ The application is currently experiencing an authentication issue where login fa
 3. **Frontend Error Handling**: Improved error message display for validation errors
 4. **README.md**: Added comprehensive debugging guide
 
-## Remaining Issue
+## Root Cause (FIXED)
 
-Authentication is failing at the `authenticationManager.authenticate()` call despite:
-- User existing in database
-- Password being properly encoded with BCrypt
-- UserDetailsService configured to use BCryptPasswordEncoder
-- All configuration appearing correct
+Two issues were identified and fixed:
+
+### Fix 1: UserDetailsServiceImpl — wrong username in UserDetails
+`UserDetailsServiceImpl.loadUserByUsername()` was building `UserDetails` with `u.getEmail()` as
+the username principal. This meant the JWT subject was the email, not the login username.
+**Fixed**: Changed to `u.getUsername()`.
+
+### Fix 2: Seed password mismatch
+`application.properties` had default `sms.seed.superadmin.password=change-me-superadmin` while the
+README and all test docs said the password was `abc`. The `DataSeeder` re-hashes the password on
+every startup, so login with `abc` was silently broken unless the env var was explicitly set.
+**Fixed**: Default changed to `abc` (matching README). Demo school default also updated to `demo123`.
+
+---
 
 ## Investigation Steps Completed
 
