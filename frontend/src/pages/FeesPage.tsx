@@ -604,7 +604,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
 
   const classGroupsQ = useQuery({
     queryKey: ['class-groups-dues'],
-    queryFn: async () => (await api.get<SpringPage<ClassGroup> | ClassGroup[]>('/api/v1/class-groups?size=500')).data,
+    queryFn: async () => (await api.get<SpringPage<ClassGroup> | ClassGroup[]>('/api/class-groups?size=500')).data,
     staleTime: 300_000,
   });
   const classGroups = pageContent(classGroupsQ.data);
@@ -2563,7 +2563,7 @@ function TabReports() {
 
   const classGroupsQ = useQuery({
     queryKey: ['class-groups-reports'],
-    queryFn: async () => (await api.get<SpringPage<ClassGroup> | ClassGroup[]>('/api/v1/class-groups?size=500')).data,
+    queryFn: async () => (await api.get<SpringPage<ClassGroup> | ClassGroup[]>('/api/class-groups?size=500')).data,
     staleTime: 300_000,
   });
   const classGroups = pageContent(classGroupsQ.data);
