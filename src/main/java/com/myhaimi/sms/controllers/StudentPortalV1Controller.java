@@ -4,8 +4,6 @@ import com.myhaimi.sms.DTO.announcement.AnnouncementDetailDTO;
 import com.myhaimi.sms.DTO.announcement.AnnouncementListItemDTO;
 import com.myhaimi.sms.DTO.studentportal.FeeStatementDTO;
 import com.myhaimi.sms.DTO.studentportal.UnreadCountDTO;
-import com.myhaimi.sms.DTO.studentportal.StudentExamCardDTO;
-import com.myhaimi.sms.DTO.studentportal.StudentMarkRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentDailyAttendanceRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
 import com.myhaimi.sms.DTO.timetable.PublishedStudentWeeklyTimetableDTO;
@@ -59,19 +57,6 @@ public class StudentPortalV1Controller {
     public PublishedStudentWeeklyTimetableDTO weeklyPublishedTimetable(@AuthenticationPrincipal UserDetails principal) {
         int studentId = linkedStudentId(principal);
         return studentPortalService.myWeeklyTimetable(studentId);
-    }
-
-    @GetMapping("/marks")
-    public ResponseEntity<List<StudentMarkRowDTO>> marks(@AuthenticationPrincipal UserDetails principal) {
-        int studentId = linkedStudentId(principal);
-        return ResponseEntity.ok(studentPortalService.myMarks(studentId));
-    }
-
-    /** Upcoming exams (hall-ticket style cards); demo schedule for Greenwood demo school. */
-    @GetMapping("/exams")
-    public ResponseEntity<List<StudentExamCardDTO>> exams(@AuthenticationPrincipal UserDetails principal) {
-        int studentId = linkedStudentId(principal);
-        return ResponseEntity.ok(studentPortalService.myExamCards(studentId));
     }
 
     @GetMapping("/subject-attendance")

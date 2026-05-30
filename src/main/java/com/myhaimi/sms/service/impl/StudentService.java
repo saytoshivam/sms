@@ -69,7 +69,6 @@ public class StudentService {
     private final SchoolDocumentRequirementRepo requirementRepo;
     private final DocumentTypeRepo documentTypeRepo;
     private final StudentAttendanceRepo attendanceRepo;
-    private final StudentMarkRepo markRepo;
     private final FeePaymentRepo feePaymentRepo;
     private final FeePaymentAllocationRepository allocationRepo;
     private final FeeReceiptRepository receiptRepo;
@@ -103,7 +102,6 @@ public class StudentService {
         List<Integer> ids = all.stream().map(Student::getId).toList();
 
         attendanceRepo.deleteByStudent_IdIn(ids);
-        markRepo.deleteByStudent_IdIn(ids);
         documentRepo.deleteByStudent_IdIn(ids);
         enrollmentRepo.deleteByStudent_IdIn(ids);
         medicalRepo.deleteByStudent_IdIn(ids);
@@ -127,7 +125,6 @@ public class StudentService {
         List<Integer> ids = List.of(student.getId());
 
         attendanceRepo.deleteByStudent_IdIn(ids);
-        markRepo.deleteByStudent_IdIn(ids);
         documentRepo.deleteByStudent_IdIn(ids);
         enrollmentRepo.deleteByStudent_IdIn(ids);
         medicalRepo.deleteByStudent_IdIn(ids);

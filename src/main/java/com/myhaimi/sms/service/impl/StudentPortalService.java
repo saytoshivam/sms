@@ -2,8 +2,6 @@ package com.myhaimi.sms.service.impl;
 
 import com.myhaimi.sms.DTO.studentportal.FeeStatementDTO;
 import com.myhaimi.sms.DTO.studentportal.FeeStatementLineDTO;
-import com.myhaimi.sms.DTO.studentportal.StudentExamCardDTO;
-import com.myhaimi.sms.DTO.studentportal.StudentMarkRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentDailyAttendanceRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
 import com.myhaimi.sms.DTO.timetable.PublishedStudentWeeklyTimetableDTO;
@@ -13,7 +11,6 @@ import com.myhaimi.sms.entity.enums.PaymentStatus;
 import com.myhaimi.sms.repository.FeePaymentRepo;
 import com.myhaimi.sms.repository.LectureRepo;
 import com.myhaimi.sms.repository.StudentAttendanceRepo;
-import com.myhaimi.sms.repository.StudentMarkRepo;
 import com.myhaimi.sms.repository.StudentRepo;
 import com.myhaimi.sms.repository.StudentFeeDemandRepository;
 import com.myhaimi.sms.repository.SubjectRepo;
@@ -27,7 +24,6 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-
 @Service
 @RequiredArgsConstructor
 public class StudentPortalService {
@@ -35,7 +31,6 @@ public class StudentPortalService {
 
     private final StudentRepo studentRepo;
     private final PublishedTimetableCalendarService publishedTimetableCalendarService;
-    private final StudentMarkRepo studentMarkRepo;
     private final SubjectRepo subjectRepo;
     private final LectureRepo lectureRepo;
     private final StudentAttendanceRepo studentAttendanceRepo;
@@ -69,48 +64,6 @@ public class StudentPortalService {
         return publishedTimetableCalendarService.studentWeeklyGrid(tenantId, student.getClassGroup().getId());
     }
 
-    /**
-     * Published exam schedule cards. Not yet modelled in the database — returns empty list.
-     */
-    @Transactional(readOnly = true)
-    public List<StudentExamCardDTO> myExamCards(int studentId) {
-        Integer tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
-            throw new IllegalStateException("Tenant context required");
-        }
-        studentRepo.findByIdAndSchool_Id(studentId, tenantId).orElseThrow();
-        return List.of();
-    }
-
-    @Transactional(readOnly = true)
-    public List<StudentMarkRowDTO> myMarks(int studentId) {
-        Integer tenantId = TenantContext.getTenantId();
-        if (tenantId == null) {
-            throw new IllegalStateException("Tenant context required");
-        }
-        studentRepo.findByIdAndSchool_Id(studentId, tenantId).orElseThrow();
-        List<StudentMark> marks =
-                studentMarkRepo.findBySchool_IdAndStudent_IdOrderByAssessedOnAsc(tenantId, studentId).stream()
-                        .sorted(Comparator.comparing(StudentMark::getAssessedOn).reversed())
-                        .toList();
-        List<StudentMarkRowDTO> out = new ArrayList<>();
-        for (StudentMark m : marks) {
-            String name =
-                    subjectRepo.findBySchool_IdAndCode(tenantId, m.getSubjectCode()).map(Subject::getName).orElse(m.getSubjectCode());
-            double pct = scorePercent(m.getScoreObtained(), m.getMaxScore());
-            out.add(new StudentMarkRowDTO(
-                    m.getSubjectCode(),
-                    name,
-                    m.getAssessmentKey(),
-                    m.getAssessmentTitle(),
-                    m.getMaxScore(),
-                    m.getScoreObtained(),
-                    pct,
-                    m.getAssessedOn(),
-                    m.getTermName()));
-        }
-        return out;
-    }
 
     /**
      * Subject-wise attendance for the academic year-to-date depends on {@link School#getAttendanceMode()}: daily roll
@@ -456,15 +409,6 @@ public class StudentPortalService {
         return new LocalDate[] {LocalDate.of(y1, 4, 1), LocalDate.of(y2, 3, 31)};
     }
 
-    private static double scorePercent(BigDecimal obtained, BigDecimal max) {
-        if (max == null || max.compareTo(BigDecimal.ZERO) <= 0) {
-            return 0;
-        }
-        return obtained
-                .multiply(BigDecimal.valueOf(100))
-                .divide(max, 2, RoundingMode.HALF_UP)
-                .doubleValue();
-    }
 
     private static double round2(double v) {
         return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP).doubleValue();
