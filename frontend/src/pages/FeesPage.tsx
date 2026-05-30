@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -9,6 +9,12 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SmartSelect } from '../components/SmartSelect';
 import { SelectKeeper } from '../components/SelectKeeper';
 import { DateKeeper } from '../components/DateKeeper';
+import {
+  CollectPaymentModal,
+  type FeePaymentResult as FeePaymentDTO,
+  fmtMoney as fmt,
+  toNum,
+} from '../components/fees/CollectPaymentModal';
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
 
@@ -142,48 +148,6 @@ const PAYMENT_MODE_LABELS: Record<PaymentMode, string> = {
   CASH: 'Cash', UPI: 'UPI', BANK_TRANSFER: 'Bank Transfer',
   CHEQUE: 'Cheque', CARD: 'Card', DEMAND_DRAFT: 'Demand Draft', ADJUSTMENT: 'Adjustment',
 };
-const REFERENCE_REQUIRED_MODES = new Set<PaymentMode>(['UPI', 'BANK_TRANSFER', 'CHEQUE', 'CARD']);
-
-type FeePaymentAllocationDTO = {
-  id: number;
-  demandId: number;
-  demandNo: string;
-  allocatedAmount: number | string;
-  demandPayableAmount: number | string;
-  demandPaidAmount: number | string;
-  demandBalanceAmount: number | string;
-  demandStatus: StudentFeeDemandStatus;
-  createdAt: string;
-};
-
-type FeeReceiptDTO = {
-  id: number;
-  receiptNo: string;
-  issuedAt: string;
-  pdfUrl?: string | null;
-  cancelledAt?: string | null;
-  cancelReason?: string | null;
-};
-
-type FeePaymentDTO = {
-  id: number;
-  schoolId: number;
-  studentId: number;
-  studentName: string;
-  receiptNo: string;
-  amount: number | string;
-  paymentMode: string;
-  paymentDate: string;
-  referenceNo?: string | null;
-  notes?: string | null;
-  status: PaymentStatus;
-  collectedByUserId?: number | null;
-  createdAt: string;
-  updatedAt: string;
-  allocations?: FeePaymentAllocationDTO[];
-  receipt?: FeeReceiptDTO | null;
-};
-
 const PAYMENT_STATUS_PILL: Record<PaymentStatus, { bg: string; color: string }> = {
   SUCCESS:   { bg: '#dcfce7', color: '#166534' },
   PENDING:   { bg: '#fef3c7', color: '#92400e' },
@@ -207,27 +171,6 @@ type DailyCollectionRow = {
   paymentMode: string;
   totalAmount: number | string;
   paymentCount: number;
-};
-
-type ClassOutstandingRow = {
-  classGroupId: number;
-  className: string;
-  section: string;
-  studentCount: number;
-  demandCount: number;
-  totalPayable: number | string;
-  totalPaid: number | string;
-  totalOutstanding: number | string;
-};
-
-type StudentDueRow = {
-  studentId: number;
-  studentName: string;
-  admissionNo: string;
-  className: string;
-  totalPayable: number | string;
-  totalPaid: number | string;
-  totalBalance: number | string;
 };
 
 type PaymentModeRow = {
@@ -275,11 +218,7 @@ function derivePermissions(roles: string[]): FeePermissions {
   return { canEdit, canCollect, canPublish, canGenerate, viewOnly };
 }
 
-function fmt(v: number | string | undefined | null): string {
-  if (v == null) return '—';
-  const n = typeof v === 'string' ? parseFloat(v) : v;
-  return isNaN(n) ? '—' : `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// fmt, toNum, FeePaymentDTO imported from shared CollectPaymentModal
 
 /** Indian compact currency: ₹12.60 Cr / ₹15.25 L / ₹35,000 */
 function fmtCompact(v: number | string | undefined | null): string {
@@ -303,11 +242,7 @@ function fmtHumanDate(value: unknown): string {
   return `${d} ${_MONTHS_SHORT[m - 1]} ${y}`;
 }
 
-function toNum(v: number | string | undefined | null): number {
-  if (v == null) return 0;
-  const n = typeof v === 'string' ? parseFloat(v) : v;
-  return isNaN(n) ? 0 : n;
-}
+// toNum imported from shared CollectPaymentModal
 
 function sumItems(items: FeePlanItem[]): number {
   return items.reduce((a, i) => a + (typeof i.amount === 'string' ? parseFloat(i.amount) || 0 : i.amount || 0), 0);
@@ -414,211 +349,7 @@ function ReceiptSummaryModal({ payment, onClose }: { payment: FeePaymentDTO; onC
   );
 }
 
-// ─── Collect Payment Modal ──────────────────────────────────────��──────────────
-
-interface CollectPaymentModalProps {
-  studentId: number;
-  studentName: string;
-  preSelectDemandId?: number;
-  onClose: () => void;
-  onSuccess: (payment: FeePaymentDTO) => void;
-}
-
-function CollectPaymentModal({ studentId, studentName, preSelectDemandId, onClose, onSuccess }: CollectPaymentModalProps) {
-  const today = new Date().toISOString().split('T')[0];
-  const [paymentDate, setPaymentDate] = useState(today);
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('CASH');
-  const [referenceNo, setReferenceNo] = useState('');
-  const [notes, setNotes] = useState('');
-  const [allocations, setAllocations] = useState<Record<number, string>>({});
-  const [submitErr, setSubmitErr] = useState('');
-
-  // Load outstanding demands for this student
-  const demandsQ = useQuery({
-    queryKey: ['student-outstanding-demands', studentId],
-    queryFn: async () => {
-      const res = await api.get<StudentFeeDemand[]>(`/api/fees/demands?studentId=${studentId}`);
-      return (res.data ?? []).filter(d => d.status === 'UNPAID' || d.status === 'PARTIAL');
-    },
-  });
-  const demands = demandsQ.data ?? [];
-
-  // Pre-select demand if provided
-  useEffect(() => {
-    if (preSelectDemandId && demands.length > 0) {
-      const d = demands.find(d => d.id === preSelectDemandId);
-      if (d) {
-        setAllocations(prev => ({ ...prev, [d.id]: String(toNum(d.balanceAmount)) }));
-      }
-    }
-  }, [preSelectDemandId, demands]);
-
-  function autoAllocate() {
-    const newAlloc: Record<number, string> = {};
-    demands.forEach(d => { newAlloc[d.id] = String(toNum(d.balanceAmount)); });
-    setAllocations(newAlloc);
-  }
-
-  function clearAllocation() { setAllocations({}); }
-
-  const totalAllocated = Object.values(allocations).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-  const refRequired = REFERENCE_REQUIRED_MODES.has(paymentMode);
-
-  let validationError = '';
-  if (totalAllocated <= 0) validationError = 'Total allocated must be greater than 0.';
-  else if (refRequired && !referenceNo.trim()) validationError = `Reference number is required for ${PAYMENT_MODE_LABELS[paymentMode]}.`;
-  else {
-    for (const d of demands) {
-      const alloc = parseFloat(allocations[d.id] ?? '0') || 0;
-      if (alloc > toNum(d.balanceAmount)) {
-        validationError = `Allocation for ${d.feeHeadName} (${d.installmentName}) exceeds balance.`;
-        break;
-      }
-    }
-  }
-
-  const submitMutation = useMutation({
-    mutationFn: async () => {
-      const allocationsList = demands
-        .filter(d => (parseFloat(allocations[d.id] ?? '0') || 0) > 0)
-        .map(d => ({ demandId: d.id, amount: parseFloat(allocations[d.id]) }));
-      return (await api.post<FeePaymentDTO>('/api/fees/payments', {
-        studentId,
-        paymentDate,
-        paymentMode,
-        referenceNo: referenceNo || undefined,
-        notes: notes || undefined,
-        allocations: allocationsList,
-      })).data;
-    },
-    onSuccess: (data) => {
-      toast.success('Payment recorded', `Receipt ${data.receiptNo} created.`);
-      onSuccess(data);
-    },
-    onError: (e) => setSubmitErr(formatApiError(e)),
-  });
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-      onClick={() => { if (!submitMutation.isPending) onClose(); }}>
-      <div className="card stack" style={{ maxWidth: 680, width: '100%', gap: 16, maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <strong style={{ fontSize: 16 }}>Collect Payment</strong>
-            <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>Student: <strong>{studentName}</strong></div>
-          </div>
-          <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '4px 10px' }}
-            disabled={submitMutation.isPending} onClick={onClose}>✕ Close</button>
-        </div>
-
-        {/* Payment fields */}
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-          <div className="stack" style={{ flex: 1, minWidth: 140 }}>
-            <label style={{ fontSize: 12 }}>Payment Date *</label>
-            <DateKeeper value={paymentDate} onChange={setPaymentDate} />
-          </div>
-          <div className="stack" style={{ flex: 1, minWidth: 160 }}>
-            <label style={{ fontSize: 12 }}>Payment Mode *</label>
-            <SelectKeeper value={paymentMode} onChange={v => setPaymentMode(v as PaymentMode)}
-              options={PAYMENT_MODES.map(m => ({ value: m, label: PAYMENT_MODE_LABELS[m] }))} />
-          </div>
-          <div className="stack" style={{ flex: 2, minWidth: 180 }}>
-            <label style={{ fontSize: 12 }}>Reference No {refRequired ? '*' : '(optional)'}</label>
-            <input value={referenceNo} onChange={e => setReferenceNo(e.target.value)}
-              placeholder={paymentMode === 'UPI' ? 'UPI transaction ID' : paymentMode === 'CHEQUE' ? 'Cheque no.' : 'Reference…'} />
-          </div>
-        </div>
-        <div className="stack">
-          <label style={{ fontSize: 12 }}>Notes (optional)</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Optional notes…" style={{ resize: 'vertical' }} />
-        </div>
-
-        {/* Outstanding demands table */}
-        <div>
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <div style={{ fontWeight: 600, fontSize: 13 }}>Outstanding Demands</div>
-            <div className="row" style={{ gap: 6 }}>
-              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={autoAllocate}>⚡ Auto-Allocate All</button>
-              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={clearAllocation}>✕ Clear</button>
-            </div>
-          </div>
-
-          {demandsQ.isLoading ? (
-            <div className="muted" style={{ textAlign: 'center', padding: 16 }}>Loading demands…</div>
-          ) : demands.length === 0 ? (
-            <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: 20, border: '1px dashed #e2e8f0', borderRadius: 8 }}>
-              No outstanding demands for this student.
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
-                    {['Fee Head', 'Installment', 'Due Date', 'Balance', 'Amount to Pay'].map(h => (
-                      <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {demands.map(d => {
-                    const balance = toNum(d.balanceAmount);
-                    const alloc = parseFloat(allocations[d.id] ?? '') || 0;
-                    const overAlloc = alloc > balance;
-                    return (
-                      <tr key={d.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '8px 10px' }}>
-                          <div style={{ fontWeight: 600 }}>{d.feeHeadName}</div>
-                          <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{d.feeHeadCode}</div>
-                        </td>
-                        <td style={{ padding: '8px 10px', fontSize: 12 }}>{d.installmentName}</td>
-                        <td style={{ padding: '8px 10px', fontSize: 12, color: '#475569' }}>{formatJsonDate(d.dueDate)}</td>
-                        <td style={{ padding: '8px 10px', fontWeight: 600, color: '#b45309' }}>{fmt(balance)}</td>
-                        <td style={{ padding: '8px 10px', minWidth: 130 }}>
-                          <input
-                            type="number" min="0" step="0.01" max={String(balance)}
-                            value={allocations[d.id] ?? ''}
-                            onChange={e => setAllocations(prev => ({ ...prev, [d.id]: e.target.value }))}
-                            style={{ width: '100%', borderColor: overAlloc ? '#dc2626' : undefined }}
-                            placeholder="0.00"
-                          />
-                          {overAlloc && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>Exceeds balance</div>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Total */}
-        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 13, color: '#64748b' }}>Total Payment Amount</span>
-          <span style={{ fontSize: 18, fontWeight: 800, color: totalAllocated > 0 ? '#1e293b' : '#94a3b8' }}>{fmt(totalAllocated)}</span>
-        </div>
-
-        {/* Errors */}
-        {(validationError || submitErr) && (
-          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#b91c1c', fontSize: 13 }}>
-            {validationError || submitErr}
-          </div>
-        )}
-
-        {/* Submit */}
-        <div className="row" style={{ gap: 8 }}>
-          <button type="button" className="btn" style={{ flex: 1 }}
-            disabled={submitMutation.isPending || !!validationError || demands.length === 0}
-            onClick={() => { setSubmitErr(''); submitMutation.mutate(); }}>
-            {submitMutation.isPending ? 'Recording Payment…' : `Record Payment — ${fmt(totalAllocated)}`}
-          </button>
-          <button type="button" className="btn secondary" disabled={submitMutation.isPending} onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// CollectPaymentModal imported from components/fees/CollectPaymentModal.tsx
 
 // ─── TAB: Student Dues ─────────────────────────────────────────────────────────
 
@@ -647,7 +378,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   const [collectTarget, setCollectTarget] = useState<{ studentId: number; studentName: string; demandId?: number } | null>(null);
   const [receiptPayment, setReceiptPayment] = useState<FeePaymentDTO | null>(null);
 
-  // ── Debounce search ───────────────────────────────────────────────────────
+  // ── Debounce search ─────────────────────────���─────────────────────────────
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchInput); setPage(0); }, 300);
     return () => clearTimeout(t);
@@ -1148,7 +879,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
         <CollectPaymentModal
           studentId={collectTarget.studentId}
           studentName={collectTarget.studentName}
-          preSelectDemandId={collectTarget.demandId}
+          preSelectedDemandId={collectTarget.demandId}
           onClose={() => setCollectTarget(null)}
           onSuccess={(payment) => {
             setCollectTarget(null);
@@ -2088,123 +1819,53 @@ function FeePlanDetailView({ planId, onClose, schoolId }: { planId: number; onCl
         )}
       </div>
 
-      <ConfirmDialog open={!!deleteItemTarget}
+      <ConfirmDialog
+        open={!!deleteItemTarget}
         title={`Remove ${deleteItemTarget?.feeHeadName ?? 'rule'}${deleteItemTarget ? ` for ${itemTargetLabel(deleteItemTarget)}` : ''} from this draft plan?`}
         description="This will permanently remove the fee rule and all its installments from this plan."
-        danger confirmLabel="Remove" onConfirm={() => { if (deleteItemTarget) deleteItemMut.mutate(deleteItemTarget.id); }} onClose={() => setDeleteItemTarget(null)} />
+        danger confirmLabel="Remove" onConfirm={() => { if (deleteItemTarget) deleteItemMut.mutate(deleteItemTarget.id); }}
+        onClose={() => setDeleteItemTarget(null)}
+      />
 
-      {/* Publish confirmation modal */}
-      {showPublishConfirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-          onClick={() => { if (!publishMut.isPending) setShowPublishConfirm(false); }}>
-          <div className="card stack" style={{ maxWidth: 480, width: '100%', gap: 16 }} onClick={e => e.stopPropagation()}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 36, marginBottom: 8 }}>🚀</div>
-              <h3 style={{ margin: 0, fontSize: 18 }}>Publish fee plan?</h3>
-              <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>{plan.name}</div>
-            </div>
-            <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#475569', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <li>Fee items and installment schedules will become <strong>read-only</strong>.</li>
-              <li>Student dues can be generated after publishing.</li>
-              <li>Future changes should be made through a <strong>revised fee plan</strong>.</li>
-            </ul>
-            {publishMut.isError && (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#b91c1c', fontSize: 13 }}>
-                {formatApiError(publishMut.error)}
-              </div>
-            )}
-            <div className="row" style={{ gap: 8 }}>
-              <button type="button" className="btn" style={{ flex: 1 }}
-                disabled={publishMut.isPending}
-                onClick={() => publishMut.mutate()}>
-                {publishMut.isPending ? 'Publishing…' : '🚀 Publish Plan'}
-              </button>
-              <button type="button" className="btn secondary" disabled={publishMut.isPending} onClick={() => setShowPublishConfirm(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={showPublishConfirm}
+        title="Publish this fee plan?"
+        description="Once published, the plan rules are locked. You can still generate student dues."
+        confirmLabel="Publish" onConfirm={() => publishMut.mutate()}
+        onClose={() => setShowPublishConfirm(false)}
+      />
 
-      <ConfirmDialog open={showArchiveConfirm} title={`Archive "${plan.name}"?`} description="Archived plans are read-only."
-        confirmLabel="Archive" onConfirm={() => archiveMut.mutate()} onClose={() => setShowArchiveConfirm(false)} />
+      <ConfirmDialog
+        open={showArchiveConfirm}
+        title="Archive this fee plan?"
+        description="Archiving will lock the plan permanently. No more dues can be generated from it."
+        danger confirmLabel="Archive" onConfirm={() => archiveMut.mutate()}
+        onClose={() => setShowArchiveConfirm(false)}
+      />
 
-      {/* Generate Demands Modal */}
       {showGenerateModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-          onClick={() => { if (!generateMut.isPending && !dryRunMut.isPending) { setShowGenerateModal(false); setGeneratePreview(null); } }}>
-          <div className="card stack" style={{ maxWidth: 520, width: '100%', gap: 16 }} onClick={e => e.stopPropagation()}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="card stack" style={{ minWidth: 360, maxWidth: 500, width: '90vw' }}>
             <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong style={{ fontSize: 16 }}>Generate Student Dues</strong>
-              <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '4px 10px' }}
-                disabled={generateMut.isPending}
-                onClick={() => { setShowGenerateModal(false); setGeneratePreview(null); }}>✕ Close</button>
+              <strong>Generate Student Dues</strong>
+              <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => { setShowGenerateModal(false); setGeneratePreview(null); setGenerateError(''); }}>&#x2715; Close</button>
             </div>
-            <div style={{ fontSize: 13, color: '#64748b' }}>Plan: <strong>{plan.name}</strong> · {plan.academicYearLabel}</div>
-
-            {dryRunMut.isPending && (
-              <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b' }}>
-                <div style={{ fontSize: 20, marginBottom: 8 }}>⏳</div>
-                Computing preview…
-              </div>
+            {generateError && <div style={{ color: '#b91c1c', fontSize: 13, background: '#fef2f2', padding: '8px 12px', borderRadius: 6 }}>{generateError}</div>}
+            {dryRunMut.isPending && <div className="muted" style={{ padding: 16, textAlign: 'center' }}>Calculating preview…</div>}
+            {!dryRunMut.isPending && !generatePreview && !generateError && (
+              <p style={{ fontSize: 13, color: '#475569', margin: 0 }}>Click Generate to create dues for eligible students.</p>
             )}
-
-            {generateError && (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#b91c1c', fontSize: 13 }}>
-                {generateError}
-              </div>
-            )}
-
-            {generatePreview && !dryRunMut.isPending && (
-              <div className="stack" style={{ gap: 12 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {[
-                    { label: 'Applicable Students',  value: generatePreview.totalApplicableStudents },
-                    { label: 'Demands to Create',    value: generatePreview.createdDemands },
-                    { label: 'Already Exist (skip)', value: generatePreview.skippedExistingDemands },
-                    { label: 'Total Amount',          value: fmt(generatePreview.totalAmountGenerated) },
-                  ].map(kpi => (
-                    <div key={kpi.label} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px' }}>
-                      <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>{kpi.label}</div>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: '#1e293b' }}>{kpi.value}</div>
-                    </div>
-                  ))}
+            {generatePreview && (
+              <div className="stack" style={{ gap: 8 }}>
+                <div style={{ fontSize: 13, color: '#475569' }}>
+                  <strong>{generatePreview.totalApplicableStudents ?? 0}</strong> students eligible,&nbsp;
+                  <strong>{generatePreview.skippedExistingDemands ?? 0}</strong> will be skipped (already have demands).
                 </div>
-
-                {generatePreview.warnings.length > 0 && (
-                  <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px' }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 4 }}>⚠ Warnings</div>
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#92400e' }}>
-                      {generatePreview.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                    </ul>
-                  </div>
-                )}
-
-                {generatePreview.overrideNotes && generatePreview.overrideNotes.length > 0 && (
-                  <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px 14px' }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#0369a1', marginBottom: 6 }}>📊 Override Summary</div>
-                    <div style={{ fontSize: 12, color: '#0369a1', marginBottom: 6 }}>More specific rules override broader rules for the same fee head.</div>
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#075985' }}>
-                      {generatePreview.overrideNotes.map((n, i) => <li key={i}>{n}</li>)}
-                    </ul>
-                  </div>
-                )}
-
-                {generatePreview.createdDemands === 0 && generatePreview.skippedExistingDemands > 0 && (
-                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#166534' }}>
-                    ✓ All demands already exist — no new demands will be created.
-                  </div>
-                )}
-
-                <div className="row" style={{ gap: 8 }}>
-                  <button type="button" className="btn" style={{ flex: 1 }}
-                    disabled={generateMut.isPending || generatePreview.createdDemands === 0}
-                    onClick={() => { setGenerateError(''); generateMut.mutate(); }}>
-                    {generateMut.isPending ? 'Generating…' : `Confirm — Create ${generatePreview.createdDemands} Demand(s)`}
-                  </button>
-                  <button type="button" className="btn secondary"
-                    disabled={generateMut.isPending}
-                    onClick={() => { setShowGenerateModal(false); setGeneratePreview(null); }}>
-                    Cancel
+                <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn secondary" onClick={() => { setShowGenerateModal(false); setGeneratePreview(null); setGenerateError(''); }}>Cancel</button>
+                  <button type="button" className="btn" style={{ background: 'linear-gradient(180deg,#059669,#047857)', borderColor: '#047857' }}
+                    disabled={generateMut.isPending} onClick={() => generateMut.mutate()}>
+                    {generateMut.isPending ? 'Generating…' : `Generate for ${generatePreview.totalApplicableStudents ?? 0} students`}
                   </button>
                 </div>
               </div>
@@ -2395,7 +2056,6 @@ function TabCollections({ perms }: { perms: FeePermissions }) {
   const [cancelTarget, setCancelTarget] = useState<FeePaymentDTO | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelErr, setCancelErr] = useState('');
-  const [collectOpen, setCollectOpen] = useState(false);
   const [receiptPayment, setReceiptPayment] = useState<FeePaymentDTO | null>(null);
 
   const buildQs = useCallback(() => {
@@ -2492,12 +2152,6 @@ function TabCollections({ perms }: { perms: FeePermissions }) {
               Clear
             </button>
           )}
-          {perms.canCollect && (
-            <button type="button" className="btn" style={{ alignSelf: 'flex-end', fontSize: 12, padding: '8px 14px' }}
-              onClick={() => setCollectOpen(true)}>
-              + Collect Payment
-            </button>
-          )}
         </div>
       </div>
 
@@ -2512,11 +2166,8 @@ function TabCollections({ perms }: { perms: FeePermissions }) {
             <div className="fee-empty-state__icon">💳</div>
             <div className="fee-empty-state__title">No payments recorded yet</div>
             <div className="fee-empty-state__desc">
-              Collect your first payment from the Student Dues tab or use the Collect Payment button above.
+              Collect payments from the Student Dues tab.
             </div>
-            {perms.canCollect && (
-              <button type="button" className="btn" onClick={() => setCollectOpen(true)}>+ Collect First Payment</button>
-            )}
           </div>
         ) : (
           <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: '40px 0' }}>No results match your filters.</div>
@@ -2611,18 +2262,6 @@ function TabCollections({ perms }: { perms: FeePermissions }) {
       {/* View payment modal */}
       {viewPayment && <ReceiptSummaryModal payment={viewPayment} onClose={() => setViewPayment(null)} />}
 
-      {/* Collect payment modal (generic — student search not preloaded) */}
-      {collectOpen && (
-        <CollectFromSearchModal
-          onClose={() => setCollectOpen(false)}
-          onSuccess={(payment) => {
-            setCollectOpen(false);
-            setReceiptPayment(payment);
-            qc.invalidateQueries({ queryKey: ['fee-payments'] });
-            qc.invalidateQueries({ queryKey: ['fee-demands'] });
-          }}
-        />
-      )}
 
       {receiptPayment && <ReceiptSummaryModal payment={receiptPayment} onClose={() => setReceiptPayment(null)} />}
 
@@ -2654,72 +2293,6 @@ function TabCollections({ perms }: { perms: FeePermissions }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ─── Collect from search modal (used from Collections tab without pre-selected student) ───
-
-function CollectFromSearchModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (p: FeePaymentDTO) => void }) {
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<{ id: number; name: string } | null>(null);
-
-  const studentsQ = useQuery({
-    queryKey: ['students-collect-search', search],
-    queryFn: async () => {
-      if (!search.trim()) return [];
-      return (await api.get<{ id: number; firstName: string; lastName?: string | null; admissionNo: string }[]>(
-        `/api/students?search=${encodeURIComponent(search)}&size=20`
-      )).data;
-    },
-    enabled: search.trim().length >= 2,
-  });
-
-  const students = Array.isArray(studentsQ.data) ? studentsQ.data : [];
-
-  if (selected) {
-    return (
-      <CollectPaymentModal
-        studentId={selected.id}
-        studentName={selected.name}
-        onClose={onClose}
-        onSuccess={onSuccess}
-      />
-    );
-  }
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-      onClick={onClose}>
-      <div className="card stack" style={{ maxWidth: 480, width: '100%', gap: 14 }} onClick={e => e.stopPropagation()}>
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <strong style={{ fontSize: 15 }}>Select Student</strong>
-          <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '4px 10px' }} onClick={onClose}>✕</button>
-        </div>
-        <div className="stack">
-          <label style={{ fontSize: 12 }}>Search student by name or admission no.</label>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Type at least 2 characters…" autoFocus />
-        </div>
-        {studentsQ.isLoading && <div className="muted" style={{ textAlign: 'center' }}>Searching…</div>}
-        {students.length > 0 && (
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
-            {students.map(s => {
-              const name = `${s.firstName} ${s.lastName ?? ''}`.trim();
-              return (
-                <button key={s.id} type="button"
-                  style={{ width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', fontSize: 13 }}
-                  onClick={() => setSelected({ id: s.id, name })}>
-                  <div style={{ fontWeight: 600 }}>{name}</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8' }}>{s.admissionNo}</div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {search.trim().length >= 2 && !studentsQ.isLoading && students.length === 0 && (
-          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center' }}>No students found.</div>
-        )}
-      </div>
     </div>
   );
 }
@@ -2845,20 +2418,16 @@ function TabOverview({ onGoToHeads, onGoToPlans, onGoToDues }: { onGoToHeads: ()
 
 // ─── TAB: Reports ──────────────────────────────────────────────────────────────
 
-type ReportType = 'dailyCollection' | 'classOutstanding' | 'studentDues' | 'paymentMode' | 'receiptRegister';
+type ReportType = 'dailyCollection' | 'paymentMode' | 'receiptRegister';
 
 const REPORT_TYPES: { key: ReportType; label: string }[] = [
   { key: 'dailyCollection',  label: 'Daily Collection' },
-  { key: 'classOutstanding', label: 'Class Outstanding' },
-  { key: 'studentDues',      label: 'Student Dues' },
   { key: 'paymentMode',      label: 'Payment Mode' },
   { key: 'receiptRegister',  label: 'Receipt Register' },
 ];
 
 const REPORT_URL: Record<ReportType, string> = {
   dailyCollection:  '/api/fees/reports/daily-collection',
-  classOutstanding: '/api/fees/reports/class-outstanding',
-  studentDues:      '/api/fees/reports/student-dues',
   paymentMode:      '/api/fees/reports/payment-mode',
   receiptRegister:  '/api/fees/reports/receipt-register',
 };
@@ -2944,47 +2513,6 @@ function TabReports() {
                 <td style={tdStyle}>{PAYMENT_MODE_LABELS[r.paymentMode as PaymentMode] ?? r.paymentMode}</td>
                 <td style={{ ...tdStyle, fontWeight: 700, color: '#16a34a' }}>{fmt(r.totalAmount)}</td>
                 <td style={{ ...tdStyle, color: '#64748b' }}>{r.paymentCount}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        );
-      }
-      case 'classOutstanding': {
-        const data = rows as ClassOutstandingRow[];
-        return (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead><tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-              {['Class', 'Section', 'Students', 'Demands', 'Payable', 'Paid', 'Outstanding'].map(h => <th key={h} style={thStyle}>{h}</th>)}
-            </tr></thead>
-            <tbody>{data.map((r, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ ...tdStyle, fontWeight: 600 }}>{r.className}</td>
-                <td style={{ ...tdStyle, color: '#64748b' }}>{r.section ?? '—'}</td>
-                <td style={tdStyle}>{r.studentCount}</td>
-                <td style={{ ...tdStyle, color: '#64748b' }}>{r.demandCount}</td>
-                <td style={tdStyle}>{fmt(r.totalPayable)}</td>
-                <td style={{ ...tdStyle, color: '#16a34a' }}>{fmt(r.totalPaid)}</td>
-                <td style={{ ...tdStyle, fontWeight: 700, color: '#dc2626' }}>{fmt(r.totalOutstanding)}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        );
-      }
-      case 'studentDues': {
-        const data = rows as StudentDueRow[];
-        return (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead><tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-              {['Student', 'Admission No', 'Class', 'Payable', 'Paid', 'Balance'].map(h => <th key={h} style={thStyle}>{h}</th>)}
-            </tr></thead>
-            <tbody>{data.map((r, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ ...tdStyle, fontWeight: 600 }}>{r.studentName}</td>
-                <td style={{ ...tdStyle, fontFamily: 'monospace', color: '#64748b' }}>{r.admissionNo}</td>
-                <td style={tdStyle}>{r.className ?? '—'}</td>
-                <td style={tdStyle}>{fmt(r.totalPayable)}</td>
-                <td style={{ ...tdStyle, color: '#16a34a' }}>{fmt(r.totalPaid)}</td>
-                <td style={{ ...tdStyle, fontWeight: 700, color: '#dc2626' }}>{fmt(r.totalBalance)}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -3163,3 +2691,4 @@ export function FeesPage() {
     </div>
   );
 }
+

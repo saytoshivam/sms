@@ -1,8 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { formatApiError } from '../lib/errors';
+import {
+  CollectPaymentModal,
+  type FeePaymentResult,
+  PAYMENT_MODE_LABELS as FEE_MODE_LABELS,
+  fmtMoney,
+  toNum,
+} from '../components/fees/CollectPaymentModal';
 import type { StudentLifecycleStatus } from '../components/students/studentListTypes';
 import {
   EditProfileDrawer,
@@ -12,8 +19,6 @@ import {
   CreateStudentLoginModal,
 } from '../components/students/StudentProfileFlows';
 import '../components/students/studentsWorkspace.css';
-import { SelectKeeper } from '../components/SelectKeeper';
-import { DateKeeper } from '../components/DateKeeper';
 
 // ─── Types matching StudentProfileSummaryDTO ─────────────────────────────────
 
@@ -162,18 +167,7 @@ function fmtDate(d: string | null | undefined): string {
   }
 }
 
-function fmtMoney(v: number | string | null | undefined): string {
-  if (v == null) return '—';
-  const n = typeof v === 'string' ? parseFloat(v) : v;
-  if (isNaN(n)) return '—';
-  return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function toNum(v: number | string | null | undefined): number {
-  if (v == null) return 0;
-  const n = typeof v === 'string' ? parseFloat(v) : v;
-  return isNaN(n) ? 0 : n;
-}
+// fmtMoney and toNum imported from shared CollectPaymentModal
 
 function fmtFileSize(bytes: number | null | undefined): string {
   if (bytes == null) return '';
@@ -1342,61 +1336,11 @@ type StudentFeeDemand = {
   academicYearLabel: string;
 };
 
-type PaymentMode = 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE' | 'CARD' | 'DEMAND_DRAFT' | 'ADJUSTMENT';
+// PaymentMode types and labels imported from shared CollectPaymentModal
 type SPPaymentStatus = 'SUCCESS' | 'PENDING' | 'FAILED' | 'CANCELLED';
 
-const SP_PAYMENT_MODES: PaymentMode[] = ['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE', 'CARD', 'DEMAND_DRAFT', 'ADJUSTMENT'];
-const SP_MODE_LABELS: Record<PaymentMode, string> = {
-  CASH: 'Cash', UPI: 'UPI', BANK_TRANSFER: 'Bank Transfer',
-  CHEQUE: 'Cheque', CARD: 'Card', DEMAND_DRAFT: 'Demand Draft', ADJUSTMENT: 'Adjustment',
-};
-const SP_REF_REQUIRED = new Set<PaymentMode>(['UPI', 'BANK_TRANSFER', 'CHEQUE', 'CARD']);
-
-type FeePaymentAllocation = {
-  id: number;
-  demandId: number;
-  demandNo: string;
-  feeHeadName?: string | null;
-  feeHeadCode?: string | null;
-  installmentName?: string | null;
-  allocatedAmount: number | string;
-  demandPayableAmount: number | string;
-  demandPaidAmount: number | string;
-  demandBalanceAmount: number | string;
-  demandStatus: StudentFeeDemandStatus;
-  createdAt: string;
-};
-
-type SPFeeReceipt = {
-  id: number;
-  receiptNo: string;
-  issuedAt: string;
-  pdfUrl?: string | null;
-  cancelledAt?: string | null;
-  cancelReason?: string | null;
-};
-
-type FeePayment = {
-  id: number;
-  schoolId: number;
-  studentId: number;
-  studentName: string;
-  studentAdmissionNo?: string | null;
-  classGroupName?: string | null;
-  receiptNo: string;
-  amount: number | string;
-  paymentMode: string;
-  paymentDate: string;
-  referenceNo?: string | null;
-  notes?: string | null;
-  status: SPPaymentStatus;
-  collectedByUserId?: number | null;
-  outstandingBalance?: number | string | null;
-  createdAt: string;
-  updatedAt: string;
-  allocations?: FeePaymentAllocation[];
-  receipt?: SPFeeReceipt | null;
-};
+// FeePayment is an alias for the shared FeePaymentResult
+type FeePayment = FeePaymentResult;
 
 // ─── Fee Ledger types ─────────────────────────────────────────────────────────
 
@@ -1468,60 +1412,8 @@ function fmtHumanDate(raw: string | null | undefined): string {
   } catch { return raw; }
 }
 
-function _printReceipt(payment: FeePayment, schoolName: string = 'School') {
-  const w = window.open('', '_blank', 'width=700,height=900');
-  if (!w) return;
-  const allocs = payment.allocations ?? [];
-  const rows = allocs.map(a => `
-    <tr>
-      <td>${a.feeHeadName ?? a.feeHeadCode ?? '—'}</td>
-      <td>${a.installmentName ?? '—'}</td>
-      <td style="font-family:monospace;font-size:12px">${a.demandNo}</td>
-      <td style="text-align:right;font-weight:700">₹${toNum(a.allocatedAmount).toLocaleString('en-IN', {minimumFractionDigits:2})}</td>
-    </tr>`).join('');
-  w.document.write(`<!DOCTYPE html>
-<html><head><title>Receipt ${payment.receiptNo}</title>
-<style>
-  body{font-family:Arial,sans-serif;color:#111;padding:24px;font-size:13px}
-  h2{margin:0 0 4px;font-size:18px}
-  .meta{color:#555;font-size:12px;margin-bottom:16px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;margin-bottom:16px}
-  .lbl{font-size:11px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
-  .val{font-weight:600;margin-top:2px}
-  table{width:100%;border-collapse:collapse;margin-bottom:12px}
-  th{text-align:left;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #ddd;padding:5px 6px}
-  td{padding:7px 6px;border-bottom:1px solid #f0f0f0;vertical-align:top}
-  .total-row{font-weight:800;background:#f8f8f8}
-  .footer{font-size:11px;color:#aaa;margin-top:8px;border-top:1px solid #eee;padding-top:8px}
-  @media print{body{padding:0}}
-</style></head><body>
-<h2>${schoolName}</h2>
-<div class="meta">Fee Payment Receipt · ${fmtHumanDate(new Date().toISOString())}</div>
-<div style="border:1px solid #ddd;border-radius:6px;padding:16px;margin-bottom:16px">
-  <div style="font-weight:800;font-size:15px;margin-bottom:10px">Receipt: ${payment.receiptNo}</div>
-  <div class="grid">
-    <div><div class="lbl">Student</div><div class="val">${payment.studentName}</div></div>
-    <div><div class="lbl">Admission No</div><div class="val">${payment.studentAdmissionNo ?? '—'}</div></div>
-    <div><div class="lbl">Class / Section</div><div class="val">${payment.classGroupName ?? '—'}</div></div>
-    <div><div class="lbl">Amount Paid</div><div class="val" style="color:#166534;font-size:16px">₹${toNum(payment.amount).toLocaleString('en-IN',{minimumFractionDigits:2})}</div></div>
-    <div><div class="lbl">Payment Mode</div><div class="val">${SP_MODE_LABELS[payment.paymentMode as PaymentMode] ?? payment.paymentMode}</div></div>
-    <div><div class="lbl">Payment Date</div><div class="val">${fmtHumanDate(payment.paymentDate)}</div></div>
-    ${payment.referenceNo ? `<div><div class="lbl">Reference No</div><div class="val" style="font-family:monospace">${payment.referenceNo}</div></div>` : ''}
-    ${payment.outstandingBalance != null ? `<div><div class="lbl">Outstanding After</div><div class="val" style="color:${toNum(payment.outstandingBalance)>0?'#b91c1c':'#166534'}">₹${toNum(payment.outstandingBalance).toLocaleString('en-IN',{minimumFractionDigits:2})}</div></div>` : ''}
-  </div>
-</div>
-${allocs.length > 0 ? `<table>
-  <thead><tr><th>Fee Head</th><th>Installment</th><th>Demand No</th><th style="text-align:right">Amount</th></tr></thead>
-  <tbody>${rows}<tr class="total-row"><td colspan="3" style="text-align:right;padding:7px 6px">Total</td><td style="text-align:right;padding:7px 6px">₹${toNum(payment.amount).toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr></tbody>
-</table>` : ''}
-<div class="footer">Generated: ${new Date().toLocaleString('en-IN')} · This is a computer-generated receipt.</div>
-</body></html>`);
-  w.document.close();
-  w.focus();
-  setTimeout(() => { w.print(); }, 400);
-}
 
-function SPReceiptModal({ payment, schoolName, onClose }: { payment: FeePayment; schoolName: string; onClose: () => void }) {
+function SPReceiptModal({ payment, onClose }: { payment: FeePayment; onClose: () => void }) {
   const r = payment.receipt;
   const [isDownloading, setIsDownloading] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
@@ -1611,7 +1503,7 @@ function SPReceiptModal({ payment, schoolName, onClose }: { payment: FeePayment;
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: 13 }}>
           {([
             ['Amount', `₹${toNum(payment.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`],
-            ['Mode', SP_MODE_LABELS[payment.paymentMode as PaymentMode] ?? payment.paymentMode],
+            ['Mode', FEE_MODE_LABELS[payment.paymentMode as keyof typeof FEE_MODE_LABELS] ?? payment.paymentMode],
             ['Date', fmtHumanDate(payment.paymentDate)],
             ['Reference', payment.referenceNo ?? '—'],
             ...(payment.outstandingBalance != null ? [['Outstanding After', `₹${toNum(payment.outstandingBalance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`]] : []),
@@ -1687,165 +1579,7 @@ function SPReceiptModal({ payment, schoolName, onClose }: { payment: FeePayment;
   );
 }
 
-function SPCollectModal({ studentId, studentName, demands, preselectedDemandId, onClose, onSuccess }: {
-  studentId: number; studentName: string; demands: StudentFeeDemand[];
-  preselectedDemandId?: number | null;
-  onClose: () => void; onSuccess: (p: FeePayment) => void;
-}) {
-  const today = new Date().toISOString().split('T')[0];
-  const [paymentDate, setPaymentDate] = useState(today);
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('CASH');
-  const [referenceNo, setReferenceNo] = useState('');
-  const outstanding = demands.filter(d => d.status === 'UNPAID' || d.status === 'PARTIAL');
-  const [allocations, setAllocations] = useState<Record<number, string>>(() => {
-    // Pre-fill only the preselected demand (if provided) with its balance
-    if (preselectedDemandId) {
-      const d = outstanding.find(x => x.id === preselectedDemandId);
-      if (d) return { [d.id]: String(toNum(d.balanceAmount)) };
-    }
-    return {};
-  });
-  const [submitErr, setSubmitErr] = useState('');
-
-  const totalAllocated = Object.values(allocations).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-  const refRequired = SP_REF_REQUIRED.has(paymentMode);
-
-  let validErr = '';
-  if (totalAllocated <= 0) validErr = 'Total allocated must be > 0.';
-  else if (refRequired && !referenceNo.trim()) validErr = `Reference is required for ${SP_MODE_LABELS[paymentMode]}.`;
-  else {
-    for (const d of outstanding) {
-      const alloc = parseFloat(allocations[d.id] ?? '0') || 0;
-      if (alloc > toNum(d.balanceAmount)) { validErr = `Over-allocated for ${d.feeHeadName}.`; break; }
-    }
-  }
-
-  const submitMut = useMutation({
-    mutationFn: async () => {
-      const allocationsList = outstanding
-        .filter(d => (parseFloat(allocations[d.id] ?? '0') || 0) > 0)
-        .map(d => ({ demandId: d.id, amount: parseFloat(allocations[d.id]) }));
-      return (await api.post<FeePayment>('/api/fees/payments', {
-        studentId, paymentDate, paymentMode,
-        referenceNo: referenceNo || undefined,
-        allocations: allocationsList,
-      })).data;
-    },
-    onSuccess: (data) => onSuccess(data),
-    onError: (e) => setSubmitErr(formatApiError(e)),
-  });
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-      onClick={() => { if (!submitMut.isPending) onClose(); }}>
-      <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 640, width: '100%', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 48px rgba(15,23,42,0.2)', maxHeight: '90vh', overflowY: 'auto' }}
-        onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 16 }}>Collect Payment</div>
-            <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>Student: <strong>{studentName}</strong></div>
-          </div>
-          <button type="button" disabled={submitMut.isPending} onClick={onClose}
-            style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 12 }}>✕</button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 130, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Payment Date *</label>
-            <DateKeeper value={paymentDate} onChange={setPaymentDate} />
-          </div>
-          <div style={{ flex: 1, minWidth: 150, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Payment Mode *</label>
-            <SelectKeeper
-              value={paymentMode}
-              onChange={v => setPaymentMode(v as PaymentMode)}
-              options={SP_PAYMENT_MODES.map(m => ({ value: m, label: SP_MODE_LABELS[m] }))}
-            />
-          </div>
-          <div style={{ flex: 2, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Reference {refRequired ? '*' : '(optional)'}</label>
-            <input value={referenceNo} onChange={e => setReferenceNo(e.target.value)}
-              style={{ padding: '8px 10px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13 }} placeholder="Ref no…" />
-          </div>
-        </div>
-
-        {outstanding.length === 0 ? (
-          <div style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center', padding: 20, border: '1px dashed #e2e8f0', borderRadius: 8 }}>
-            No outstanding demands.
-          </div>
-        ) : (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>Outstanding Demands</div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button type="button" onClick={() => { const a: Record<number, string> = {}; outstanding.forEach(d => { a[d.id] = String(toNum(d.balanceAmount)); }); setAllocations(a); }}
-                  style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11 }}>⚡ Auto-Allocate</button>
-                <button type="button" onClick={() => setAllocations({})}
-                  style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontSize: 11 }}>✕ Clear</button>
-              </div>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
-                    {['Fee Head', 'Installment', 'Balance', 'Amount to Pay'].map(h => (
-                      <th key={h} style={{ padding: '7px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {outstanding.map(d => {
-                    const bal = toNum(d.balanceAmount);
-                    const alloc = parseFloat(allocations[d.id] ?? '') || 0;
-                    return (
-                      <tr key={d.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '7px 10px' }}>
-                          <div style={{ fontWeight: 600 }}>{d.feeHeadName}</div>
-                          <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>{d.feeHeadCode}</div>
-                        </td>
-                        <td style={{ padding: '7px 10px', fontSize: 12 }}>{d.installmentName}</td>
-                        <td style={{ padding: '7px 10px', fontWeight: 700, color: '#b45309' }}>{fmtMoney(bal)}</td>
-                        <td style={{ padding: '7px 10px', minWidth: 120 }}>
-                          <input type="number" min="0" step="0.01" max={String(bal)}
-                            value={allocations[d.id] ?? ''}
-                            onChange={e => setAllocations(prev => ({ ...prev, [d.id]: e.target.value }))}
-                            style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: `1px solid ${alloc > bal ? '#dc2626' : '#e2e8f0'}`, fontSize: 13 }}
-                            placeholder="0.00" />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 13, color: '#64748b' }}>Total</span>
-          <span style={{ fontSize: 18, fontWeight: 800 }}>{fmtMoney(totalAllocated)}</span>
-        </div>
-
-        {(validErr || submitErr) && (
-          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', color: '#b91c1c', fontSize: 13 }}>
-            {validErr || submitErr}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button"
-            disabled={submitMut.isPending || !!validErr || outstanding.length === 0}
-            onClick={() => { setSubmitErr(''); submitMut.mutate(); }}
-            style={{ flex: 1, padding: '10px 0', borderRadius: 8, background: submitMut.isPending || !!validErr || outstanding.length === 0 ? '#94a3b8' : 'var(--color-primary, #4f46e5)', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>
-            {submitMut.isPending ? 'Recording…' : `Record Payment — ${fmtMoney(totalAllocated)}`}
-          </button>
-          <button type="button" disabled={submitMut.isPending} onClick={onClose}
-            style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// SPCollectModal removed — using shared CollectPaymentModal from components/fees/CollectPaymentModal.tsx
 
 function FeesTab({ studentId, studentName }: { studentId: number; studentName: string }) {
   const [collectOpen, setCollectOpen] = useState(false);
@@ -1857,13 +1591,6 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
   const qc = useQueryClient();
 
   // Fetch school name for receipt print / PDF
-  const meQ = useQuery({
-    queryKey: ['user-me'],
-    queryFn: async () => (await api.get<{ schoolName?: string; roles?: string[] }>('/api/user/me')).data,
-    staleTime: 5 * 60_000,
-  });
-  const schoolName = meQ.data?.schoolName ?? 'School';
-
   const feesQ = useQuery({
     queryKey: ['student-fee-demands', studentId],
     queryFn: async () => (await api.get<StudentFeeDemand[]>(`/api/students/${studentId}/fees/demands`)).data,
@@ -2036,7 +1763,7 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
                     <tr key={p.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', opacity: p.status === 'CANCELLED' ? 0.6 : 1 }}>
                       <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 700, color: '#4f46e5' }}>{p.receiptNo}</td>
                       <td style={{ padding: '10px 12px', fontWeight: 700 }}>{fmtMoney(p.amount)}</td>
-                      <td style={{ padding: '10px 12px', fontSize: 12 }}>{SP_MODE_LABELS[p.paymentMode as PaymentMode] ?? p.paymentMode}</td>
+                      <td style={{ padding: '10px 12px', fontSize: 12 }}>{FEE_MODE_LABELS[p.paymentMode as keyof typeof FEE_MODE_LABELS] ?? p.paymentMode}</td>
                       <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.65)' }}>{fmtHumanDate(p.paymentDate)}</td>
                       <td style={{ padding: '10px 12px', fontSize: 12, color: 'rgba(15,23,42,0.55)', fontFamily: p.referenceNo ? 'monospace' : undefined }}>{p.referenceNo ?? '—'}</td>
                       <td style={{ padding: '10px 12px' }}>
@@ -2174,11 +1901,10 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
       {/* ─── Modals ──────────────────────────────────────────────────────────── */}
 
       {collectOpen && (
-        <SPCollectModal
+        <CollectPaymentModal
           studentId={studentId}
           studentName={studentName}
-          demands={demands}
-          preselectedDemandId={collectPreselect}
+          preSelectedDemandId={collectPreselect}
           onClose={() => { setCollectOpen(false); setCollectPreselect(null); }}
           onSuccess={(payment) => {
             setCollectOpen(false);
@@ -2191,7 +1917,7 @@ function FeesTab({ studentId, studentName }: { studentId: number; studentName: s
         />
       )}
 
-      {receiptPayment && <SPReceiptModal payment={receiptPayment} schoolName={schoolName} onClose={() => setReceiptPayment(null)} />}
+      {receiptPayment && <SPReceiptModal payment={receiptPayment} onClose={() => setReceiptPayment(null)} />}
 
       {cancelTarget && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
