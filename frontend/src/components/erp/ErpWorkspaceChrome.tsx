@@ -101,6 +101,7 @@ function buildLeaderNavGroups(attendancePath: string, roles: string[]): NavGroup
           icon: CalendarRange,
           prefix: '/app/timetable',
         },
+        { to: '/app/examinations', label: 'Examinations', icon: FileText, prefix: '/app/examinations' },
         {
           to: withWorkspaceReadOnly('/app/students'),
           label: 'Students',

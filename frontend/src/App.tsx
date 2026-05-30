@@ -62,6 +62,7 @@ import { TimeModulePage } from './pages/modules/TimeModulePage';
 import { TimetableModulePage } from './pages/modules/TimetableModulePage';
 import { ClassesSectionsModulePage } from './pages/modules/ClassesSectionsModulePage';
 import { DocumentRequirementsPage } from './pages/students/DocumentRequirementsPage';
+import { ExaminationsModulePage } from './pages/modules/ExaminationsModulePage';
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { isAuthenticated } = useAuth();
@@ -183,6 +184,7 @@ export default function App() {
             </RequireSchoolLeadership>
           }
         />
+        <Route path="examinations" element={<ExaminationsModulePage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/app" replace />} />

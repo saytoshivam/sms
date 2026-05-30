@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarDays,
   Clock,
+  FileText,
   GraduationCap,
   Network,
   Search,
@@ -611,6 +612,7 @@ function SchoolOperationsHub({ schoolName }: { schoolName: string }) {
           <HubCard icon={GraduationCap} title="Teachers" level={teachersReadiness.level} primary={teachersReadiness.primary} secondary={teachersReadiness.secondary} to="/app/teachers" />
           <HubCard icon={Network} title="Academic structure" level={academicReadiness.level} primary={academicReadiness.primary} secondary={academicReadiness.secondary} to="/app/academic" />
           <HubCard icon={CalendarDays} title="Timetable" level={timetableReadiness.level} primary={timetableReadiness.primary} secondary={timetableReadiness.secondary} to="/app/timetable" />
+          <HubCard icon={FileText} title="Examinations" level="info" primary="Configure schemes & grading" secondary="Assessment schemes, components, and grading bands." to="/app/examinations" />
           <HubCard
             icon={UsersRound}
             title="Students"
