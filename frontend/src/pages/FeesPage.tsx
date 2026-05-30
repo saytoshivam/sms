@@ -15,6 +15,7 @@ import {
   fmtMoney as fmt,
   toNum,
 } from '../components/fees/CollectPaymentModal';
+import { FeeLedgerModal } from '../components/fees/FeeLedgerModal';
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
 
@@ -377,6 +378,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
   // ── Modal state ───────────────────────────────────────────────────────────
   const [collectTarget, setCollectTarget] = useState<{ studentId: number; studentName: string; demandId?: number } | null>(null);
   const [receiptPayment, setReceiptPayment] = useState<FeePaymentDTO | null>(null);
+  const [ledgerTarget, setLedgerTarget] = useState<{ studentId: number; studentName: string } | null>(null);
 
   // ── Debounce search ─────────────────────────���─────────────────────────────
   useEffect(() => {
@@ -789,8 +791,8 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                             </button>
                           )}
                           <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px', whiteSpace: 'nowrap' }}
-                            title="Student ledger — coming soon"
-                            onClick={() => toast.info('Student ledger', 'Ledger view is coming soon.')}>
+                            title="View student fee ledger"
+                            onClick={() => setLedgerTarget({ studentId: d.studentId, studentName: d.studentName })}>
                             Ledger
                           </button>
                         </div>
@@ -864,7 +866,7 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
                       </button>
                     )}
                     <button type="button" className="btn secondary" style={{ fontSize: 12 }}
-                      onClick={() => toast.info('Student ledger', 'Ledger view is coming soon.')}>
+                      onClick={() => setLedgerTarget({ studentId: d.studentId, studentName: d.studentName })}>
                       Ledger
                     </button>
                   </div>
@@ -892,6 +894,14 @@ function TabStudentDues({ perms }: { perms: FeePermissions }) {
 
       {receiptPayment && (
         <ReceiptSummaryModal payment={receiptPayment} onClose={() => setReceiptPayment(null)} />
+      )}
+
+      {ledgerTarget && (
+        <FeeLedgerModal
+          studentId={ledgerTarget.studentId}
+          studentName={ledgerTarget.studentName}
+          onClose={() => setLedgerTarget(null)}
+        />
       )}
     </div>
   );
