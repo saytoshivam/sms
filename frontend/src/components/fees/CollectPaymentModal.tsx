@@ -2,7 +2,7 @@
  * CollectPaymentModal — shared collect-payment modal used in both
  * Student Profile (Fees tab) and Fee Management → Student Dues.
  *
- * Fetches outstanding demands itself from /api/fees/demands?studentId=…
+ * Fetches outstanding demands itself from /api/students/{studentId}/fees/demands
  * so callers only need to provide studentId + studentName.
  */
 import { useEffect, useState } from 'react';
@@ -130,7 +130,7 @@ export function CollectPaymentModal({
   const demandsQ = useQuery({
     queryKey: ['student-outstanding-demands', studentId],
     queryFn: async () => {
-      const res = await api.get<OutstandingDemand[]>(`/api/fees/demands?studentId=${studentId}`);
+      const res = await api.get<OutstandingDemand[]>(`/api/students/${studentId}/fees/demands`);
       return (Array.isArray(res.data) ? res.data : []).filter(
         d => d.status === 'UNPAID' || d.status === 'PARTIAL',
       );
