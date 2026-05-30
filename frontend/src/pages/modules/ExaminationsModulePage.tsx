@@ -2,6 +2,12 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ModulePage, StatusChip, type StatusLevel } from '../../components/module/ModulePage';
+import { SmartSelect } from '../../components/SmartSelect';
+import { SelectKeeper } from '../../components/SelectKeeper';
+import { MultiSelectKeeper } from '../../components/MultiSelectKeeper';
+import { DateKeeper } from '../../components/DateKeeper';
+import { TimeKeeper } from '../../components/TimeKeeper';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { api } from '../../lib/api';
 import { pageContent, type SpringPage } from '../../lib/springPageContent';
 import { formatApiError } from '../../lib/errors';
@@ -68,7 +74,7 @@ type ClassGroup = {
 };
 
 type SubjectLite = { id: number; name: string; code?: string | null };
-type AcademicYear = { id: number; name: string; isCurrent?: boolean };
+type AcademicYear = { id: number; label: string };
 
 type GradingBand = {
   id: number;
@@ -84,6 +90,110 @@ type GradingScheme = {
   academicYearId: number | null;
   active: boolean;
   bands: GradingBand[];
+};
+
+type AssessmentInstanceStatus =
+  | 'DRAFT'
+  | 'SCHEDULED'
+  | 'MARKS_ENTRY_OPEN'
+  | 'MARKS_SUBMITTED'
+  | 'LOCKED'
+  | 'PUBLISHED'
+  | 'CANCELLED';
+
+type AssessmentInstance = {
+  id: number;
+  schoolId: number;
+  academicYearId: number;
+  academicYearLabel: string | null;
+  schemeId: number;
+  schemeName: string;
+  componentId: number;
+  componentName: string;
+  componentType: string;
+  name: string;
+  subjectId: number;
+  subjectName: string;
+  classGroupId: number;
+  classGroupLabel: string;
+  assessmentDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  roomId: number | null;
+  roomLabel: string | null;
+  maxMarks: number;
+  status: AssessmentInstanceStatus;
+  sequence: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type RoomLite = { id: number; building: string; roomNumber: string; buildingName?: string };
+
+type MarkStatus = 'DRAFT' | 'SUBMITTED' | 'LOCKED';
+
+type MarksEntryRowDTO = {
+  studentId: number;
+  admissionNo: string;
+  fullName: string;
+  markId: number | null;
+  marksObtained: number | null;
+  absent: boolean;
+  absentReason: string | null;
+  remarks: string | null;
+  status: MarkStatus | null;
+};
+
+type MarksEntrySheetDTO = {
+  assessmentInstanceId: number;
+  assessmentName: string;
+  componentName: string;
+  schemeName: string;
+  classGroupLabel: string;
+  subjectName: string;
+  assessmentDate: string | null;
+  maxMarks: number;
+  assessmentStatus: AssessmentInstanceStatus;
+  rows: MarksEntryRowDTO[];
+};
+
+type ResultStatus = 'GENERATED' | 'LOCKED' | 'PUBLISHED';
+
+type StudentResultComponentDTO = {
+  id: number | null;
+  assessmentComponentId: number;
+  componentName: string;
+  calculationRule: string;
+  rawScore: number | null;
+  rawMax: number | null;
+  weightedScore: number | null;
+  weightagePercent: number | null;
+  calculationDetailsJson: string | null;
+};
+
+type StudentResultDTO = {
+  id: number | null;
+  schoolId: number;
+  academicYearId: number;
+  academicYearLabel: string | null;
+  studentId: number;
+  studentName: string;
+  admissionNo: string | null;
+  classGroupId: number;
+  classGroupName: string | null;
+  schemeId: number;
+  schemeName: string;
+  subjectId: number;
+  subjectName: string;
+  totalWeightedScore: number | null;
+  percentage: number | null;
+  grade: string | null;
+  status: ResultStatus | null;
+  generatedAt: string | null;
+  publishedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  components: StudentResultComponentDTO[];
 };
 
 type SchemeForm = {
@@ -460,9 +570,29 @@ export function ExaminationsModulePage() {
         />
       ) : null}
 
-      {tab === 'schedule' ? <PlaceholderCard text="Create assessment schedule after publishing a scheme." /> : null}
-      {tab === 'marks' ? <PlaceholderCard text="Marks entry will be available after assessments are scheduled." /> : null}
-      {tab === 'results' ? <PlaceholderCard text="Results will be generated after marks are submitted and locked." /> : null}
+      {tab === 'schedule' ? (
+        <ExamSchedulePanel
+          schemes={schemes}
+          classGroups={classGroups}
+          subjects={subjects}
+          academicYears={academicYearsQ.data ?? []}
+        />
+      ) : null}
+      {tab === 'marks' ? (
+        <MarksEntryPanel
+          classGroups={classGroups}
+          subjects={subjects}
+          schemes={schemes}
+        />
+      ) : null}
+      {tab === 'results' ? (
+        <ResultsPanel
+          schemes={schemes}
+          classGroups={classGroups}
+          subjects={subjects}
+          academicYears={academicYearsQ.data ?? []}
+        />
+      ) : null}
     </ModulePage>
   );
 }
@@ -516,7 +646,7 @@ function AssessmentSchemesPanel({
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<SchemeForm>({
     name: '',
-    academicYearId: String(academicYears.find((y) => y.isCurrent)?.id ?? academicYears[0]?.id ?? ''),
+    academicYearId: String(academicYears[0]?.id ?? ''),
     description: '',
     applicableScopeType: 'SCHOOL',
     classGrade: '',
@@ -615,17 +745,14 @@ function AssessmentSchemesPanel({
               </label>
               <label className="stack" style={{ gap: 6 }}>
                 <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic year</span>
-                <select
+                <SmartSelect
                   value={form.academicYearId}
-                  onChange={(e) => setForm((p) => ({ ...p, academicYearId: e.target.value }))}
-                >
-                  <option value="">Select</option>
-                  {academicYears.map((y) => (
-                    <option key={y.id} value={y.id}>
-                      {y.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => setForm((p) => ({ ...p, academicYearId: v }))}
+                  options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+                  placeholder="Select academic year…"
+                  allowClear
+                  clearLabel="— Not set —"
+                />
               </label>
             </div>
 
@@ -641,39 +768,35 @@ function AssessmentSchemesPanel({
             <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
               <label className="stack" style={{ gap: 6 }}>
                 <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Applicable scope</span>
-                <select
+                <SelectKeeper
                   value={form.applicableScopeType}
-                  onChange={(e) =>
+                  onChange={(v) =>
                     setForm((p) => ({
                       ...p,
-                      applicableScopeType: e.target.value as ScopeType,
+                      applicableScopeType: v as ScopeType,
                       classGrade: '',
                       sectionClassGroupId: '',
                       subjectId: '',
                     }))
                   }
-                >
-                  <option value="SCHOOL">SCHOOL</option>
-                  <option value="CLASS">CLASS</option>
-                  <option value="SECTION">SECTION</option>
-                  <option value="SUBJECT">SUBJECT</option>
-                </select>
+                  options={[
+                    { value: 'SCHOOL', label: 'School-wide' },
+                    { value: 'CLASS', label: 'Class' },
+                    { value: 'SECTION', label: 'Section' },
+                    { value: 'SUBJECT', label: 'Subject' },
+                  ]}
+                />
               </label>
 
               {form.applicableScopeType === 'CLASS' ? (
                 <label className="stack" style={{ gap: 6 }}>
                   <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class</span>
-                  <select
+                  <SelectKeeper
                     value={form.classGrade}
-                    onChange={(e) => setForm((p) => ({ ...p, classGrade: e.target.value }))}
-                  >
-                    <option value="">Select class</option>
-                    {gradeOptions.map((g) => (
-                      <option key={g} value={g}>
-                        Grade {g}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => setForm((p) => ({ ...p, classGrade: v }))}
+                    emptyValueLabel="Select class…"
+                    options={gradeOptions.map((g) => ({ value: String(g), label: `Grade ${g}` }))}
+                  />
                 </label>
               ) : null}
 
@@ -681,31 +804,25 @@ function AssessmentSchemesPanel({
                 <>
                   <label className="stack" style={{ gap: 6 }}>
                     <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class</span>
-                    <select
+                    <SelectKeeper
                       value={form.classGrade}
-                      onChange={(e) => setForm((p) => ({ ...p, classGrade: e.target.value, sectionClassGroupId: '' }))}
-                    >
-                      <option value="">All classes</option>
-                      {gradeOptions.map((g) => (
-                        <option key={g} value={g}>
-                          Grade {g}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setForm((p) => ({ ...p, classGrade: v, sectionClassGroupId: '' }))}
+                      emptyValueLabel="All classes"
+                      options={gradeOptions.map((g) => ({ value: String(g), label: `Grade ${g}` }))}
+                    />
                   </label>
                   <label className="stack" style={{ gap: 6 }}>
                     <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Section</span>
-                    <select
+                    <SmartSelect
                       value={form.sectionClassGroupId}
-                      onChange={(e) => setForm((p) => ({ ...p, sectionClassGroupId: e.target.value }))}
-                    >
-                      <option value="">Select section</option>
-                      {sectionClassOptions.map((cg) => (
-                        <option key={cg.id} value={cg.id}>
-                          {cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}`}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setForm((p) => ({ ...p, sectionClassGroupId: v }))}
+                      options={sectionClassOptions.map((cg) => ({
+                        value: String(cg.id),
+                        label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}`,
+                      }))}
+                      placeholder="Select section…"
+                      allowClear
+                    />
                   </label>
                 </>
               ) : null}
@@ -713,15 +830,18 @@ function AssessmentSchemesPanel({
               {form.applicableScopeType === 'SUBJECT' ? (
                 <label className="stack" style={{ gap: 6 }}>
                   <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
-                  <select value={form.subjectId} onChange={(e) => setForm((p) => ({ ...p, subjectId: e.target.value }))}>
-                    <option value="">Select subject</option>
-                    {subjects.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                        {s.code ? ` (${s.code})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <SmartSelect
+                    value={form.subjectId}
+                    onChange={(v) => setForm((p) => ({ ...p, subjectId: v }))}
+                    options={subjects.map((s) => ({
+                      value: String(s.id),
+                      label: s.name,
+                      meta: s.code ?? undefined,
+                    }))}
+                    placeholder="Select subject…"
+                    searchable
+                    allowClear
+                  />
                 </label>
               ) : null}
             </div>
@@ -956,14 +1076,12 @@ function SchemeDetailCard({
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ fontWeight: 900 }}>Components</div>
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <select value={presetIndex} onChange={(e) => setPresetIndex(e.target.value)}>
-              <option value="">Use common pattern</option>
-              {PRESETS.map((p, i) => (
-                <option key={p.label} value={String(i)}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+            <SelectKeeper
+              value={presetIndex}
+              onChange={(v) => setPresetIndex(v)}
+              emptyValueLabel="Use common pattern…"
+              options={PRESETS.map((p, i) => ({ value: String(i), label: p.label }))}
+            />
             <button
               type="button"
               className="btn secondary"
@@ -1169,17 +1287,12 @@ function ComponentFormPanel({
         </label>
         <label className="stack" style={{ gap: 6 }}>
           <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Component type</span>
-          <select
+          <SelectKeeper
             value={form.componentType}
-            onChange={(e) => setForm((p) => ({ ...p, componentType: e.target.value as ComponentType }))}
+            onChange={(v) => setForm((p) => ({ ...p, componentType: v as ComponentType }))}
             disabled={disabled}
-          >
-            {COMPONENT_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {toDisplayLabel(t)}
-              </option>
-            ))}
-          </select>
+            options={COMPONENT_TYPES.map((t) => ({ value: t, label: toDisplayLabel(t) }))}
+          />
         </label>
         <label className="stack" style={{ gap: 6 }}>
           <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Weightage %</span>
@@ -1194,10 +1307,10 @@ function ComponentFormPanel({
         </label>
         <label className="stack" style={{ gap: 6 }}>
           <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Calculation rule</span>
-          <select
+          <SelectKeeper
             value={form.calculationRule}
-            onChange={(e) => {
-              const nextRule = e.target.value as CalculationRule;
+            onChange={(v) => {
+              const nextRule = v as CalculationRule;
               setForm((p) => ({
                 ...p,
                 calculationRule: nextRule,
@@ -1205,13 +1318,8 @@ function ComponentFormPanel({
               }));
             }}
             disabled={disabled}
-          >
-            {CALCULATION_RULES.map((r) => (
-              <option key={r} value={r}>
-                {toDisplayLabel(r)}
-              </option>
-            ))}
-          </select>
+            options={CALCULATION_RULES.map((r) => ({ value: r, label: toDisplayLabel(r) }))}
+          />
         </label>
 
         {showMaxMarks ? (
@@ -1381,14 +1489,14 @@ function GradingPanel({
           </label>
           <label className="stack" style={{ gap: 6 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic year (optional)</span>
-            <select value={academicYearId} onChange={(e) => setAcademicYearId(e.target.value)}>
-              <option value="">Not set</option>
-              {academicYears.map((y) => (
-                <option key={y.id} value={y.id}>
-                  {y.name}
-                </option>
-              ))}
-            </select>
+            <SmartSelect
+              value={academicYearId}
+              onChange={(v) => setAcademicYearId(v)}
+              options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+              placeholder="Not set"
+              allowClear
+              clearLabel="— Not set —"
+            />
           </label>
         </div>
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
@@ -1406,11 +1514,1624 @@ function GradingPanel({
   );
 }
 
-function PlaceholderCard({ text }: { text: string }) {
+// ─────────────────────────── Instance status helpers ────────────────────────
+
+function instanceStatusLevel(status: AssessmentInstanceStatus): StatusLevel {
+  switch (status) {
+    case 'DRAFT': return 'idle';
+    case 'SCHEDULED': return 'info';
+    case 'MARKS_ENTRY_OPEN': return 'warn';
+    case 'MARKS_SUBMITTED': return 'warn';
+    case 'LOCKED': return 'ok';
+    case 'PUBLISHED': return 'ok';
+    case 'CANCELLED': return 'error';
+  }
+}
+
+function instanceStatusLabel(status: AssessmentInstanceStatus): string {
+  switch (status) {
+    case 'DRAFT': return 'Draft';
+    case 'SCHEDULED': return 'Scheduled';
+    case 'MARKS_ENTRY_OPEN': return 'Marks Open';
+    case 'MARKS_SUBMITTED': return 'Submitted';
+    case 'LOCKED': return 'Locked';
+    case 'PUBLISHED': return 'Published';
+    case 'CANCELLED': return 'Cancelled';
+  }
+}
+
+function resolveInstancesToGenerate(component: AssessmentComponent): number {
+  const r = component.calculationRule;
+  if (r === 'SINGLE_ASSESSMENT' || r === 'HIGHEST' || r === 'MANUAL') return 1;
+  if (r === 'BEST_N_OF_M' || r === 'SUM' || r === 'AVERAGE') return component.totalAssessments ?? 1;
+  return 1;
+}
+
+function defaultGeneratedName(component: AssessmentComponent, sequence: number): string {
+  if (sequence <= 1 && component.calculationRule === 'SINGLE_ASSESSMENT') return component.name;
+  return `${component.name} ${sequence}`;
+}
+
+// ─────────────────────────────── Exam Schedule Panel ────────────────────────────────
+
+function ExamSchedulePanel({
+  schemes,
+  classGroups,
+  subjects,
+  academicYears,
+}: {
+  schemes: AssessmentScheme[];
+  classGroups: ClassGroup[];
+  subjects: SubjectLite[];
+  academicYears: AcademicYear[];
+}) {
+  const qc = useQueryClient();
+
+  const [filterAcademicYearId, setFilterAcademicYearId] = useState('');
+  const [filterSchemeId, setFilterSchemeId] = useState('');
+  const [filterClassGroupId, setFilterClassGroupId] = useState('');
+  const [filterSubjectId, setFilterSubjectId] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [panelMode, setPanelMode] = useState<'none' | 'create' | 'bulk'>('none');
+  const [editingInstance, setEditingInstance] = useState<AssessmentInstance | null>(null);
+
+  const serverQs = useMemo(() => {
+    const p = new URLSearchParams();
+    if (filterAcademicYearId) p.set('academicYearId', filterAcademicYearId);
+    if (filterSchemeId) p.set('schemeId', filterSchemeId);
+    if (filterClassGroupId) p.set('classGroupId', filterClassGroupId);
+    if (filterSubjectId) p.set('subjectId', filterSubjectId);
+    return p.toString();
+  }, [filterAcademicYearId, filterSchemeId, filterClassGroupId, filterSubjectId]);
+
+  const assessmentsQ = useQuery({
+    queryKey: ['exam-assessments', filterAcademicYearId, filterSchemeId, filterClassGroupId, filterSubjectId],
+    queryFn: async () => (await api.get<AssessmentInstance[]>(`/api/exams/assessments?${serverQs}`)).data,
+  });
+
+  const roomsQ = useQuery({
+    queryKey: ['rooms-exams'],
+    enabled: panelMode === 'create' || editingInstance != null,
+    queryFn: async () => pageContent((await api.get<SpringPage<RoomLite> | RoomLite[]>('/api/rooms?size=500')).data),
+  });
+
+  const assessments = useMemo(() => {
+    let list = assessmentsQ.data ?? [];
+    if (filterStatus) list = list.filter((a) => a.status === filterStatus);
+    if (filterDateFrom) list = list.filter((a) => !!a.assessmentDate && a.assessmentDate >= filterDateFrom);
+    if (filterDateTo) list = list.filter((a) => !!a.assessmentDate && a.assessmentDate <= filterDateTo);
+    return list;
+  }, [assessmentsQ.data, filterStatus, filterDateFrom, filterDateTo]);
+
+  const cancelMutation = useMutation({
+    mutationFn: async (id: number) => (await api.post<AssessmentInstance>(`/api/exams/assessments/${id}/cancel`)).data,
+    onSuccess: async () => {
+      toast.success('Assessment cancelled');
+      await qc.invalidateQueries({ queryKey: ['exam-assessments'] });
+    },
+    onError: (e) => toast.error('Could not cancel', formatApiError(e)),
+  });
+
+  const openMarksMutation = useMutation({
+    mutationFn: async (id: number) => (await api.post<AssessmentInstance>(`/api/exams/assessments/${id}/open-marks`)).data,
+    onSuccess: async () => {
+      toast.success('Marks entry opened');
+      await qc.invalidateQueries({ queryKey: ['exam-assessments'] });
+    },
+    onError: (e) => toast.error('Could not open marks entry', formatApiError(e)),
+  });
+
+  const onRefresh = async () => { await qc.invalidateQueries({ queryKey: ['exam-assessments'] }); };
+
+  const publishedSchemes = schemes.filter((s) => s.status === 'PUBLISHED');
+  const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
+
   return (
-    <div className="card" style={{ padding: 16, border: '1px solid rgba(15,23,42,0.1)' }}>
-      <div className="muted" style={{ fontSize: 14 }}>
-        {text}
+    <div className="stack" style={{ gap: 12 }}>
+      {/* Header */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ fontWeight: 900 }}>
+            Exam Schedule
+            {assessments.length > 0 ? (
+              <span className="muted" style={{ fontWeight: 400, fontSize: 13, marginLeft: 8 }}>
+                ({assessments.length})
+              </span>
+            ) : null}
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => { setPanelMode(panelMode === 'bulk' ? 'none' : 'bulk'); setEditingInstance(null); }}
+            >
+              {panelMode === 'bulk' ? 'Close' : 'Generate from Scheme'}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => { setPanelMode(panelMode === 'create' ? 'none' : 'create'); setEditingInstance(null); }}
+            >
+              {panelMode === 'create' ? 'Close form' : '+ Create Assessment'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic year</span>
+            <SmartSelect value={filterAcademicYearId} onChange={setFilterAcademicYearId}
+              options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+              placeholder="All years" allowClear />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme</span>
+            <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
+              options={schemes.map((s) => ({ value: String(s.id), label: s.name, meta: s.status }))}
+              placeholder="All schemes" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
+            <SmartSelect value={filterClassGroupId} onChange={setFilterClassGroupId}
+              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
+              placeholder="All classes" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
+            <SmartSelect value={filterSubjectId} onChange={setFilterSubjectId}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              placeholder="All subjects" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Status</span>
+            <SelectKeeper value={filterStatus} onChange={setFilterStatus}
+              emptyValueLabel="All statuses"
+              options={STATUS_OPTIONS.map((s) => ({ value: s, label: instanceStatusLabel(s) }))} />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>From date</span>
+            <DateKeeper value={filterDateFrom} onChange={setFilterDateFrom} emptyLabel="Any" clearable />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>To date</span>
+            <DateKeeper value={filterDateTo} onChange={setFilterDateTo} emptyLabel="Any" clearable />
+          </label>
+        </div>
+      </div>
+
+      {/* Inline panels */}
+      {panelMode === 'create' && editingInstance == null ? (
+        <CreateAssessmentForm
+          publishedSchemes={publishedSchemes}
+          classGroups={classGroups}
+          subjects={subjects}
+          rooms={roomsQ.data ?? []}
+          onSuccess={async () => { setPanelMode('none'); await onRefresh(); }}
+          onCancel={() => setPanelMode('none')}
+        />
+      ) : null}
+
+      {panelMode === 'bulk' ? (
+        <BulkGeneratePanel
+          publishedSchemes={publishedSchemes}
+          classGroups={classGroups}
+          subjects={subjects}
+          onSuccess={async () => { setPanelMode('none'); await onRefresh(); }}
+          onCancel={() => setPanelMode('none')}
+        />
+      ) : null}
+
+      {editingInstance != null ? (
+        <EditAssessmentForm
+          instance={editingInstance}
+          classGroups={classGroups}
+          subjects={subjects}
+          rooms={roomsQ.data ?? []}
+          onSuccess={async () => { setEditingInstance(null); await onRefresh(); }}
+          onCancel={() => setEditingInstance(null)}
+        />
+      ) : null}
+
+      {/* Assessments table */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        {assessmentsQ.isLoading ? (
+          <div className="muted" style={{ padding: 12 }}>Loading…</div>
+        ) : assessmentsQ.isError ? (
+          <div style={{ color: '#b91c1c', padding: 12 }}>Failed to load assessments.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
+                  {['Assessment', 'Component', 'Class / Section', 'Subject', 'Date', 'Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
+                    <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {assessments.map((a) => {
+                  const canEdit = a.status !== 'LOCKED' && a.status !== 'PUBLISHED' && a.status !== 'CANCELLED';
+                  const canOpenMarks = a.status === 'DRAFT' || a.status === 'SCHEDULED';
+                  const canCancel = a.status !== 'CANCELLED' && a.status !== 'LOCKED' && a.status !== 'PUBLISHED';
+                  const timeStr = a.startTime ? (a.endTime ? `${a.startTime}–${a.endTime}` : a.startTime) : '—';
+                  return (
+                    <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                      <td style={{ padding: '8px 6px', fontWeight: 700 }}>{a.name}</td>
+                      <td style={{ padding: '8px 6px' }}>{a.componentName}</td>
+                      <td style={{ padding: '8px 6px' }}>{a.classGroupLabel}</td>
+                      <td style={{ padding: '8px 6px' }}>{a.subjectName}</td>
+                      <td style={{ padding: '8px 6px' }}>{a.assessmentDate ?? '—'}</td>
+                      <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{timeStr}</td>
+                      <td style={{ padding: '8px 6px' }}>{a.roomLabel ?? '—'}</td>
+                      <td style={{ padding: '8px 6px' }}>{a.maxMarks}</td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <StatusChip level={instanceStatusLevel(a.status)} label={instanceStatusLabel(a.status)} />
+                      </td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                          {canEdit ? (
+                            <button type="button" className="btn secondary"
+                              onClick={() => { setEditingInstance(a); setPanelMode('none'); }}>
+                              Edit
+                            </button>
+                          ) : null}
+                          {canOpenMarks ? (
+                            <button type="button" className="btn secondary"
+                              disabled={openMarksMutation.isPending}
+                              onClick={() => openMarksMutation.mutate(a.id)}>
+                              Open Marks
+                            </button>
+                          ) : null}
+                          {canCancel ? (
+                            <button type="button" className="btn secondary"
+                              disabled={cancelMutation.isPending}
+                              onClick={() => cancelMutation.mutate(a.id)}>
+                              Cancel
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {assessments.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="muted" style={{ padding: 14 }}>
+                      No assessments found. Use filters or create/generate assessments above.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────── Create Assessment Form ─────────────────────────────
+
+type AssessmentCreateForm = {
+  schemeId: string; componentId: string; classGroupId: string; subjectId: string;
+  name: string; assessmentDate: string; startTime: string; endTime: string;
+  roomId: string; maxMarks: string; sequence: string;
+};
+
+function emptyCreateForm(): AssessmentCreateForm {
+  return { schemeId: '', componentId: '', classGroupId: '', subjectId: '', name: '', assessmentDate: '', startTime: '', endTime: '', roomId: '', maxMarks: '', sequence: '1' };
+}
+
+function CreateAssessmentForm({
+  publishedSchemes, classGroups, subjects, rooms, onSuccess, onCancel,
+}: {
+  publishedSchemes: AssessmentScheme[];
+  classGroups: ClassGroup[];
+  subjects: SubjectLite[];
+  rooms: RoomLite[];
+  onSuccess: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState<AssessmentCreateForm>(emptyCreateForm);
+  const set = <K extends keyof AssessmentCreateForm>(k: K, v: AssessmentCreateForm[K]) => setForm((p) => ({ ...p, [k]: v }));
+
+  const selectedScheme = publishedSchemes.find((s) => String(s.id) === form.schemeId) ?? null;
+  const availableComponents = (selectedScheme?.components ?? []).filter((c) => c.calculationRule !== 'ATTENDANCE_PERCENTAGE');
+  const selectedComponent = availableComponents.find((c) => String(c.id) === form.componentId) ?? null;
+
+  const roomOptions = rooms.map((r) => ({ value: String(r.id), label: `${r.buildingName ?? r.building} / ${r.roomNumber}` }));
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!form.schemeId || !form.componentId) throw new Error('Select scheme and component');
+      if (!form.classGroupId) throw new Error('Select class / section');
+      if (!form.subjectId) throw new Error('Select subject');
+      if (!form.name.trim()) throw new Error('Assessment name is required');
+      if (!form.maxMarks || Number(form.maxMarks) <= 0) throw new Error('Max marks must be > 0');
+      return (await api.post<AssessmentInstance>('/api/exams/assessments', {
+        schemeId: Number(form.schemeId),
+        componentId: Number(form.componentId),
+        classGroupId: Number(form.classGroupId),
+        subjectId: Number(form.subjectId),
+        name: form.name.trim(),
+        assessmentDate: form.assessmentDate || null,
+        startTime: form.startTime || null,
+        endTime: form.endTime || null,
+        roomId: form.roomId ? Number(form.roomId) : null,
+        maxMarks: Number(form.maxMarks),
+        sequence: Number(form.sequence) || 1,
+      })).data;
+    },
+    onSuccess: async () => { toast.success('Assessment created'); setForm(emptyCreateForm()); await onSuccess(); },
+    onError: (e) => toast.error('Could not create', formatApiError(e)),
+  });
+
+  return (
+    <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+      <div style={{ fontWeight: 900, marginBottom: 10 }}>Create Assessment</div>
+      <div className="stack" style={{ gap: 10 }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme (published)</span>
+            <SmartSelect value={form.schemeId}
+              onChange={(v) => setForm((p) => ({ ...p, schemeId: v, componentId: '', name: '', maxMarks: '' }))}
+              options={publishedSchemes.map((s) => ({ value: String(s.id), label: s.name, meta: s.academicYearLabel ?? undefined }))}
+              placeholder="Select scheme…" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Component</span>
+            <SmartSelect value={form.componentId}
+              onChange={(v) => {
+                const comp = availableComponents.find((c) => String(c.id) === v);
+                setForm((p) => ({
+                  ...p, componentId: v,
+                  maxMarks: comp?.maxMarks != null ? String(comp.maxMarks) : p.maxMarks,
+                  name: comp?.calculationRule === 'SINGLE_ASSESSMENT' ? comp.name : p.name,
+                }));
+              }}
+              options={availableComponents.map((c) => ({ value: String(c.id), label: c.name, meta: toDisplayLabel(c.componentType) }))}
+              placeholder={form.schemeId ? 'Select component…' : 'Select scheme first'}
+              disabled={!form.schemeId} allowClear />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
+            <SmartSelect value={form.classGroupId} onChange={(v) => set('classGroupId', v)}
+              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
+              placeholder="Select class…" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
+            <SmartSelect value={form.subjectId} onChange={(v) => set('subjectId', v)}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              placeholder="Select subject…" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Assessment name</span>
+            <input value={form.name} onChange={(e) => set('name', e.target.value)}
+              placeholder={selectedComponent ? selectedComponent.name : 'e.g. CA 1'} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Max marks</span>
+            <input type="number" min={0.01} step="0.01" value={form.maxMarks}
+              onChange={(e) => set('maxMarks', e.target.value)}
+              placeholder={selectedComponent?.maxMarks != null ? String(selectedComponent.maxMarks) : '100'} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date (optional)</span>
+            <DateKeeper value={form.assessmentDate} onChange={(v) => set('assessmentDate', v)} emptyLabel="Not set" clearable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Start time</span>
+            <TimeKeeper value={form.startTime} onChange={(v) => set('startTime', v)} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>End time</span>
+            <TimeKeeper value={form.endTime} onChange={(v) => set('endTime', v)} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Room (optional)</span>
+            <SmartSelect value={form.roomId} onChange={(v) => set('roomId', v)}
+              options={roomOptions} placeholder="No room" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Sequence</span>
+            <input type="number" min={1} value={form.sequence} onChange={(e) => set('sequence', e.target.value)} />
+          </label>
+        </div>
+        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn" disabled={createMutation.isPending} onClick={() => createMutation.mutate()}>
+            {createMutation.isPending ? 'Creating…' : 'Create Assessment'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────── Edit Assessment Form ───────────────────────────────
+
+type AssessmentEditForm = {
+  name: string; classGroupId: string; subjectId: string;
+  assessmentDate: string; startTime: string; endTime: string;
+  roomId: string; maxMarks: string; sequence: string;
+};
+
+function EditAssessmentForm({
+  instance, classGroups, subjects, rooms, onSuccess, onCancel,
+}: {
+  instance: AssessmentInstance;
+  classGroups: ClassGroup[];
+  subjects: SubjectLite[];
+  rooms: RoomLite[];
+  onSuccess: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState<AssessmentEditForm>({
+    name: instance.name,
+    classGroupId: String(instance.classGroupId),
+    subjectId: String(instance.subjectId),
+    assessmentDate: instance.assessmentDate ?? '',
+    startTime: instance.startTime ?? '',
+    endTime: instance.endTime ?? '',
+    roomId: instance.roomId != null ? String(instance.roomId) : '',
+    maxMarks: String(instance.maxMarks),
+    sequence: String(instance.sequence),
+  });
+  const set = <K extends keyof AssessmentEditForm>(k: K, v: AssessmentEditForm[K]) => setForm((p) => ({ ...p, [k]: v }));
+
+  const roomOptions = rooms.map((r) => ({ value: String(r.id), label: `${r.buildingName ?? r.building} / ${r.roomNumber}` }));
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      if (!form.name.trim()) throw new Error('Name is required');
+      if (!form.classGroupId) throw new Error('Select class');
+      if (!form.subjectId) throw new Error('Select subject');
+      if (!form.maxMarks || Number(form.maxMarks) <= 0) throw new Error('Max marks must be > 0');
+      return (await api.put<AssessmentInstance>(`/api/exams/assessments/${instance.id}`, {
+        name: form.name.trim(),
+        classGroupId: Number(form.classGroupId),
+        subjectId: Number(form.subjectId),
+        assessmentDate: form.assessmentDate || null,
+        startTime: form.startTime || null,
+        endTime: form.endTime || null,
+        roomId: form.roomId ? Number(form.roomId) : null,
+        maxMarks: Number(form.maxMarks),
+        sequence: Number(form.sequence) || 1,
+      })).data;
+    },
+    onSuccess: async () => { toast.success('Assessment updated'); await onSuccess(); },
+    onError: (e) => toast.error('Could not update', formatApiError(e)),
+  });
+
+  return (
+    <div className="card" style={{ padding: 12, border: '2px solid rgba(234,88,12,0.3)' }}>
+      <div style={{ fontWeight: 900, marginBottom: 2 }}>Edit: {instance.name}</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{instance.schemeName} · {instance.componentName}</div>
+      <div className="stack" style={{ gap: 10 }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Assessment name</span>
+            <input value={form.name} onChange={(e) => set('name', e.target.value)} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
+            <SmartSelect value={form.classGroupId} onChange={(v) => set('classGroupId', v)}
+              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
+              placeholder="Select class…" searchable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
+            <SmartSelect value={form.subjectId} onChange={(v) => set('subjectId', v)}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              placeholder="Select subject…" searchable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Max marks</span>
+            <input type="number" min={0.01} step="0.01" value={form.maxMarks} onChange={(e) => set('maxMarks', e.target.value)} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date</span>
+            <DateKeeper value={form.assessmentDate} onChange={(v) => set('assessmentDate', v)} emptyLabel="Not set" clearable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Start time</span>
+            <TimeKeeper value={form.startTime} onChange={(v) => set('startTime', v)} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>End time</span>
+            <TimeKeeper value={form.endTime} onChange={(v) => set('endTime', v)} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Room (optional)</span>
+            <SmartSelect value={form.roomId} onChange={(v) => set('roomId', v)}
+              options={roomOptions} placeholder="No room" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Sequence</span>
+            <input type="number" min={1} value={form.sequence} onChange={(e) => set('sequence', e.target.value)} />
+          </label>
+        </div>
+        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate()}>
+            {updateMutation.isPending ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────── Bulk Generate Panel ────────────────────────────────
+
+type BulkPreviewRow = { componentName: string; classGroupLabel: string; subjectName: string; names: string[] };
+
+function BulkGeneratePanel({
+  publishedSchemes, classGroups, subjects, onSuccess, onCancel,
+}: {
+  publishedSchemes: AssessmentScheme[];
+  classGroups: ClassGroup[];
+  subjects: SubjectLite[];
+  onSuccess: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [step, setStep] = useState<'configure' | 'preview'>('configure');
+  const [schemeId, setSchemeId] = useState('');
+  const [selectedClassGroupIds, setSelectedClassGroupIds] = useState<string[]>([]);
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
+  const [preview, setPreview] = useState<BulkPreviewRow[]>([]);
+
+  const selectedScheme = publishedSchemes.find((s) => String(s.id) === schemeId) ?? null;
+  const nonAttendanceComponents = (selectedScheme?.components ?? []).filter((c) => c.calculationRule !== 'ATTENDANCE_PERCENTAGE');
+
+  const generateMutation = useMutation({
+    mutationFn: async () => {
+      if (!schemeId || selectedClassGroupIds.length === 0 || selectedSubjectIds.length === 0)
+        throw new Error('Fill in scheme, classes, and subjects');
+      return (await api.post<AssessmentInstance[]>(`/api/exams/schemes/${schemeId}/generate-assessments`, {
+        classGroupIds: selectedClassGroupIds.map(Number),
+        subjectIds: selectedSubjectIds.map(Number),
+        assessmentDates: [],
+      })).data;
+    },
+    onSuccess: async (data) => {
+      toast.success('Generated', `${data.length} assessment${data.length === 1 ? '' : 's'} created.`);
+      await onSuccess();
+    },
+    onError: (e) => toast.error('Could not generate', formatApiError(e)),
+  });
+
+  function buildPreview() {
+    if (!selectedScheme) return;
+    const cgMap = new Map(classGroups.map((cg) => [String(cg.id), cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}`]));
+    const sMap = new Map(subjects.map((s) => [String(s.id), s.name]));
+    const rows: BulkPreviewRow[] = [];
+    for (const comp of nonAttendanceComponents) {
+      const count = resolveInstancesToGenerate(comp);
+      for (const cgId of selectedClassGroupIds) {
+        for (const sId of selectedSubjectIds) {
+          const names: string[] = [];
+          for (let i = 1; i <= count; i++) names.push(defaultGeneratedName(comp, i));
+          rows.push({ componentName: comp.name, classGroupLabel: cgMap.get(cgId) ?? cgId, subjectName: sMap.get(sId) ?? sId, names });
+        }
+      }
+    }
+    setPreview(rows);
+    setStep('preview');
+  }
+
+  return (
+    <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+      <div style={{ fontWeight: 900, marginBottom: 10 }}>Generate Assessments from Scheme</div>
+      {step === 'configure' ? (
+        <div className="stack" style={{ gap: 12 }}>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Published scheme</span>
+            <SmartSelect value={schemeId} onChange={(v) => setSchemeId(v)}
+              options={publishedSchemes.map((s) => ({ value: String(s.id), label: s.name, meta: s.academicYearLabel ?? undefined }))}
+              placeholder="Select scheme…" allowClear searchable />
+          </label>
+          {selectedScheme && nonAttendanceComponents.length > 0 ? (
+            <div className="muted" style={{ fontSize: 12 }}>
+              Will generate:{' '}
+              <strong>{nonAttendanceComponents.map((c) => `${c.name} ×${resolveInstancesToGenerate(c)}`).join(', ')}</strong>
+            </div>
+          ) : null}
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Sections</span>
+            <MultiSelectKeeper value={selectedClassGroupIds} onChange={setSelectedClassGroupIds}
+              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
+              placeholder="Select classes…" />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subjects</span>
+            <MultiSelectKeeper value={selectedSubjectIds} onChange={setSelectedSubjectIds}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.name }))}
+              placeholder="Select subjects…" />
+          </label>
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn secondary" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn"
+              disabled={!schemeId || selectedClassGroupIds.length === 0 || selectedSubjectIds.length === 0}
+              onClick={buildPreview}>
+              Preview ({selectedClassGroupIds.length} × {selectedSubjectIds.length})
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="stack" style={{ gap: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>
+            {preview.length} group{preview.length === 1 ? '' : 's'} to be created (existing skipped automatically)
+          </div>
+          <div style={{ overflowX: 'auto', maxHeight: 300, overflowY: 'auto', border: '1px solid rgba(15,23,42,0.1)', borderRadius: 6 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)', background: 'rgba(15,23,42,0.03)' }}>
+                  {['Component', 'Class', 'Subject', 'Names'].map((h) => (
+                    <th key={h} style={{ padding: '6px 8px' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {preview.map((row, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
+                    <td style={{ padding: '5px 8px' }}>{row.componentName}</td>
+                    <td style={{ padding: '5px 8px' }}>{row.classGroupLabel}</td>
+                    <td style={{ padding: '5px 8px' }}>{row.subjectName}</td>
+                    <td style={{ padding: '5px 8px', color: '#64748b' }}>{row.names.join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="muted" style={{ fontSize: 12 }}>All dates start as blank (DRAFT status).</div>
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn secondary" onClick={() => setStep('configure')}>Back</button>
+            <button type="button" className="btn" disabled={generateMutation.isPending} onClick={() => generateMutation.mutate()}>
+              {generateMutation.isPending ? 'Generating…' : 'Confirm & Generate'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────── Marks Entry Panel ──────────────────────────────
+
+function markStatusLevel(s: MarkStatus | null): StatusLevel {
+  if (s === 'LOCKED') return 'ok';
+  if (s === 'SUBMITTED') return 'info';
+  return 'idle';
+}
+
+function MarksEntryPanel({
+  classGroups,
+  subjects,
+  schemes,
+}: {
+  classGroups: ClassGroup[];
+  subjects: SubjectLite[];
+  schemes: AssessmentScheme[];
+}) {
+  const [filterClassGroupId, setFilterClassGroupId] = useState('');
+  const [filterSubjectId, setFilterSubjectId] = useState('');
+  const [filterSchemeId, setFilterSchemeId] = useState('');
+  const [filterStatus, setFilterStatus] = useState('MARKS_ENTRY_OPEN');
+  const [enteringInstanceId, setEnteringInstanceId] = useState<number | null>(null);
+
+  const serverQs = useMemo(() => {
+    const p = new URLSearchParams();
+    if (filterClassGroupId) p.set('classGroupId', filterClassGroupId);
+    if (filterSubjectId) p.set('subjectId', filterSubjectId);
+    if (filterSchemeId) p.set('schemeId', filterSchemeId);
+    return p.toString();
+  }, [filterClassGroupId, filterSubjectId, filterSchemeId]);
+
+  const assessmentsQ = useQuery({
+    queryKey: ['exam-assessments-marks', filterClassGroupId, filterSubjectId, filterSchemeId],
+    queryFn: async () => (await api.get<AssessmentInstance[]>(`/api/exams/assessments?${serverQs}`)).data,
+  });
+
+  const assessments = useMemo(() => {
+    const list = assessmentsQ.data ?? [];
+    if (!filterStatus) return list;
+    return list.filter((a) => a.status === filterStatus);
+  }, [assessmentsQ.data, filterStatus]);
+
+  const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
+
+  if (enteringInstanceId != null) {
+    return (
+      <MarksEntrySheet
+        instanceId={enteringInstanceId}
+        onClose={() => setEnteringInstanceId(null)}
+      />
+    );
+  }
+
+  return (
+    <div className="stack" style={{ gap: 12 }}>
+      {/* Header */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <div style={{ fontWeight: 900 }}>Marks Entry</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              Showing assessments where marks can be entered. Use "Open Marks" on the Schedule tab to enable marks entry for an assessment.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
+            <SmartSelect value={filterClassGroupId} onChange={setFilterClassGroupId}
+              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
+              placeholder="All classes" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
+            <SmartSelect value={filterSubjectId} onChange={setFilterSubjectId}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              placeholder="All subjects" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme</span>
+            <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
+              options={schemes.map((s) => ({ value: String(s.id), label: s.name }))}
+              placeholder="All schemes" allowClear searchable />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Status</span>
+            <SelectKeeper value={filterStatus} onChange={setFilterStatus}
+              emptyValueLabel="All statuses"
+              options={STATUS_OPTIONS.map((s) => ({ value: s, label: instanceStatusLabel(s) }))} />
+          </label>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        {assessmentsQ.isLoading ? (
+          <div className="muted" style={{ padding: 12 }}>Loading…</div>
+        ) : assessmentsQ.isError ? (
+          <div style={{ color: '#b91c1c', padding: 12 }}>Failed to load assessments.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
+                  {['Assessment', 'Component', 'Class / Section', 'Subject', 'Date', 'Max Marks', 'Status', 'Action'].map((h) => (
+                    <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {assessments.map((a) => (
+                  <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                    <td style={{ padding: '8px 6px', fontWeight: 700 }}>{a.name}</td>
+                    <td style={{ padding: '8px 6px' }}>{a.componentName}</td>
+                    <td style={{ padding: '8px 6px' }}>{a.classGroupLabel}</td>
+                    <td style={{ padding: '8px 6px' }}>{a.subjectName}</td>
+                    <td style={{ padding: '8px 6px' }}>{a.assessmentDate ?? '—'}</td>
+                    <td style={{ padding: '8px 6px' }}>{a.maxMarks}</td>
+                    <td style={{ padding: '8px 6px' }}>
+                      <StatusChip level={instanceStatusLevel(a.status)} label={instanceStatusLabel(a.status)} />
+                    </td>
+                    <td style={{ padding: '8px 6px' }}>
+                      {a.status === 'MARKS_ENTRY_OPEN' ? (
+                        <button type="button" className="btn"
+                          onClick={() => setEnteringInstanceId(a.id)}>
+                          Enter Marks
+                        </button>
+                      ) : (a.status === 'MARKS_SUBMITTED' || a.status === 'LOCKED') ? (
+                        <button type="button" className="btn secondary"
+                          onClick={() => setEnteringInstanceId(a.id)}>
+                          View Marks
+                        </button>
+                      ) : (
+                        <span className="muted" style={{ fontSize: 12 }}>Open marks entry first</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {assessments.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="muted" style={{ padding: 14 }}>
+                      {filterStatus === 'MARKS_ENTRY_OPEN'
+                        ? 'No assessments with marks entry open. Open marks entry from the Exam Schedule tab.'
+                        : 'No assessments found for the selected filters.'}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────── Marks Entry Sheet ──────────────────────────────
+
+type MarkRow = {
+  studentId: number;
+  admissionNo: string;
+  fullName: string;
+  markId: number | null;
+  marksObtained: string;
+  absent: boolean;
+  absentReason: string;
+  remarks: string;
+  status: MarkStatus | null;
+};
+
+function MarksEntrySheet({ instanceId, onClose }: { instanceId: number; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [rows, setRows] = useState<MarkRow[]>([]);
+  const [synced, setSynced] = useState(false);
+
+  const sheetQ = useQuery({
+    queryKey: ['marks-sheet', instanceId],
+    queryFn: async () => (await api.get<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks-sheet`)).data,
+  });
+
+  // Sync sheet data into local editable rows once loaded
+  useMemo(() => {
+    if (!sheetQ.data || synced) return;
+    setRows(
+      sheetQ.data.rows.map((r) => ({
+        studentId: r.studentId,
+        admissionNo: r.admissionNo,
+        fullName: r.fullName,
+        markId: r.markId,
+        marksObtained: r.marksObtained != null ? String(r.marksObtained) : '',
+        absent: r.absent,
+        absentReason: r.absentReason ?? '',
+        remarks: r.remarks ?? '',
+        status: r.status,
+      })),
+    );
+    setSynced(true);
+  }, [sheetQ.data, synced]);
+
+  const setRow = (studentId: number, patch: Partial<MarkRow>) =>
+    setRows((prev) => prev.map((r) => (r.studentId === studentId ? { ...r, ...patch } : r)));
+
+  const buildPayload = () => ({
+    rows: rows.map((r) => ({
+      studentId: r.studentId,
+      marksObtained: r.absent ? null : r.marksObtained.trim() === '' ? null : Number(r.marksObtained),
+      absent: r.absent,
+      absentReason: r.absentReason.trim() || null,
+      remarks: r.remarks.trim() || null,
+    })),
+  });
+
+  const draftMutation = useMutation({
+    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks/draft`, buildPayload())).data,
+    onSuccess: async (data) => {
+      toast.success('Draft saved');
+      setRows(data.rows.map((r) => ({
+        studentId: r.studentId, admissionNo: r.admissionNo, fullName: r.fullName,
+        markId: r.markId, marksObtained: r.marksObtained != null ? String(r.marksObtained) : '',
+        absent: r.absent, absentReason: r.absentReason ?? '', remarks: r.remarks ?? '', status: r.status,
+      })));
+      await qc.invalidateQueries({ queryKey: ['exam-assessments-marks'] });
+    },
+    onError: (e) => toast.error('Could not save draft', formatApiError(e)),
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: async () => {
+      // Validate before submitting
+      for (const r of rows) {
+        if (!r.absent && r.marksObtained.trim() === '') {
+          throw new Error(`Marks required for ${r.fullName} (or mark as absent)`);
+        }
+        const maxM = sheetQ.data?.maxMarks ?? 0;
+        const val = Number(r.marksObtained);
+        if (!r.absent && r.marksObtained.trim() !== '' && val > maxM) {
+          throw new Error(`Marks for ${r.fullName} exceed max (${maxM})`);
+        }
+      }
+      return (await api.post<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks/submit`, buildPayload())).data;
+    },
+    onSuccess: async (data) => {
+      toast.success('Marks submitted', 'Assessment marked as submitted.');
+      setRows(data.rows.map((r) => ({
+        studentId: r.studentId, admissionNo: r.admissionNo, fullName: r.fullName,
+        markId: r.markId, marksObtained: r.marksObtained != null ? String(r.marksObtained) : '',
+        absent: r.absent, absentReason: r.absentReason ?? '', remarks: r.remarks ?? '', status: r.status,
+      })));
+      await qc.invalidateQueries({ queryKey: ['exam-assessments-marks'] });
+      await qc.invalidateQueries({ queryKey: ['exam-assessments'] });
+    },
+    onError: (e) => toast.error('Could not submit', formatApiError(e)),
+  });
+
+  const sheet = sheetQ.data;
+  const isLocked = sheet?.assessmentStatus === 'LOCKED' || sheet?.assessmentStatus === 'PUBLISHED';
+  const isSubmitted = sheet?.assessmentStatus === 'MARKS_SUBMITTED';
+  const maxMarks = sheet?.maxMarks ?? 100;
+
+  const submittedCount = rows.filter((r) => r.status === 'SUBMITTED' || r.status === 'LOCKED').length;
+
+  return (
+    <div className="stack" style={{ gap: 12 }}>
+      {/* Back + header */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <button type="button" className="btn secondary" onClick={onClose} style={{ marginBottom: 8 }}>
+              ← Back to list
+            </button>
+            {sheet ? (
+              <>
+                <h2 style={{ margin: 0, fontSize: 18 }}>{sheet.assessmentName}</h2>
+                <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+                  {sheet.schemeName} · {sheet.componentName} · {sheet.classGroupLabel} · {sheet.subjectName}
+                  {sheet.assessmentDate ? ` · ${sheet.assessmentDate}` : ''}
+                  {' · '}Max: <strong>{sheet.maxMarks}</strong> marks
+                </div>
+                <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  <StatusChip level={instanceStatusLevel(sheet.assessmentStatus)} label={instanceStatusLabel(sheet.assessmentStatus)} />
+                  <StatusChip level="idle" label={`${submittedCount} / ${rows.length} submitted`} />
+                </div>
+              </>
+            ) : sheetQ.isLoading ? (
+              <div className="muted">Loading sheet…</div>
+            ) : (
+              <div style={{ color: '#b91c1c' }}>Could not load sheet.</div>
+            )}
+          </div>
+          {!isLocked && !isSubmitted && sheet ? (
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn secondary"
+                disabled={draftMutation.isPending || submitMutation.isPending}
+                onClick={() => draftMutation.mutate()}>
+                {draftMutation.isPending ? 'Saving…' : 'Save Draft'}
+              </button>
+              <button type="button" className="btn"
+                disabled={draftMutation.isPending || submitMutation.isPending}
+                onClick={() => submitMutation.mutate()}>
+                {submitMutation.isPending ? 'Submitting…' : 'Submit Marks'}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Marks table */}
+      {rows.length > 0 ? (
+        <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>#</th>
+                  <th style={{ padding: '8px 6px' }}>Adm. No</th>
+                  <th style={{ padding: '8px 6px' }}>Student Name</th>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Marks / {maxMarks}</th>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Absent</th>
+                  <th style={{ padding: '8px 6px' }}>Remarks</th>
+                  <th style={{ padding: '8px 6px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => {
+                  const marksNum = row.marksObtained.trim() === '' ? null : Number(row.marksObtained);
+                  const marksError = !row.absent && marksNum !== null && marksNum > maxMarks;
+                  return (
+                    <tr key={row.studentId} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                      <td style={{ padding: '6px 6px', color: '#94a3b8', fontSize: 12 }}>{idx + 1}</td>
+                      <td style={{ padding: '6px 6px', fontSize: 12, color: '#64748b' }}>{row.admissionNo}</td>
+                      <td style={{ padding: '6px 6px', fontWeight: 700 }}>{row.fullName}</td>
+                      <td style={{ padding: '6px 6px' }}>
+                        <input
+                          type="number"
+                          min={0}
+                          max={maxMarks}
+                          step="0.01"
+                          value={row.absent ? '' : row.marksObtained}
+                          disabled={isLocked || row.absent}
+                          onChange={(e) => setRow(row.studentId, { marksObtained: e.target.value })}
+                          style={{
+                            width: 80,
+                            borderColor: marksError ? '#dc2626' : undefined,
+                            background: row.absent ? '#f1f5f9' : undefined,
+                          }}
+                        />
+                        {marksError ? (
+                          <div style={{ color: '#dc2626', fontSize: 11, marginTop: 2 }}>Exceeds max</div>
+                        ) : null}
+                      </td>
+                      <td style={{ padding: '6px 6px' }}>
+                        <label className="row" style={{ gap: 6, alignItems: 'center', cursor: isLocked ? 'default' : 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={row.absent}
+                            disabled={isLocked}
+                            onChange={(e) => setRow(row.studentId, {
+                              absent: e.target.checked,
+                              marksObtained: e.target.checked ? '' : row.marksObtained,
+                            })}
+                          />
+                          <span style={{ fontSize: 12 }}>Absent</span>
+                        </label>
+                        {row.absent ? (
+                          <input
+                            type="text"
+                            value={row.absentReason}
+                            disabled={isLocked}
+                            placeholder="Reason (optional)"
+                            onChange={(e) => setRow(row.studentId, { absentReason: e.target.value })}
+                            style={{ marginTop: 4, fontSize: 12, width: 140 }}
+                          />
+                        ) : null}
+                      </td>
+                      <td style={{ padding: '6px 6px' }}>
+                        <input
+                          type="text"
+                          value={row.remarks}
+                          disabled={isLocked}
+                          placeholder="Optional remarks"
+                          onChange={(e) => setRow(row.studentId, { remarks: e.target.value })}
+                          style={{ fontSize: 12, width: 140 }}
+                        />
+                      </td>
+                      <td style={{ padding: '6px 6px' }}>
+                        {row.status ? (
+                          <StatusChip level={markStatusLevel(row.status)} label={row.status} />
+                        ) : (
+                          <span className="muted" style={{ fontSize: 11 }}>Unsaved</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {!isLocked && !isSubmitted ? (
+            <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button type="button" className="btn secondary"
+                disabled={draftMutation.isPending || submitMutation.isPending}
+                onClick={() => draftMutation.mutate()}>
+                {draftMutation.isPending ? 'Saving…' : 'Save Draft'}
+              </button>
+              <button type="button" className="btn"
+                disabled={draftMutation.isPending || submitMutation.isPending}
+                onClick={() => submitMutation.mutate()}>
+                {submitMutation.isPending ? 'Submitting…' : 'Submit Marks'}
+              </button>
+            </div>
+          ) : null}
+          {isLocked ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              Marks are locked. Contact admin to reopen if needed.
+            </div>
+          ) : isSubmitted ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              Marks have been submitted. Contact admin to reopen for corrections.
+            </div>
+          ) : null}
+        </div>
+      ) : sheetQ.isSuccess ? (
+        <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
+          <div className="muted">No students found in this class group.</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─────────────────────────────── Result Status Helpers ───────────────────────
+
+function resultStatusLevel(s: ResultStatus | null): StatusLevel {
+  if (s === 'PUBLISHED') return 'ok';
+  if (s === 'LOCKED') return 'info';
+  if (s === 'GENERATED') return 'warn';
+  return 'idle';
+}
+
+function resultStatusLabel(s: ResultStatus | null): string {
+  if (s === 'PUBLISHED') return 'Published';
+  if (s === 'LOCKED') return 'Locked';
+  if (s === 'GENERATED') return 'Generated';
+  return 'Unknown';
+}
+
+// ─────────────────────────────── Result Calculation Details ───────────────────
+
+type CalcDetail = {
+  instanceName?: string;
+  score?: number;
+  max?: number;
+  dropped?: boolean;
+  note?: string;
+};
+
+function parseCalcDetails(json: string | null): CalcDetail[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    if (Array.isArray(parsed)) return parsed as CalcDetail[];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function ComponentDetailBlock({ comp }: { comp: StudentResultComponentDTO }) {
+  const details = parseCalcDetails(comp.calculationDetailsJson);
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 4, color: '#1e293b' }}>
+        {comp.componentName}
+        <span className="muted" style={{ fontWeight: 400, marginLeft: 6, fontSize: 11 }}>
+          ({comp.calculationRule?.replace(/_/g, ' ')})
+        </span>
+      </div>
+      {details.length > 0 ? (
+        <div style={{ paddingLeft: 12 }}>
+          {details.map((d, i) => (
+            <div key={i} style={{ fontSize: 12, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: d.dropped ? '#94a3b8' : '#1e293b', textDecoration: d.dropped ? 'line-through' : undefined }}>
+                {d.instanceName ?? `Entry ${i + 1}`}
+                {typeof d.score === 'number' && typeof d.max === 'number'
+                  ? ` ${d.score}/${d.max}`
+                  : typeof d.score === 'number' ? ` ${d.score}` : ''}
+              </span>
+              {d.dropped ? (
+                <span style={{ fontSize: 10, color: '#94a3b8', background: '#f1f5f9', padding: '1px 5px', borderRadius: 4 }}>dropped</span>
+              ) : null}
+              {d.note ? <span className="muted" style={{ fontSize: 11 }}>{d.note}</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div style={{ fontSize: 12, marginTop: 4, color: '#64748b' }}>
+        Weighted: <strong style={{ color: '#1e293b' }}>
+          {comp.weightedScore != null ? comp.weightedScore.toFixed(2) : '—'}
+          {comp.weightagePercent != null ? `/${comp.weightagePercent}` : ''}
+        </strong>
+        {comp.rawScore != null && comp.rawMax != null ? (
+          <span className="muted" style={{ marginLeft: 8 }}>Raw: {comp.rawScore}/{comp.rawMax}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────── Results Panel ───────────────────────────────
+
+function ResultsPanel({
+  schemes,
+  classGroups,
+  subjects,
+  academicYears,
+}: {
+  schemes: AssessmentScheme[];
+  classGroups: ClassGroup[];
+  subjects: SubjectLite[];
+  academicYears: AcademicYear[];
+}) {
+  const [filterAcademicYearId, setFilterAcademicYearId] = useState('');
+  const [filterSchemeId, setFilterSchemeId] = useState('');
+  const [filterClassGroupId, setFilterClassGroupId] = useState('');
+  const [filterSubjectId, setFilterSubjectId] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  // Preview mode: results fetched on demand but not persisted
+  const [previewResults, setPreviewResults] = useState<StudentResultDTO[] | null>(null);
+  const [expandedStudentId, setExpandedStudentId] = useState<number | null>(null);
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+
+  const qc = useQueryClient();
+
+  // Persisted results query
+  const resultsQ = useQuery({
+    queryKey: ['exam-results', filterClassGroupId, filterSchemeId, filterSubjectId, filterStatus],
+    queryFn: async () => {
+      const p = new URLSearchParams();
+      if (filterClassGroupId) p.set('classGroupId', filterClassGroupId);
+      if (filterSchemeId) p.set('schemeId', filterSchemeId);
+      if (filterSubjectId) p.set('subjectId', filterSubjectId);
+      if (filterStatus) p.set('status', filterStatus);
+      return (await api.get<StudentResultDTO[]>(`/api/exams/results?${p.toString()}`)).data;
+    },
+  });
+
+  // Display: if we have a fresh preview, show that; otherwise show persisted
+  const displayResults = previewResults ?? resultsQ.data ?? [];
+
+  // Derive dynamic component columns from the first result's components (or from selected scheme)
+  const componentColumns: string[] = useMemo(() => {
+    if (displayResults.length > 0) {
+      return displayResults[0].components.map((c) => c.componentName);
+    }
+    const scheme = schemes.find((s) => String(s.id) === filterSchemeId);
+    if (scheme) return scheme.components.map((c) => c.name);
+    return [];
+  }, [displayResults, schemes, filterSchemeId]);
+
+  const canAct = filterSchemeId && filterClassGroupId && filterSubjectId;
+
+  // ── Mutations ────────────────────────────────────────────────────────────────
+
+  const previewMutation = useMutation({
+    mutationFn: async () => {
+      if (!canAct) throw new Error('Select scheme, class/section, and subject first.');
+      return (await api.post<StudentResultDTO[]>('/api/exams/results/preview', {
+        classGroupId: Number(filterClassGroupId),
+        schemeId: Number(filterSchemeId),
+        subjectId: Number(filterSubjectId),
+      })).data;
+    },
+    onSuccess: (data) => {
+      setPreviewResults(data);
+      toast.success('Preview ready', `${data.length} student result${data.length === 1 ? '' : 's'} calculated (not saved).`);
+    },
+    onError: (e) => toast.error('Preview failed', formatApiError(e)),
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: async () => {
+      if (!canAct) throw new Error('Select scheme, class/section, and subject first.');
+      return (await api.post<StudentResultDTO[]>('/api/exams/results/generate', {
+        classGroupId: Number(filterClassGroupId),
+        schemeId: Number(filterSchemeId),
+        subjectId: Number(filterSubjectId),
+      })).data;
+    },
+    onSuccess: async (data) => {
+      setPreviewResults(null);
+      toast.success('Generated', `${data.length} result${data.length === 1 ? '' : 's'} saved.`);
+      await qc.invalidateQueries({ queryKey: ['exam-results'] });
+    },
+    onError: (e) => toast.error('Generate failed', formatApiError(e)),
+  });
+
+  const lockMutation = useMutation({
+    mutationFn: async () => {
+      if (!canAct) throw new Error('Select scheme, class/section, and subject first.');
+      return (await api.post<StudentResultDTO[]>('/api/exams/results/lock', {
+        classGroupId: Number(filterClassGroupId),
+        schemeId: Number(filterSchemeId),
+        subjectId: Number(filterSubjectId),
+      })).data;
+    },
+    onSuccess: async (data) => {
+      setPreviewResults(null);
+      toast.success('Locked', `${data.length} result${data.length === 1 ? '' : 's'} locked.`);
+      await qc.invalidateQueries({ queryKey: ['exam-results'] });
+    },
+    onError: (e) => toast.error('Lock failed', formatApiError(e)),
+  });
+
+  const publishMutation = useMutation({
+    mutationFn: async () => {
+      if (!canAct) throw new Error('Select scheme, class/section, and subject first.');
+      return (await api.post<StudentResultDTO[]>('/api/exams/results/publish', {
+        classGroupId: Number(filterClassGroupId),
+        schemeId: Number(filterSchemeId),
+        subjectId: Number(filterSubjectId),
+      })).data;
+    },
+    onSuccess: async (data) => {
+      setPreviewResults(null);
+      setShowPublishConfirm(false);
+      toast.success('Published', `${data.length} result${data.length === 1 ? '' : 's'} published and visible to students/parents.`);
+      await qc.invalidateQueries({ queryKey: ['exam-results'] });
+    },
+    onError: (e) => {
+      setShowPublishConfirm(false);
+      toast.error('Publish failed', formatApiError(e));
+    },
+  });
+
+  const isActing =
+    previewMutation.isPending ||
+    generateMutation.isPending ||
+    lockMutation.isPending ||
+    publishMutation.isPending;
+
+  const RESULT_STATUS_OPTIONS: ResultStatus[] = ['GENERATED', 'LOCKED', 'PUBLISHED'];
+
+  return (
+    <div className="stack" style={{ gap: 12 }}>
+      {/* Publish Confirmation Dialog */}
+      <ConfirmDialog
+        open={showPublishConfirm}
+        title="Publish Results?"
+        description="After publishing, results will be visible to students/parents and cannot be edited directly."
+        confirmLabel={publishMutation.isPending ? 'Publishing…' : 'Publish Results'}
+        confirmDisabled={publishMutation.isPending}
+        onConfirm={() => publishMutation.mutate()}
+        onClose={() => setShowPublishConfirm(false)}
+      />
+
+      {/* Header */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <div style={{ fontWeight: 900 }}>Results</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              Preview, generate, lock, and publish student results. Select scheme + class + subject to act.
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={!canAct || isActing}
+              onClick={() => previewMutation.mutate()}
+            >
+              {previewMutation.isPending ? 'Previewing…' : 'Preview Results'}
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={!canAct || isActing}
+              onClick={() => generateMutation.mutate()}
+            >
+              {generateMutation.isPending ? 'Generating…' : 'Generate Results'}
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={!canAct || isActing}
+              onClick={() => lockMutation.mutate()}
+            >
+              {lockMutation.isPending ? 'Locking…' : 'Lock Results'}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={!canAct || isActing}
+              onClick={() => setShowPublishConfirm(true)}
+            >
+              Publish Results
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic Year</span>
+            <SmartSelect
+              value={filterAcademicYearId}
+              onChange={setFilterAcademicYearId}
+              options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+              placeholder="All years"
+              allowClear
+              searchable
+            />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme</span>
+            <SmartSelect
+              value={filterSchemeId}
+              onChange={(v) => { setFilterSchemeId(v); setPreviewResults(null); }}
+              options={schemes.map((s) => ({ value: String(s.id), label: s.name, meta: s.academicYearLabel ?? undefined }))}
+              placeholder="Select scheme…"
+              allowClear
+              searchable
+            />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
+            <SmartSelect
+              value={filterClassGroupId}
+              onChange={(v) => { setFilterClassGroupId(v); setPreviewResults(null); }}
+              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
+              placeholder="All classes"
+              allowClear
+              searchable
+            />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
+            <SmartSelect
+              value={filterSubjectId}
+              onChange={(v) => { setFilterSubjectId(v); setPreviewResults(null); }}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              placeholder="All subjects"
+              allowClear
+              searchable
+            />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Status</span>
+            <SelectKeeper
+              value={filterStatus}
+              onChange={setFilterStatus}
+              emptyValueLabel="All statuses"
+              options={RESULT_STATUS_OPTIONS.map((s) => ({ value: s, label: resultStatusLabel(s) }))}
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* Preview notice */}
+      {previewResults != null ? (
+        <div style={{
+          background: '#fffbeb',
+          border: '1px solid #fcd34d',
+          borderRadius: 8,
+          padding: '10px 14px',
+          fontSize: 13,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          justifyContent: 'space-between',
+        }}>
+          <span>
+            <strong>Preview mode</strong> — these {previewResults.length} result{previewResults.length === 1 ? '' : 's'} are not saved yet. Click <em>Generate Results</em> to persist.
+          </span>
+          <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setPreviewResults(null)}>
+            Clear Preview
+          </button>
+        </div>
+      ) : null}
+
+      {/* Results Table */}
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        {resultsQ.isLoading && previewResults == null ? (
+          <div className="muted" style={{ padding: 12 }}>Loading…</div>
+        ) : resultsQ.isError && previewResults == null ? (
+          <div style={{ color: '#b91c1c', padding: 12 }}>Failed to load results.</div>
+        ) : displayResults.length === 0 ? (
+          <div className="muted" style={{ padding: 12 }}>
+            No results found. Select scheme + class + subject, then click <strong>Preview Results</strong> or <strong>Generate Results</strong>.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.12)' }}>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Student</th>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Roll No</th>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Subject</th>
+                  {componentColumns.map((col) => (
+                    <th key={col} style={{ padding: '8px 6px', whiteSpace: 'nowrap', color: '#475569' }}>{col}</th>
+                  ))}
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Total</th>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>%</th>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Grade</th>
+                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayResults.map((r) => {
+                  const isExpanded = expandedStudentId === r.studentId;
+                  return (
+                    <>
+                      <tr
+                        key={`${r.studentId}-${r.subjectId}`}
+                        style={{
+                          borderBottom: isExpanded ? 'none' : '1px solid rgba(15,23,42,0.08)',
+                          cursor: 'pointer',
+                          background: isExpanded ? 'rgba(15,23,42,0.03)' : undefined,
+                        }}
+                        onClick={() => setExpandedStudentId(isExpanded ? null : r.studentId)}
+                      >
+                        <td style={{ padding: '8px 6px', fontWeight: 700 }}>
+                          <span style={{ marginRight: 6, fontSize: 11, color: '#64748b' }}>{isExpanded ? '▲' : '▶'}</span>
+                          {r.studentName}
+                        </td>
+                        <td style={{ padding: '8px 6px', color: '#64748b', fontSize: 12 }}>{r.admissionNo ?? '—'}</td>
+                        <td style={{ padding: '8px 6px' }}>{r.subjectName}</td>
+                        {componentColumns.map((col) => {
+                          const comp = r.components.find((c) => c.componentName === col);
+                          return (
+                            <td key={col} style={{ padding: '8px 6px' }}>
+                              {comp ? (
+                                <span style={{ color: '#1e293b' }}>
+                                  {comp.weightedScore != null ? comp.weightedScore.toFixed(1) : '—'}
+                                  {comp.weightagePercent != null ? (
+                                    <span className="muted" style={{ fontSize: 11 }}>/{comp.weightagePercent}</span>
+                                  ) : null}
+                                </span>
+                              ) : <span className="muted">—</span>}
+                            </td>
+                          );
+                        })}
+                        <td style={{ padding: '8px 6px', fontWeight: 700 }}>
+                          {r.totalWeightedScore != null ? r.totalWeightedScore.toFixed(2) : '—'}
+                        </td>
+                        <td style={{ padding: '8px 6px', fontWeight: 700, color: '#2563eb' }}>
+                          {r.percentage != null ? `${r.percentage.toFixed(1)}%` : '—'}
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          {r.grade ? (
+                            <span style={{
+                              display: 'inline-block',
+                              background: '#dbeafe',
+                              color: '#1d4ed8',
+                              borderRadius: 4,
+                              padding: '2px 8px',
+                              fontWeight: 700,
+                              fontSize: 13,
+                            }}>
+                              {r.grade}
+                            </span>
+                          ) : <span className="muted">—</span>}
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <StatusChip level={resultStatusLevel(r.status)} label={resultStatusLabel(r.status)} />
+                        </td>
+                      </tr>
+                      {isExpanded ? (
+                        <tr key={`${r.studentId}-${r.subjectId}-detail`} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                          <td colSpan={4 + componentColumns.length} style={{ padding: '10px 14px 14px 32px', background: 'rgba(15,23,42,0.02)' }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: '#1e293b' }}>
+                              Component Calculation Details — {r.studentName}
+                            </div>
+                            {r.components.length === 0 ? (
+                              <div className="muted" style={{ fontSize: 12 }}>No component details available.</div>
+                            ) : (
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+                                {r.components.map((comp) => (
+                                  <div
+                                    key={comp.assessmentComponentId}
+                                    style={{ background: '#f8fafc', border: '1px solid rgba(15,23,42,0.1)', borderRadius: 6, padding: '10px 12px' }}
+                                  >
+                                    <ComponentDetailBlock comp={comp} />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ marginTop: 10, display: 'flex', gap: 16, fontSize: 13 }}>
+                              <span>
+                                <span className="muted">Total: </span>
+                                <strong>{r.totalWeightedScore != null ? r.totalWeightedScore.toFixed(2) : '—'}</strong>
+                              </span>
+                              <span>
+                                <span className="muted">Percentage: </span>
+                                <strong style={{ color: '#2563eb' }}>{r.percentage != null ? `${r.percentage.toFixed(1)}%` : '—'}</strong>
+                              </span>
+                              <span>
+                                <span className="muted">Grade: </span>
+                                <strong>{r.grade ?? '—'}</strong>
+                              </span>
+                              {r.generatedAt ? (
+                                <span className="muted" style={{ fontSize: 11 }}>
+                                  Generated: {new Date(r.generatedAt).toLocaleDateString()}
+                                </span>
+                              ) : null}
+                              {r.publishedAt ? (
+                                <span className="muted" style={{ fontSize: 11 }}>
+                                  Published: {new Date(r.publishedAt).toLocaleDateString()}
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

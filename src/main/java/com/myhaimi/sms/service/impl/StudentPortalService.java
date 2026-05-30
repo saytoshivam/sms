@@ -1,13 +1,17 @@
 package com.myhaimi.sms.service.impl;
 
-import com.myhaimi.sms.DTO.studentportal.FeeStatementDTO;
-import com.myhaimi.sms.DTO.studentportal.FeeStatementLineDTO;
-import com.myhaimi.sms.DTO.studentportal.StudentDailyAttendanceRowDTO;
-import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
+import com.myhaimi.sms.DTO.studentportal.*;
 import com.myhaimi.sms.DTO.timetable.PublishedStudentWeeklyTimetableDTO;
 import com.myhaimi.sms.DTO.timetable.TimetableOccurrenceDTO;
 import com.myhaimi.sms.entity.*;
 import com.myhaimi.sms.entity.enums.PaymentStatus;
+import com.myhaimi.sms.modules.exam.entity.AssessmentInstance;
+import com.myhaimi.sms.modules.exam.entity.StudentResult;
+import com.myhaimi.sms.modules.exam.entity.StudentResultComponent;
+import com.myhaimi.sms.modules.exam.entity.enums.AssessmentInstanceStatus;
+import com.myhaimi.sms.modules.exam.entity.enums.ResultStatus;
+import com.myhaimi.sms.modules.exam.repository.AssessmentInstanceRepository;
+import com.myhaimi.sms.modules.exam.repository.StudentResultRepository;
 import com.myhaimi.sms.repository.FeePaymentRepo;
 import com.myhaimi.sms.repository.LectureRepo;
 import com.myhaimi.sms.repository.StudentAttendanceRepo;
@@ -24,10 +28,11 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
+
 @Service
 @RequiredArgsConstructor
 public class StudentPortalService {
-
 
     private final StudentRepo studentRepo;
     private final PublishedTimetableCalendarService publishedTimetableCalendarService;
@@ -36,6 +41,8 @@ public class StudentPortalService {
     private final StudentAttendanceRepo studentAttendanceRepo;
     private final StudentFeeDemandRepository demandRepo;
     private final FeePaymentRepo feePaymentRepo;
+    private final AssessmentInstanceRepository assessmentInstanceRepo;
+    private final StudentResultRepository studentResultRepo;
 
     @Transactional(readOnly = true)
     public List<TimetableOccurrenceDTO> mySchedule(int studentId, LocalDate from, LocalDate to) {
@@ -412,5 +419,99 @@ public class StudentPortalService {
 
     private static double round2(double v) {
         return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    // ──────────────────────── Student portal: exams ───────────────────────────
+
+    /**
+     * Returns all assessment instances for the student's current class group that
+     * are visible (not DRAFT and not CANCELLED), ordered by date ascending.
+     */
+    @Transactional(readOnly = true)
+    public List<StudentExamDTO> myExams(int studentId) {
+        Integer tenantId = TenantContext.getTenantId();
+        if (tenantId == null) throw new IllegalStateException("Tenant context required");
+
+        Student student = studentRepo.findByIdAndSchool_Id(studentId, tenantId).orElseThrow();
+        if (student.getClassGroup() == null) return List.of();
+
+        List<AssessmentInstanceStatus> excluded = List.of(
+                AssessmentInstanceStatus.DRAFT,
+                AssessmentInstanceStatus.CANCELLED);
+
+        List<AssessmentInstance> instances = assessmentInstanceRepo.findForStudentPortal(
+                tenantId, student.getClassGroup().getId(), excluded);
+
+        return instances.stream().map(ai -> {
+            Room room = ai.getRoom();
+            String roomLabel = room != null
+                    ? room.getBuildingName() + " " + room.getRoomNumber()
+                    : null;
+            Subject subject = ai.getSubject();
+            return new StudentExamDTO(
+                    ai.getId(),
+                    ai.getName(),
+                    ai.getComponent().getName(),
+                    ai.getComponent().getComponentType().name(),
+                    ai.getScheme().getName(),
+                    subject.getName(),
+                    subject.getCode(),
+                    ai.getClassGroup().getDisplayName(),
+                    ai.getAcademicYear().getLabel(),
+                    ai.getAssessmentDate() != null ? ai.getAssessmentDate().toString() : null,
+                    ai.getStartTime() != null ? ai.getStartTime().toString().substring(0, 5) : null,
+                    ai.getEndTime()   != null ? ai.getEndTime().toString().substring(0, 5)   : null,
+                    roomLabel,
+                    ai.getMaxMarks(),
+                    ai.getStatus().name()
+            );
+        }).collect(Collectors.toList());
+    }
+
+    // ──────────────────────── Student portal: results ─────────────────────────
+
+    /**
+     * Returns all PUBLISHED results for the student, with component breakdown.
+     */
+    @Transactional(readOnly = true)
+    public List<StudentPortalResultDTO> myResults(int studentId) {
+        Integer tenantId = TenantContext.getTenantId();
+        if (tenantId == null) throw new IllegalStateException("Tenant context required");
+
+        List<StudentResult> results = studentResultRepo.findByStudent_IdAndSchool_Id(studentId, tenantId)
+                .stream()
+                .filter(r -> r.getStatus() == ResultStatus.PUBLISHED)
+                .collect(Collectors.toList());
+
+        return results.stream().map(r -> {
+            List<StudentPortalResultComponentDTO> comps = r.getComponents().stream()
+                    .map(c -> new StudentPortalResultComponentDTO(
+                            c.getId(),
+                            c.getAssessmentComponent().getName(),
+                            c.getAssessmentComponent().getCalculationRule().name(),
+                            c.getRawScore(),
+                            c.getRawMax(),
+                            c.getWeightedScore(),
+                            c.getWeightagePercent(),
+                            c.getCalculationDetailsJson()
+                    ))
+                    .collect(Collectors.toList());
+
+            return new StudentPortalResultDTO(
+                    r.getId(),
+                    r.getScheme().getName(),
+                    r.getAcademicYear().getLabel(),
+                    r.getSubject().getName(),
+                    r.getSubject().getCode(),
+                    r.getClassGroup().getDisplayName(),
+                    r.getTotalWeightedScore(),
+                    r.getPercentage(),
+                    r.getGrade(),
+                    r.getStatus().name(),
+                    r.getGeneratedAt() != null ? r.getGeneratedAt().toString() : null,
+                    r.getPublishedAt()  != null ? r.getPublishedAt().toString()  : null,
+                    comps
+            );
+        }).collect(Collectors.toList());
     }
 }

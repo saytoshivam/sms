@@ -14,6 +14,13 @@ import java.util.List;
 import java.util.Optional;
 
 public interface AttendanceSessionRepo extends JpaRepository<AttendanceSession, Integer> {
+
+    /**
+     * Used by result calculation: fetch all daily (non-lecture) sessions for a class within an academic year's date range.
+     */
+    List<AttendanceSession> findBySchool_IdAndClassGroup_IdAndDateBetweenAndLectureIsNull(
+            Integer schoolId, Integer classGroupId, LocalDate from, LocalDate to);
+
     Page<AttendanceSession> findBySchool_Id(Integer schoolId, Pageable pageable);
 
     @Query(

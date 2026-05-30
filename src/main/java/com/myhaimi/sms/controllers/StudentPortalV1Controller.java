@@ -3,6 +3,8 @@ package com.myhaimi.sms.controllers;
 import com.myhaimi.sms.DTO.announcement.AnnouncementDetailDTO;
 import com.myhaimi.sms.DTO.announcement.AnnouncementListItemDTO;
 import com.myhaimi.sms.DTO.studentportal.FeeStatementDTO;
+import com.myhaimi.sms.DTO.studentportal.StudentExamDTO;
+import com.myhaimi.sms.DTO.studentportal.StudentPortalResultDTO;
 import com.myhaimi.sms.DTO.studentportal.UnreadCountDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentDailyAttendanceRowDTO;
 import com.myhaimi.sms.DTO.studentportal.StudentSubjectAttendanceDTO;
@@ -110,6 +112,29 @@ public class StudentPortalV1Controller {
             @RequestParam(required = false) String financialYear) {
         int studentId = linkedStudentId(principal);
         return ResponseEntity.ok(studentPortalService.myFeeStatement(studentId, financialYear));
+    }
+
+    // ──────────────────────── Exams (assessment instances) ────────────────────
+
+    /**
+     * All visible assessment instances for the student's current class group.
+     * Status ≠ DRAFT and ≠ CANCELLED, ordered by date ascending.
+     */
+    @GetMapping("/exams")
+    public ResponseEntity<List<StudentExamDTO>> exams(@AuthenticationPrincipal UserDetails principal) {
+        int studentId = linkedStudentId(principal);
+        return ResponseEntity.ok(studentPortalService.myExams(studentId));
+    }
+
+    // ──────────────────────── Published results ───────────────────────────────
+
+    /**
+     * All PUBLISHED results for the student, grouped by scheme/subject with component breakdown.
+     */
+    @GetMapping("/results")
+    public ResponseEntity<List<StudentPortalResultDTO>> results(@AuthenticationPrincipal UserDetails principal) {
+        int studentId = linkedStudentId(principal);
+        return ResponseEntity.ok(studentPortalService.myResults(studentId));
     }
 
     private static AnnouncementCategory parseCategory(String category) {

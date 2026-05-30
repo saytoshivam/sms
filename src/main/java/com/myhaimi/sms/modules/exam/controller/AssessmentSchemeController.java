@@ -1,6 +1,7 @@
 package com.myhaimi.sms.modules.exam.controller;
 
 import com.myhaimi.sms.modules.exam.dto.*;
+import com.myhaimi.sms.modules.exam.service.AssessmentScheduleService;
 import com.myhaimi.sms.modules.exam.service.AssessmentSchemeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ import java.util.List;
 public class AssessmentSchemeController {
 
     private final AssessmentSchemeService service;
+    private final AssessmentScheduleService assessmentScheduleService;
 
     // ─────────────────────────────── Schemes ─────────────────────────────────
 
@@ -113,5 +115,66 @@ public class AssessmentSchemeController {
     @PostMapping("/grading-schemes")
     public ResponseEntity<GradingSchemeDTO> createGradingScheme(@Valid @RequestBody GradingSchemeCreateDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.createGradingScheme(dto));
+    }
+
+    // ─────────────────────────────── Assessment Scheduling ─────────────────────
+
+    @GetMapping("/assessments")
+    public ResponseEntity<List<AssessmentInstanceDTO>> listAssessments(
+            @RequestParam(required = false) Integer academicYearId,
+            @RequestParam(required = false) Integer classGroupId,
+            @RequestParam(required = false) Integer subjectId,
+            @RequestParam(required = false) Integer schemeId,
+            @RequestParam(required = false) Integer componentId
+    ) {
+        return ResponseEntity.ok(assessmentScheduleService.listAssessments(
+                academicYearId,
+                classGroupId,
+                subjectId,
+                schemeId,
+                componentId
+        ));
+    }
+
+    @PostMapping("/assessments")
+    public ResponseEntity<AssessmentInstanceDTO> createAssessment(@Valid @RequestBody AssessmentInstanceCreateDTO dto) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(assessmentScheduleService.createAssessment(dto));
+    }
+
+    @GetMapping("/assessments/{id}")
+    public ResponseEntity<AssessmentInstanceDTO> getAssessment(@PathVariable Integer id) {
+        return ResponseEntity.ok(assessmentScheduleService.getAssessment(id));
+    }
+
+    @PutMapping("/assessments/{id}")
+    public ResponseEntity<AssessmentInstanceDTO> updateAssessment(
+            @PathVariable Integer id,
+            @Valid @RequestBody AssessmentInstanceUpdateDTO dto
+    ) {
+        return ResponseEntity.ok(assessmentScheduleService.updateAssessment(id, dto));
+    }
+
+    @PostMapping("/assessments/{id}/cancel")
+    public ResponseEntity<AssessmentInstanceDTO> cancelAssessment(@PathVariable Integer id) {
+        return ResponseEntity.ok(assessmentScheduleService.cancelAssessment(id));
+    }
+
+    @PostMapping("/assessments/{id}/open-marks")
+    public ResponseEntity<AssessmentInstanceDTO> openMarksEntry(@PathVariable Integer id) {
+        return ResponseEntity.ok(assessmentScheduleService.openMarksEntry(id));
+    }
+
+    @PostMapping("/assessments/{id}/lock")
+    public ResponseEntity<AssessmentInstanceDTO> lockAssessment(@PathVariable Integer id) {
+        return ResponseEntity.ok(assessmentScheduleService.lockAssessment(id));
+    }
+
+    @PostMapping("/schemes/{schemeId}/generate-assessments")
+    public ResponseEntity<List<AssessmentInstanceDTO>> generateAssessmentsForClassScheme(
+            @PathVariable Integer schemeId,
+            @Valid @RequestBody AssessmentGenerateRequestDTO dto
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(assessmentScheduleService.generateAssessmentsForClassScheme(schemeId, dto));
     }
 }

@@ -182,6 +182,17 @@ export function TeacherDashboard({ profile }: { profile: MeProfile }) {
     queryFn: async () => (await api.get<StudentProgressRow[]>('/api/v1/teacher/students/progress')).data,
   });
 
+  const pendingMarksQ = useQuery({
+    queryKey: ['teacher-pending-marks'],
+    queryFn: async () => {
+      const data = await api.get<Array<{ id: number; name: string; classGroupLabel: string; subjectName: string; assessmentDate: string | null; status?: string }>>(
+        '/api/exams/assessments?',
+      );
+      return data.data.filter((a) => a.status === 'MARKS_ENTRY_OPEN');
+    },
+    staleTime: 120_000,
+  });
+
   const todayRows = useMemo(() => {
     const rows = [...(todaySchedule.data ?? [])];
     rows.sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -477,13 +488,44 @@ export function TeacherDashboard({ profile }: { profile: MeProfile }) {
           </span>
         </div>
         <div className="tdash-att-body">
-          <strong>{primaryAttendance.detail || 'Review today’s sheets'}</strong>
+          <strong>{primaryAttendance.detail || "Review today\u2019s sheets"}</strong>
         </div>
         <Link className="tdash-att-btn" to={primaryAttendance.to}>
           {primaryAttendance.label}
         </Link>
         {attendanceCtx.error ? <div className="tdash-err">{formatApiError(attendanceCtx.error)}</div> : null}
       </div>
+
+      {/* 4b. Pending marks entry */}
+      {(pendingMarksQ.data?.length ?? 0) > 0 ? (
+        <div className="tdash-att">
+          <div className="tdash-att-head">
+            <span className="tdash-att-title">Marks entry pending</span>
+            <span className="tdash-muted" style={{ fontSize: 10 }}>
+              {pendingMarksQ.data?.length} open
+            </span>
+          </div>
+          <div className="tdash-att-body">
+            {pendingMarksQ.data?.slice(0, 2).map((a) => (
+              <div key={a.id} style={{ marginBottom: 2 }}>
+                <strong>{a.name}</strong>
+                <span className="tdash-muted" style={{ fontSize: 11, marginLeft: 6 }}>
+                  {a.classGroupLabel} · {a.subjectName}
+                  {a.assessmentDate ? ` · ${a.assessmentDate}` : ''}
+                </span>
+              </div>
+            ))}
+            {(pendingMarksQ.data?.length ?? 0) > 2 ? (
+              <div className="tdash-muted" style={{ fontSize: 11 }}>
+                +{(pendingMarksQ.data?.length ?? 0) - 2} more
+              </div>
+            ) : null}
+          </div>
+          <Link className="tdash-att-btn" to="/app/examinations?tab=marks">
+            Enter marks
+          </Link>
+        </div>
+      ) : null}
 
       {/* 5. Today timeline */}
       <div>
