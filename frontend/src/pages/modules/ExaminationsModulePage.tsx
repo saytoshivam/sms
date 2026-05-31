@@ -1924,7 +1924,7 @@ function defaultGeneratedName(component: AssessmentComponent, sequence: number):
   return `${component.name} ${sequence}`;
 }
 
-// ─────────────────────────────── Exam Schedule Panel ────────────────────────────────
+// ─────────────────────���───────── Exam Schedule Panel ────────────────────────────────
 
 function ExamSchedulePanel({
   schemes,
@@ -1940,7 +1940,9 @@ function ExamSchedulePanel({
   const qc = useQueryClient();
 
   const [filterAcademicYearId, setFilterAcademicYearId] = useState('');
+  const [filterSchemeStatus, setFilterSchemeStatus] = useState<'' | 'PUBLISHED' | 'ARCHIVED'>('');
   const [filterSchemeId, setFilterSchemeId] = useState('');
+  const [filterGrade, setFilterGrade] = useState('');
   const [filterClassGroupId, setFilterClassGroupId] = useState('');
   const [filterSubjectId, setFilterSubjectId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -2000,6 +2002,25 @@ function ExamSchedulePanel({
   const publishedSchemes = schemes.filter((s) => s.status === 'PUBLISHED');
   const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
 
+  // Grade options derived from classGroups
+  const gradeOptions = useMemo(() => {
+    const set = new Set<number>();
+    classGroups.forEach((cg) => { if (cg.gradeLevel != null) set.add(cg.gradeLevel); });
+    return [...set].sort((a, b) => a - b);
+  }, [classGroups]);
+
+  // Section options filtered by selected grade
+  const sectionOptions = useMemo(() => {
+    if (!filterGrade) return classGroups;
+    return classGroups.filter((cg) => String(cg.gradeLevel) === filterGrade);
+  }, [classGroups, filterGrade]);
+
+  // Scheme options filtered by status toggle
+  const filteredSchemeOptions = useMemo(() => {
+    if (!filterSchemeStatus) return schemes;
+    return schemes.filter((s) => s.status === filterSchemeStatus);
+  }, [schemes, filterSchemeStatus]);
+
   return (
     <div className="stack" style={{ gap: 12 }}>
       {/* Header */}
@@ -2043,9 +2064,28 @@ function ExamSchedulePanel({
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme</span>
-            <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
-              options={schemes.map((s) => ({ value: String(s.id), label: s.name, meta: s.status }))}
-              placeholder="All schemes" allowClear searchable />
+            <div className="stack" style={{ gap: 4 }}>
+              <div className="row" style={{ gap: 4 }}>
+                {(['', 'PUBLISHED', 'ARCHIVED'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => { setFilterSchemeStatus(v); setFilterSchemeId(''); }}
+                    style={{
+                      fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(15,23,42,0.2)', cursor: 'pointer',
+                      background: filterSchemeStatus === v ? '#0f172a' : 'transparent',
+                      color: filterSchemeStatus === v ? '#fff' : 'inherit',
+                      fontWeight: filterSchemeStatus === v ? 700 : 400,
+                    }}
+                  >
+                    {v === '' ? 'All' : v === 'PUBLISHED' ? 'Published' : 'Archived'}
+                  </button>
+                ))}
+              </div>
+              <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
+                options={filteredSchemeOptions.map((s) => ({ value: String(s.id), label: s.name, meta: s.status === 'PUBLISHED' ? 'Published' : s.status === 'ARCHIVED' ? 'Archived' : 'Draft' }))}
+                placeholder="All schemes" allowClear searchable />
+            </div>
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
@@ -2659,9 +2699,28 @@ function MarksEntryPanel({
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme</span>
-            <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
-              options={schemes.map((s) => ({ value: String(s.id), label: s.name }))}
-              placeholder="All schemes" allowClear searchable />
+            <div className="stack" style={{ gap: 4 }}>
+              <div className="row" style={{ gap: 4 }}>
+                {(['', 'PUBLISHED', 'ARCHIVED'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => { setFilterSchemeStatus(v); setFilterSchemeId(''); }}
+                    style={{
+                      fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(15,23,42,0.2)', cursor: 'pointer',
+                      background: filterSchemeStatus === v ? '#0f172a' : 'transparent',
+                      color: filterSchemeStatus === v ? '#fff' : 'inherit',
+                      fontWeight: filterSchemeStatus === v ? 700 : 400,
+                    }}
+                  >
+                    {v === '' ? 'All' : v === 'PUBLISHED' ? 'Published' : 'Archived'}
+                  </button>
+                ))}
+              </div>
+              <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
+                options={filteredSchemeOptions.map((s) => ({ value: String(s.id), label: s.name, meta: s.status === 'PUBLISHED' ? 'Published' : s.status === 'ARCHIVED' ? 'Archived' : 'Draft' }))}
+                placeholder="All schemes" allowClear searchable />
+            </div>
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Status</span>
@@ -3297,25 +3356,44 @@ function ResultsPanel({
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme</span>
-            <SmartSelect
-              value={filterSchemeId}
-              onChange={(v) => { setFilterSchemeId(v); setPreviewResults(null); }}
-              options={schemes.map((s) => ({ value: String(s.id), label: s.name, meta: s.academicYearLabel ?? undefined }))}
-              placeholder="Select scheme…"
-              allowClear
-              searchable
-            />
+            <div className="stack" style={{ gap: 4 }}>
+              <div className="row" style={{ gap: 4 }}>
+                {(['', 'PUBLISHED', 'ARCHIVED'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => { setFilterSchemeStatus(v); setFilterSchemeId(''); }}
+                    style={{
+                      fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(15,23,42,0.2)', cursor: 'pointer',
+                      background: filterSchemeStatus === v ? '#0f172a' : 'transparent',
+                      color: filterSchemeStatus === v ? '#fff' : 'inherit',
+                      fontWeight: filterSchemeStatus === v ? 700 : 400,
+                    }}
+                  >
+                    {v === '' ? 'All' : v === 'PUBLISHED' ? 'Published' : 'Archived'}
+                  </button>
+                ))}
+              </div>
+              <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
+                options={filteredSchemeOptions.map((s) => ({ value: String(s.id), label: s.name, meta: s.status === 'PUBLISHED' ? 'Published' : s.status === 'ARCHIVED' ? 'Archived' : 'Draft' }))}
+                placeholder="All schemes" allowClear searchable />
+            </div>
           </label>
           <label className="stack" style={{ gap: 4 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Sections</span>
+            <SmartSelect
+              value={filterGrade}
+              onChange={(v) => { setFilterGrade(v); setFilterClassGroupId(''); }}
+              options={gradeOptions.map((g) => ({ value: String(g), label: `Grade ${g}` }))}
+              placeholder="All classes" allowClear />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Section</span>
             <SmartSelect
               value={filterClassGroupId}
-              onChange={(v) => { setFilterClassGroupId(v); setPreviewResults(null); }}
-              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
-              placeholder="All classes"
-              allowClear
-              searchable
-            />
+              onChange={setFilterClassGroupId}
+              options={sectionOptions.map((cg) => ({ value: String(cg.id), label: cg.section ?? cg.displayName ?? `Grade ${cg.gradeLevel}` }))}
+              placeholder={filterGrade ? 'All sections' : 'Select class first'} allowClear />
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
