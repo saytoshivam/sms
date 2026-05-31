@@ -3,31 +3,13 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
-  BookOpen,
-  Building2,
-  CalendarRange,
   CheckCircle2,
   ChevronRight,
-  ClipboardCheck,
-  GraduationCap,
-  LayoutDashboard,
-  LineChart,
-  Megaphone,
-  MessagesSquare,
-  Network,
-  Palette,
-  Presentation,
-  Shield,
-  Upload,
-  Users,
-  Wallet,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type { SchoolAdminDashboardShellProps } from './schoolAdmin/dashboardPersona';
 import type { SchoolAdminOperationalSnapshot } from './schoolAdmin/useSchoolAdminOperationalData';
 import { inr } from './schoolAdmin/useSchoolAdminOperationalData';
 import { formatApiError } from '../../lib/errors';
-import { withWorkspaceReadOnly } from '../../lib/workspaceViewMode';
 import './schoolAdminCommandCenter.css';
 
 function KpiShell({
@@ -74,17 +56,6 @@ function KpiShell({
       <div className="sacc-kpi-sub">{sub}</div>
       {trend ? <div className={trendCls}>{trend}</div> : null}
     </div>
-  );
-}
-
-function ModLauncher({ to, Icon, label }: { to: string; Icon: LucideIcon; label: string }) {
-  return (
-    <Link className="sacc-launch" to={to}>
-      <span className="sacc-launch__icon">
-        <Icon size={18} strokeWidth={2} aria-hidden />
-      </span>
-      <span className="sacc-launch__label">{label}</span>
-    </Link>
   );
 }
 
@@ -663,40 +634,6 @@ export function SchoolAdminCommandCenter({
         </div>
       </div>
 
-      <div className="sacc-module-groups">
-        <div className="sacc-section-title">Academics · app launcher</div>
-        <p className="sacc-launch-hint">Dense shortcuts · primary workflows live above in Action center.</p>
-        <div className="sacc-launch-grid">
-          <ModLauncher to="/app/operations-hub" Icon={LayoutDashboard} label="Operations hub" />
-          <ModLauncher to={attendanceMonitorHref} Icon={ClipboardCheck} label="Attendance" />
-          <ModLauncher to={withWorkspaceReadOnly('/app/timetable?scope=published')} Icon={CalendarRange} label="Timetable" />
-          <ModLauncher to={withWorkspaceReadOnly('/app/teachers')} Icon={GraduationCap} label="Teachers" />
-          <ModLauncher to={withWorkspaceReadOnly('/app/fees')} Icon={Wallet} label="Fees" />
-          <ModLauncher to={withWorkspaceReadOnly('/app/students')} Icon={Users} label="Students" />
-          <ModLauncher to={withWorkspaceReadOnly('/app/academic')} Icon={Network} label="Structure" />
-          <ModLauncher to={withWorkspaceReadOnly('/app/subjects')} Icon={BookOpen} label="Subjects" />
-          <ModLauncher to={withWorkspaceReadOnly('/app/lectures')} Icon={Presentation} label="Lectures" />
-        </div>
-
-        <div className="sacc-section-title">System</div>
-        <div className="sacc-launch-grid">
-          <ModLauncher to="/app/school/management" Icon={Building2} label="School" />
-          {isSchoolAdmin ? <ModLauncher to="/app/onboarding" Icon={Upload} label="Imports" /> : null}
-          <ModLauncher to="/app/user-access" Icon={Shield} label="Access" />
-          <ModLauncher to="/app/school-theme" Icon={Palette} label="Brand" />
-        </div>
-
-        <div className="sacc-section-title">Communication</div>
-        <div className="sacc-launch-grid sacc-launch-grid--narrow">
-          <ModLauncher to="/app/school/announcements/new" Icon={Megaphone} label="Circulars" />
-          <ModLauncher to="/app/teacher/announcements/new" Icon={MessagesSquare} label="Class posts" />
-        </div>
-
-        <div className="sacc-section-title">Reports</div>
-        <div className="sacc-launch-grid sacc-launch-grid--narrow">
-          <ModLauncher to="/app/teacher/class-progress" Icon={LineChart} label="Class progress" />
-        </div>
-      </div>
     </div>
   );
 }
