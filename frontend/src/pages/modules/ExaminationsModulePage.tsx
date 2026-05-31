@@ -433,6 +433,52 @@ function computeScopeLabel(s: AssessmentScheme): string {
   return gradeLabel ?? s.assignmentLabel ?? 'Not assigned';
 }
 
+function getScopeCategory(s: AssessmentScheme): string {
+  const active = (s.assignments ?? []).filter((a) => a.active);
+  if (active.length === 0) return 'Unassigned';
+  const types = new Set(active.map((a) => a.scopeType));
+  if (types.has('SCHOOL')) return 'School-wide';
+  if (types.has('CLASS_SUBJECT') || types.has('SECTION_SUBJECT')) return 'Class + Subject Override';
+  if (types.has('SUBJECT')) return 'Subject Override';
+  if (types.has('SECTION')) return 'Class Section';
+  if (types.has('CLASS')) return 'Class Group';
+  return 'Custom';
+}
+
+function getOverridePriority(s: AssessmentScheme): number {
+  const active = (s.assignments ?? []).filter((a) => a.active);
+  if (active.length === 0) return 0;
+  const types = new Set(active.map((a) => a.scopeType));
+  if (types.has('CLASS_SUBJECT') || types.has('SECTION_SUBJECT')) return 5;
+  if (types.has('SUBJECT')) return 4;
+  if (types.has('SECTION')) return 3;
+  if (types.has('CLASS')) return 2;
+  if (types.has('SCHOOL')) return 1;
+  return 0;
+}
+
+function getOverrideBadge(s: AssessmentScheme): string | null {
+  const p = getOverridePriority(s);
+  if (p <= 1) return null;
+  if (p === 2) return 'Overrides school-wide';
+  if (p === 3) return 'Overrides grade scheme';
+  return 'Highest priority';
+}
+
+type SchemeState = 'Needs Setup' | 'Draft' | 'Ready to Publish' | 'Published' | 'Archived' | 'Has Conflicts';
+
+function computeSchemeState(s: AssessmentScheme): { state: SchemeState; level: StatusLevel } {
+  if (s.status === 'ARCHIVED') return { state: 'Archived', level: 'idle' };
+  if (s.status === 'PUBLISHED') return { state: 'Published', level: 'ok' };
+  const components = s.components ?? [];
+  const total = totalWeightage(components);
+  const hasRuleIssue = components.some((c) => validateComponentRules(c).length > 0);
+  if (components.length === 0) return { state: 'Needs Setup', level: 'warn' };
+  if (!(s.assignments ?? []).some((a) => a.active)) return { state: 'Needs Setup', level: 'warn' };
+  if (hasRuleIssue || total !== 100) return { state: 'Has Conflicts', level: 'error' };
+  return { state: 'Ready to Publish', level: 'ok' };
+}
+
 function toDisplayLabel(v: string): string {
   return v
     .toLowerCase()
@@ -739,6 +785,11 @@ function AssessmentSchemesPanel({
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [schemeSearch, setSchemeSearch] = useState('');
+  const [filterScope, setFilterScope] = useState('');
+  const [filterState, setFilterState] = useState('');
+  const [filterAcademicYearFilter, setFilterAcademicYearFilter] = useState('');
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+  const [activeMenuId, setActiveMenuId] = useState<number | null>(null);
   const [selectedPresetIndex, setSelectedPresetIndex] = useState('0');
   const [form, setForm] = useState<SchemeForm>({
     name: '',
@@ -848,92 +899,127 @@ function AssessmentSchemesPanel({
   const activeSchemes = schemes.filter((s) => s.status !== 'ARCHIVED');
   const archivedSchemes = schemes.filter((s) => s.status === 'ARCHIVED');
 
-  function renderSchemeRows(rows: AssessmentScheme[], archivedList: boolean) {
+  function renderSchemeRows(rows: AssessmentScheme[], isArchived: boolean) {
     return rows.map((s) => {
-      const r = schemeReadiness(s);
-      const canPublish = s.status === 'DRAFT' && r.ready;
-      const isDraft = s.status === 'DRAFT';
-      const isPublished = s.status === 'PUBLISHED';
-      const isArchived = s.status === 'ARCHIVED';
+      const { state, level } = computeSchemeState(s);
+      const total = totalWeightage(s.components ?? []);
+      const overrideBadge = getOverrideBadge(s);
+      const scopeCategory = getScopeCategory(s);
+      const appliesTo = computeScopeLabel(s);
+      const isMenuOpen = activeMenuId === s.id;
 
-      const statusBadge = (
-        <span style={{
-          fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap',
-          background: isDraft ? '#fef3c7' : isPublished ? '#d1fae5' : '#f1f5f9',
-          color: isDraft ? '#92400e' : isPublished ? '#065f46' : '#64748b',
-        }}>
-          {isDraft ? 'Draft' : isPublished ? 'Published' : 'Archived'}
-        </span>
-      );
-
-      const readinessBadge = !isArchived ? (
-        <span style={{
-          fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap',
-          background: r.level === 'ok' ? '#d1fae5' : r.level === 'warn' ? '#fef3c7' : r.level === 'error' ? '#fee2e2' : '#f1f5f9',
-          color: r.level === 'ok' ? '#065f46' : r.level === 'warn' ? '#92400e' : r.level === 'error' ? '#991b1b' : '#64748b',
-        }}>
-          {r.label}
-        </span>
-      ) : (
-        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
-          Read-only
-        </span>
-      );
-
-      const primaryLabel = isDraft ? (r.ready ? 'Open setup' : 'Open setup') : 'View';
+      const stateColors: Record<SchemeState, { bg: string; color: string }> = {
+        'Needs Setup':     { bg: '#fef3c7', color: '#92400e' },
+        'Draft':           { bg: '#f1f5f9', color: '#475569' },
+        'Ready to Publish':{ bg: '#dbeafe', color: '#1d4ed8' },
+        'Published':       { bg: '#d1fae5', color: '#065f46' },
+        'Archived':        { bg: '#f1f5f9', color: '#64748b' },
+        'Has Conflicts':   { bg: '#fee2e2', color: '#991b1b' },
+      };
+      const sc = stateColors[state];
 
       return (
         <tr
           key={s.id}
-          style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', opacity: isArchived ? 0.78 : 1, cursor: 'pointer' }}
+          style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', opacity: isArchived ? 0.75 : 1, cursor: 'pointer' }}
           onClick={() => onOpenScheme(s.id)}
         >
-          <td style={{ padding: '8px 6px', fontWeight: 700 }}>{s.name}</td>
-          <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{s.academicYearLabel ?? `Year ${s.academicYearId}`}</td>
-          <td style={{ padding: '8px 6px' }}>{computeScopeLabel(s)}</td>
-          <td style={{ padding: '8px 6px' }}>{statusBadge}</td>
-          <td style={{ padding: '8px 6px' }}>{readinessBadge}</td>
-          <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Scheme Name */}
+          <td style={{ padding: '9px 8px' }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>{s.name}</div>
+            {overrideBadge && (
+              <div style={{ fontSize: 10, marginTop: 2, color: '#7c3aed', fontWeight: 600 }}>
+                ↑ {overrideBadge}
+              </div>
+            )}
+          </td>
+          {/* Scope */}
+          <td style={{ padding: '9px 8px', fontSize: 12, color: '#475569', whiteSpace: 'nowrap' }}>
+            {scopeCategory}
+          </td>
+          {/* Applies To */}
+          <td style={{ padding: '9px 8px', fontSize: 12, maxWidth: 160 }}>
+            <span title={appliesTo} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {appliesTo}
+            </span>
+          </td>
+          {/* Components */}
+          <td style={{ padding: '9px 8px', fontSize: 12, textAlign: 'center' }}>
+            {s.components?.length ?? 0}
+          </td>
+          {/* Total Weightage */}
+          <td style={{ padding: '9px 8px', fontSize: 12, textAlign: 'center' }}>
+            <span style={{ color: total === 100 ? '#065f46' : total > 0 ? '#b45309' : '#94a3b8', fontWeight: total === 100 ? 700 : 400 }}>
+              {total > 0 ? `${total}%` : '—'}
+            </span>
+          </td>
+          {/* State */}
+          <td style={{ padding: '9px 8px' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap', background: sc.bg, color: sc.color }}>
+              {state}
+            </span>
+          </td>
+          {/* Actions */}
+          <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <button
                 type="button"
                 className="btn"
-                style={{ fontSize: 12, padding: '4px 10px' }}
+                style={{ fontSize: 11, padding: '3px 10px' }}
                 onClick={() => onOpenScheme(s.id)}
               >
-                {primaryLabel}
+                {s.status === 'DRAFT' ? 'Open' : 'View'}
               </button>
-              {isDraft && canPublish && (
+              {/* 3-dot overflow menu */}
+              <div style={{ position: 'relative' }}>
                 <button
                   type="button"
-                  className="btn secondary"
-                  style={{ fontSize: 12, padding: '4px 10px' }}
-                  disabled={publishScheme.isPending}
-                  onClick={() => publishScheme.mutate(s.id)}
+                  style={{ background: 'none', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 14, lineHeight: 1, color: '#64748b' }}
+                  onClick={(e) => { e.stopPropagation(); setActiveMenuId(isMenuOpen ? null : s.id); }}
+                  title="More actions"
                 >
-                  Publish
+                  ⋯
                 </button>
-              )}
-              <button
-                type="button"
-                className="btn secondary"
-                style={{ fontSize: 12, padding: '4px 10px' }}
-                disabled={cloneScheme.isPending}
-                onClick={() => cloneScheme.mutate(s.id)}
-              >
-                Clone
-              </button>
-              {!isArchived && (
-                <button
-                  type="button"
-                  className="btn secondary"
-                  style={{ fontSize: 12, padding: '4px 10px' }}
-                  disabled={archiveScheme.isPending}
-                  onClick={() => archiveScheme.mutate(s.id)}
-                >
-                  Archive
-                </button>
-              )}
+                {isMenuOpen && (
+                  <div
+                    style={{
+                      position: 'absolute', right: 0, top: '110%', zIndex: 50,
+                      background: '#fff', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 6,
+                      boxShadow: '0 4px 12px rgba(15,23,42,0.12)', minWidth: 140, padding: '4px 0',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {s.status === 'DRAFT' && computeSchemeState(s).state === 'Ready to Publish' && (
+                      <button
+                        type="button"
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', color: '#065f46' }}
+                        disabled={publishScheme.isPending}
+                        onClick={() => { publishScheme.mutate(s.id); setActiveMenuId(null); }}
+                      >
+                        ✓ Publish
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }}
+                      disabled={cloneScheme.isPending}
+                      onClick={() => { cloneScheme.mutate(s.id); setActiveMenuId(null); }}
+                    >
+                      ⎘ Clone
+                    </button>
+                    {!isArchived && (
+                      <button
+                        type="button"
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', color: '#b45309' }}
+                        disabled={archiveScheme.isPending}
+                        onClick={() => { archiveScheme.mutate(s.id); setActiveMenuId(null); }}
+                      >
+                        ▾ Archive
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </td>
         </tr>
@@ -942,14 +1028,13 @@ function AssessmentSchemesPanel({
   }
 
   function suggestSchemeName(): string {
-    const ay = formatAcademicYear(academicYears.find((y) => String(y.id) === form.academicYearId)?.label);
-    if (form.applicableScopeType === 'SCHOOL') return `School-wide Evaluation Scheme ${ay}`;
+    if (form.applicableScopeType === 'SCHOOL') return 'School-wide Default Scheme';
     if (form.applicableScopeType === 'SUBJECT') {
       if (form.subjectIds.length === 1) {
         const subject = subjects.find((s) => String(s.id) === form.subjectIds[0]);
-        return `${subject?.name ?? 'Subject'} Evaluation Scheme ${ay}`;
+        return `${subject?.name ?? 'Subject'} Override Scheme`;
       }
-      if (form.subjectIds.length > 1) return `${form.subjectIds.length} Subjects Evaluation Scheme ${ay}`;
+      if (form.subjectIds.length > 1) return `${form.subjectIds.length} Subjects Override Scheme`;
     }
     const grades = form.applicableScopeType === 'CLASS'
       ? form.classGrades.map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b)
@@ -959,8 +1044,8 @@ function AssessmentSchemesPanel({
         .filter((n, i, arr) => arr.indexOf(n) === i)
         .sort((a, b) => a - b);
     const gradeLabel = gradeSelectionLabel(grades);
-    if (gradeLabel) return `${gradeLabel} Evaluation Scheme ${ay}`;
-    return `Evaluation Scheme ${ay}`;
+    if (gradeLabel) return `${gradeLabel} Evaluation Scheme`;
+    return 'Evaluation Scheme';
   }
 
   function presetToFormComponents(preset: ComponentPreset): ComponentForm[] {
@@ -1215,64 +1300,141 @@ function AssessmentSchemesPanel({
 
       {!selectedScheme ? (
         <>
+        {/* ── Summary Cards ── */}
+        {schemes.length > 0 && (() => {
+          const active = schemes.filter((s) => s.status !== 'ARCHIVED').length;
+          const drafts = schemes.filter((s) => s.status === 'DRAFT').length;
+          const subjectOverrides = schemes.filter((s) => getOverridePriority(s) >= 4).length;
+          const archived = schemes.filter((s) => s.status === 'ARCHIVED').length;
+          const conflicts = schemes.filter((s) => computeSchemeState(s).state === 'Has Conflicts').length;
+          const cards = [
+            { label: 'Active', value: active, color: '#065f46', bg: '#d1fae5' },
+            { label: 'Drafts', value: drafts, color: '#92400e', bg: '#fef3c7' },
+            { label: 'Subject Overrides', value: subjectOverrides, color: '#4338ca', bg: '#ede9fe' },
+            { label: 'Archived', value: archived, color: '#475569', bg: '#f1f5f9' },
+            { label: 'Conflicts', value: conflicts, color: conflicts > 0 ? '#991b1b' : '#475569', bg: conflicts > 0 ? '#fee2e2' : '#f1f5f9' },
+          ];
+          return (
+            <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
+              {cards.map((c) => (
+                <div key={c.label} style={{ background: c.bg, borderRadius: 8, padding: '10px 14px' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: c.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{c.label}</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: c.color, marginTop: 2 }}>{c.value}</div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* ── Active Schemes ── */}
         <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-            <div style={{ fontWeight: 900 }}>Active Assessment Schemes</div>
+          {/* Search + Filters */}
+          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', marginBottom: 12 }}>
             <input
               value={schemeSearch}
               onChange={(e) => setSchemeSearch(e.target.value)}
-              placeholder="Search by name…"
-              style={{ fontSize: 13, padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', width: 220 }}
+              placeholder="Search scheme, class, subject…"
+              style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', gridColumn: 'span 2' }}
             />
+            <select
+              value={filterScope}
+              onChange={(e) => setFilterScope(e.target.value)}
+              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', color: filterScope ? '#0f172a' : '#94a3b8' }}
+            >
+              <option value="">All scopes</option>
+              {['School-wide','Class Group','Class Section','Subject Override','Class + Subject Override','Unassigned'].map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+            <select
+              value={filterAcademicYearFilter}
+              onChange={(e) => setFilterAcademicYearFilter(e.target.value)}
+              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', color: filterAcademicYearFilter ? '#0f172a' : '#94a3b8' }}
+            >
+              <option value="">All years</option>
+              {academicYears.map((y) => <option key={y.id} value={String(y.id)}>{y.label}</option>)}
+            </select>
+            <select
+              value={filterState}
+              onChange={(e) => setFilterState(e.target.value)}
+              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', color: filterState ? '#0f172a' : '#94a3b8' }}
+            >
+              <option value="">All states</option>
+              {(['Needs Setup','Ready to Publish','Published','Has Conflicts'] as SchemeState[]).map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
           </div>
-          <div style={{ overflowX: 'auto' }}>
+
+          {/* Table */}
+          <div style={{ overflowX: 'auto' }} onClick={() => activeMenuId !== null && setActiveMenuId(null)}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
-                  <th style={{ padding: '8px 6px' }}>Scheme name</th>
-                  <th style={{ padding: '8px 6px' }}>Academic year</th>
-                  <th style={{ padding: '8px 6px' }}>Assigned to</th>
-                  <th style={{ padding: '8px 6px' }}>Status</th>
-                  <th style={{ padding: '8px 6px' }}>Readiness</th>
-                  <th style={{ padding: '8px 6px' }}>Actions</th>
+                <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
+                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12 }}>Scheme Name</th>
+                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Scope</th>
+                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Applies To</th>
+                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center' }}>Comps</th>
+                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center' }}>Weightage</th>
+                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12 }}>State</th>
+                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {renderSchemeRows(
-                  activeSchemes.filter((s) => !schemeSearch.trim() || s.name.toLowerCase().includes(schemeSearch.toLowerCase())),
-                  false,
-                )}
-                {activeSchemes.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: 14 }} className="muted">
-                      No active schemes created yet.
-                    </td>
-                  </tr>
-                ) : null}
+                {(() => {
+                  const q = schemeSearch.trim().toLowerCase();
+                  const filtered = activeSchemes.filter((s) => {
+                    if (q && !s.name.toLowerCase().includes(q) && !computeScopeLabel(s).toLowerCase().includes(q)) return false;
+                    if (filterScope && getScopeCategory(s) !== filterScope) return false;
+                    if (filterAcademicYearFilter && String(s.academicYearId) !== filterAcademicYearFilter) return false;
+                    if (filterState && computeSchemeState(s).state !== filterState) return false;
+                    return true;
+                  });
+                  if (filtered.length === 0) return (
+                    <tr><td colSpan={7} style={{ padding: 16 }} className="muted">
+                      {activeSchemes.length === 0 ? 'No active schemes yet. Create your first scheme above.' : 'No schemes match the current filters.'}
+                    </td></tr>
+                  );
+                  return renderSchemeRows(filtered, false);
+                })()}
               </tbody>
             </table>
           </div>
         </div>
-        {archivedSchemes.length > 0 ? (
-          <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-            <div style={{ fontWeight: 900, marginBottom: 10 }}>Archived Assessment Schemes</div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
-                    <th style={{ padding: '8px 6px' }}>Scheme name</th>
-                    <th style={{ padding: '8px 6px' }}>Academic year</th>
-                    <th style={{ padding: '8px 6px' }}>Assigned to</th>
-                    <th style={{ padding: '8px 6px' }}>Status</th>
-                    <th style={{ padding: '8px 6px' }}>Readiness</th>
-                    <th style={{ padding: '8px 6px' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>{renderSchemeRows(archivedSchemes, true)}</tbody>
-              </table>
-            </div>
+
+        {/* ── Archived (collapsible) ── */}
+        {archivedSchemes.length > 0 && (
+          <div className="card" style={{ padding: 0, border: '1px solid rgba(15,23,42,0.1)', overflow: 'hidden' }}>
+            <button
+              type="button"
+              style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'rgba(15,23,42,0.03)', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+              onClick={() => setArchivedExpanded((v) => !v)}
+            >
+              <span style={{ fontWeight: 700, fontSize: 13, color: '#64748b' }}>
+                Archived Assessment Schemes ({archivedSchemes.length})
+              </span>
+              <span style={{ fontSize: 12, color: '#94a3b8' }}>{archivedExpanded ? '▲ Collapse' : '▼ Expand'}</span>
+            </button>
+            {archivedExpanded && (
+              <div style={{ overflowX: 'auto', padding: '0 0 8px' }} onClick={() => activeMenuId !== null && setActiveMenuId(null)}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
+                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>Scheme Name</th>
+                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>Scope</th>
+                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>Applies To</th>
+                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11, textAlign: 'center' }}>Comps</th>
+                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11, textAlign: 'center' }}>Weightage</th>
+                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>State</th>
+                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>{renderSchemeRows(archivedSchemes, true)}</tbody>
+                </table>
+              </div>
+            )}
           </div>
-        ) : null}
+        )}
         </>
       ) : (
         <SchemeDetailCard
@@ -1406,11 +1568,31 @@ function SchemeDetailCard({
               {scheme.academicYearLabel ?? `Year ${scheme.academicYearId}`} · {computeScopeLabel(scheme)} · Total weightage: {total}%
             </div>
             <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-              <StatusChip
-                level={scheme.status === 'DRAFT' ? 'warn' : scheme.status === 'PUBLISHED' ? 'ok' : 'idle'}
-                label={statusLabel}
-              />
-              {!isReadOnly && <StatusChip level={ready.level} label={ready.label} />}
+              {(() => {
+                const { state } = computeSchemeState(scheme);
+                const stateColors: Record<SchemeState, { bg: string; color: string }> = {
+                  'Needs Setup':     { bg: '#fef3c7', color: '#92400e' },
+                  'Draft':           { bg: '#f1f5f9', color: '#475569' },
+                  'Ready to Publish':{ bg: '#dbeafe', color: '#1d4ed8' },
+                  'Published':       { bg: '#d1fae5', color: '#065f46' },
+                  'Archived':        { bg: '#f1f5f9', color: '#64748b' },
+                  'Has Conflicts':   { bg: '#fee2e2', color: '#991b1b' },
+                };
+                const sc = stateColors[state];
+                return (
+                  <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 8px', borderRadius: 4, background: sc.bg, color: sc.color }}>
+                    {state}
+                  </span>
+                );
+              })()}
+              {(() => {
+                const badge = getOverrideBadge(scheme);
+                return badge ? (
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4, background: '#ede9fe', color: '#5b21b6' }}>
+                    ↑ {badge}
+                  </span>
+                ) : null;
+              })()}
               {isReadOnly && (
                 <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
                   Read-only · Clone to revise
