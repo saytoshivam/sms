@@ -766,6 +766,66 @@ function AssessmentSchemesPanel({
     return g.gradeLevel === grade;
   });
 
+  const activeSchemes = schemes.filter((s) => s.status !== 'ARCHIVED');
+  const archivedSchemes = schemes.filter((s) => s.status === 'ARCHIVED');
+
+  function renderSchemeRows(rows: AssessmentScheme[], archivedList: boolean) {
+    return rows.map((s) => {
+      const total = totalWeightage(s.components ?? []);
+      const r = readiness(s.components ?? []);
+      const hasAssignments = (s.assignments ?? []).some((a) => a.active);
+      const canPublish = s.status === 'DRAFT' && r.ready && hasAssignments;
+      return (
+        <tr key={s.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', opacity: archivedList ? 0.78 : 1 }}>
+          <td style={{ padding: '8px 6px', fontWeight: 700 }}>{s.name}</td>
+          <td style={{ padding: '8px 6px' }}>{s.academicYearLabel ?? `Year ${s.academicYearId}`}</td>
+          <td style={{ padding: '8px 6px' }}>{scopeLabel(s)}</td>
+          <td style={{ padding: '8px 6px' }}>{s.status}</td>
+          <td style={{ padding: '8px 6px' }}>{s.components?.length ?? 0}</td>
+          <td style={{ padding: '8px 6px' }}>{total}%</td>
+          <td style={{ padding: '8px 6px' }}>{canPublish ? 'Ready' : (!hasAssignments ? 'Needs assignment' : r.label)}</td>
+          <td style={{ padding: '8px 6px' }}>
+            <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+              <button type="button" className="btn secondary" onClick={() => onOpenScheme(s.id)}>
+                Open
+              </button>
+              {!archivedList ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={!canPublish || publishScheme.isPending}
+                    onClick={() => publishScheme.mutate(s.id)}
+                  >
+                    Publish
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={cloneScheme.isPending}
+                    onClick={() => cloneScheme.mutate(s.id)}
+                  >
+                    Clone
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={archiveScheme.isPending}
+                    onClick={() => archiveScheme.mutate(s.id)}
+                  >
+                    Archive
+                  </button>
+                </>
+              ) : (
+                <span className="muted" style={{ fontSize: 12 }}>Archived</span>
+              )}
+            </div>
+          </td>
+        </tr>
+      );
+    });
+  }
+
   function suggestSchemeName(): string {
     const ay = academicYears.find((y) => String(y.id) === form.academicYearId)?.label ?? '2026-27';
     if (form.applicableScopeType === 'SCHOOL') return `School-wide Evaluation Scheme ${ay}`;
@@ -1013,7 +1073,9 @@ function AssessmentSchemesPanel({
       </div>
 
       {!selectedScheme ? (
+        <>
         <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>Active Assessment Schemes</div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -1029,58 +1091,11 @@ function AssessmentSchemesPanel({
                 </tr>
               </thead>
               <tbody>
-                {schemes.map((s) => {
-                  const total = totalWeightage(s.components ?? []);
-                  const r = readiness(s.components ?? []);
-                  const hasAssignments = (s.assignments ?? []).some((a) => a.active);
-                  const canPublish = s.status === 'DRAFT' && r.ready && hasAssignments;
-                  return (
-                    <tr key={s.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
-                      <td style={{ padding: '8px 6px', fontWeight: 700 }}>{s.name}</td>
-                      <td style={{ padding: '8px 6px' }}>{s.academicYearLabel ?? `Year ${s.academicYearId}`}</td>
-                      <td style={{ padding: '8px 6px' }}>{scopeLabel(s)}</td>
-                      <td style={{ padding: '8px 6px' }}>{s.status}</td>
-                      <td style={{ padding: '8px 6px' }}>{s.components?.length ?? 0}</td>
-                      <td style={{ padding: '8px 6px' }}>{total}%</td>
-                      <td style={{ padding: '8px 6px' }}>{canPublish ? 'Ready' : (!hasAssignments ? 'Needs assignment' : r.label)}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                          <button type="button" className="btn secondary" onClick={() => onOpenScheme(s.id)}>
-                            Open
-                          </button>
-                          <button
-                            type="button"
-                            className="btn secondary"
-                            disabled={!canPublish || publishScheme.isPending}
-                            onClick={() => publishScheme.mutate(s.id)}
-                          >
-                            Publish
-                          </button>
-                          <button
-                            type="button"
-                            className="btn secondary"
-                            disabled={cloneScheme.isPending}
-                            onClick={() => cloneScheme.mutate(s.id)}
-                          >
-                            Clone
-                          </button>
-                          <button
-                            type="button"
-                            className="btn secondary"
-                            disabled={s.status === 'ARCHIVED' || archiveScheme.isPending}
-                            onClick={() => archiveScheme.mutate(s.id)}
-                          >
-                            Archive
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {schemes.length === 0 ? (
+                {renderSchemeRows(activeSchemes, false)}
+                {activeSchemes.length === 0 ? (
                   <tr>
                     <td colSpan={8} style={{ padding: 14 }} className="muted">
-                      No schemes created yet.
+                      No active schemes created yet.
                     </td>
                   </tr>
                 ) : null}
@@ -1088,6 +1103,29 @@ function AssessmentSchemesPanel({
             </table>
           </div>
         </div>
+        {archivedSchemes.length > 0 ? (
+          <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+            <div style={{ fontWeight: 900, marginBottom: 10 }}>Archived Assessment Schemes</div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
+                    <th style={{ padding: '8px 6px' }}>Scheme name</th>
+                    <th style={{ padding: '8px 6px' }}>Academic year</th>
+                    <th style={{ padding: '8px 6px' }}>Assigned to</th>
+                    <th style={{ padding: '8px 6px' }}>Status</th>
+                    <th style={{ padding: '8px 6px' }}>Components</th>
+                    <th style={{ padding: '8px 6px' }}>Total weightage</th>
+                    <th style={{ padding: '8px 6px' }}>Readiness</th>
+                    <th style={{ padding: '8px 6px' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>{renderSchemeRows(archivedSchemes, true)}</tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+        </>
       ) : (
         <SchemeDetailCard
           scheme={selectedScheme}
