@@ -13,6 +13,8 @@ public record GradingBandCreateDTO(
         @NotBlank @Size(max = 16) String grade,
         @NotNull @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal minPercent,
         @NotNull @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal maxPercent,
+        @Size(max = 64) String label,
+        String resultType,
         BigDecimal gradePoint,
         @Size(max = 128) String remarks,
         @NotNull @Min(1) Integer sequence

@@ -7,6 +7,8 @@ public record GradingBandDTO(
         String grade,
         BigDecimal minPercent,
         BigDecimal maxPercent,
+        String label,
+        String resultType,
         BigDecimal gradePoint,
         String remarks,
         Integer sequence

@@ -14,10 +14,12 @@ public record GradingSchemeCreateDTO(
         Integer academicYearId,
         String scope,
         Integer classGroupId,
+        List<Integer> classGroupIds,
         Boolean defaultScheme,
         BigDecimal passingPercent,
         Integer effectiveFromAcademicYearId,
         Integer effectiveToAcademicYearId,
-        boolean active,
+        String status,
+        Boolean active,
         @NotEmpty @Valid List<GradingBandCreateDTO> bands
 ) {}

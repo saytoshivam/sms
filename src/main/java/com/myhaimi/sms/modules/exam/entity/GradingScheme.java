@@ -4,6 +4,7 @@ import com.myhaimi.sms.entity.AcademicYear;
 import com.myhaimi.sms.entity.ClassGroup;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.modules.exam.entity.enums.GradingSchemeScope;
+import com.myhaimi.sms.modules.exam.entity.enums.GradingSchemeStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -26,7 +27,8 @@ import java.util.List;
         @Index(name = "idx_gs_academic_year", columnList = "academic_year_id"),
         @Index(name = "idx_gs_effective_from", columnList = "effective_from_academic_year_id"),
         @Index(name = "idx_gs_effective_to", columnList = "effective_to_academic_year_id"),
-        @Index(name = "idx_gs_scope_class", columnList = "scope,class_group_id")
+        @Index(name = "idx_gs_scope_class", columnList = "scope,class_group_id"),
+        @Index(name = "idx_gs_status", columnList = "status")
 })
 public class GradingScheme {
 
@@ -67,9 +69,13 @@ public class GradingScheme {
     @Column(nullable = false, length = 128)
     private String name;
 
-    /** Whether this is the active/default scheme for the school. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private GradingSchemeStatus status = GradingSchemeStatus.DRAFT;
+
+    /** Legacy active flag retained for older callers; status is the source of truth. */
     @Column(nullable = false)
-    private boolean active = true;
+    private boolean active = false;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -82,4 +88,13 @@ public class GradingScheme {
     @OneToMany(mappedBy = "gradingScheme", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sequence ASC")
     private List<GradingBand> bands = new ArrayList<>();
+
+    @OneToMany(mappedBy = "gradingScheme", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<GradingSchemeClassAssignment> classAssignments = new ArrayList<>();
+
+    @PrePersist
+    @PreUpdate
+    private void syncLegacyActiveFlag() {
+        this.active = this.status == GradingSchemeStatus.ACTIVE;
+    }
 }

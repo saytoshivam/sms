@@ -8,6 +8,7 @@ import { MultiSelectKeeper } from '../../components/MultiSelectKeeper';
 import { DateKeeper } from '../../components/DateKeeper';
 import { TimeKeeper } from '../../components/TimeKeeper';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { GradingSchemesManager } from './GradingSchemesManager';
 import { api } from '../../lib/api';
 import { pageContent, type SpringPage } from '../../lib/springPageContent';
 import { formatApiError } from '../../lib/errors';
@@ -717,11 +718,11 @@ export function ExaminationsModulePage() {
       ) : null}
 
       {tab === 'grading' ? (
-        <GradingPanel
+        <GradingSchemesManager
           gradingSchemes={gradingQ.data ?? []}
           academicYears={academicYearsQ.data ?? []}
           classGroups={classGroups}
-          onCreated={async () => {
+          onChanged={async () => {
             await qc.invalidateQueries({ queryKey: ['grading-schemes'] });
           }}
         />
@@ -2480,7 +2481,7 @@ function GradingPanel({
                                   key={action}
                                   type="button"
                                   disabled
-                                  title={`${action} API pending`}
+                                  title="Open the grading detail page to manage this scheme"
                                   style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', color: '#94a3b8', cursor: 'not-allowed' }}
                                 >
                                   {action}

@@ -32,6 +32,12 @@ import java.util.List;
  *
  * GET    /api/exams/grading-schemes
  * POST   /api/exams/grading-schemes
+ * GET    /api/exams/grading-schemes/{schemeId}
+ * PUT    /api/exams/grading-schemes/{schemeId}
+ * POST   /api/exams/grading-schemes/{schemeId}/publish
+ * POST   /api/exams/grading-schemes/{schemeId}/archive
+ * POST   /api/exams/grading-schemes/{schemeId}/clone
+ * POST   /api/exams/grading-schemes/{schemeId}/set-default
  * </pre>
  */
 @RestController
@@ -132,6 +138,38 @@ public class AssessmentSchemeController {
     @PostMapping("/grading-schemes")
     public ResponseEntity<GradingSchemeDTO> createGradingScheme(@Valid @RequestBody GradingSchemeCreateDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.createGradingScheme(dto));
+    }
+
+    @GetMapping("/grading-schemes/{schemeId}")
+    public ResponseEntity<GradingSchemeDTO> getGradingScheme(@PathVariable Integer schemeId) {
+        return ResponseEntity.ok(service.getGradingScheme(schemeId));
+    }
+
+    @PutMapping("/grading-schemes/{schemeId}")
+    public ResponseEntity<GradingSchemeDTO> updateGradingScheme(
+            @PathVariable Integer schemeId,
+            @Valid @RequestBody GradingSchemeCreateDTO dto) {
+        return ResponseEntity.ok(service.updateGradingScheme(schemeId, dto));
+    }
+
+    @PostMapping("/grading-schemes/{schemeId}/publish")
+    public ResponseEntity<GradingSchemeDTO> publishGradingScheme(@PathVariable Integer schemeId) {
+        return ResponseEntity.ok(service.publishGradingScheme(schemeId));
+    }
+
+    @PostMapping("/grading-schemes/{schemeId}/archive")
+    public ResponseEntity<GradingSchemeDTO> archiveGradingScheme(@PathVariable Integer schemeId) {
+        return ResponseEntity.ok(service.archiveGradingScheme(schemeId));
+    }
+
+    @PostMapping("/grading-schemes/{schemeId}/clone")
+    public ResponseEntity<GradingSchemeDTO> cloneGradingScheme(@PathVariable Integer schemeId) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.cloneGradingScheme(schemeId));
+    }
+
+    @PostMapping("/grading-schemes/{schemeId}/set-default")
+    public ResponseEntity<GradingSchemeDTO> setDefaultGradingScheme(@PathVariable Integer schemeId) {
+        return ResponseEntity.ok(service.setDefaultGradingScheme(schemeId));
     }
 
     // ─────────────────────────────── Assessment Scheduling ─────────────────────

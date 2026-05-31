@@ -3,6 +3,8 @@ package com.myhaimi.sms.modules.exam.seeder;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.modules.exam.entity.GradingBand;
 import com.myhaimi.sms.modules.exam.entity.GradingScheme;
+import com.myhaimi.sms.modules.exam.entity.enums.GradeResultType;
+import com.myhaimi.sms.modules.exam.entity.enums.GradingSchemeStatus;
 import com.myhaimi.sms.modules.exam.repository.GradingSchemeRepository;
 import com.myhaimi.sms.repository.SchoolRepo;
 import lombok.RequiredArgsConstructor;
@@ -26,16 +28,16 @@ public class DefaultGradingSchemeSeeder implements ApplicationRunner {
 
     private static final String DEFAULT_SCHEME_NAME = "Default Grading Scheme";
 
-    // grade, minPercent, maxPercent, gradePoint
+    // grade, minPercent, maxPercent, label, resultType, gradePoint
     private static final Object[][] DEFAULT_BANDS = {
-            {"A1", 91, 100, 10.0},
-            {"A2", 81,  90,  9.0},
-            {"B1", 71,  80,  8.0},
-            {"B2", 61,  70,  7.0},
-            {"C1", 51,  60,  6.0},
-            {"C2", 41,  50,  5.0},
-            {"D",  33,  40,  4.0},
-            {"E",   0,  32,  0.0},
+            {"A1", 91, 100, "Outstanding", GradeResultType.PASS, 10.0},
+            {"A2", 81,  90, "Excellent", GradeResultType.PASS, 9.0},
+            {"B1", 71,  80, "Very Good", GradeResultType.PASS, 8.0},
+            {"B2", 61,  70, "Good", GradeResultType.PASS, 7.0},
+            {"C1", 51,  60, "Average", GradeResultType.PASS, 6.0},
+            {"C2", 41,  50, "Below Average", GradeResultType.PASS, 5.0},
+            {"D",  33,  40, "Pass", GradeResultType.PASS, 4.0},
+            {"E",   0,  32, "Fail", GradeResultType.FAIL, 0.0},
     };
 
     private final SchoolRepo schoolRepo;
@@ -62,6 +64,7 @@ public class DefaultGradingSchemeSeeder implements ApplicationRunner {
         GradingScheme gs = new GradingScheme();
         gs.setSchool(school);
         gs.setName(DEFAULT_SCHEME_NAME);
+        gs.setStatus(GradingSchemeStatus.ACTIVE);
         gs.setActive(true);
         gs = gradingSchemeRepo.save(gs);
 
@@ -72,7 +75,9 @@ public class DefaultGradingSchemeSeeder implements ApplicationRunner {
             band.setGrade((String) row[0]);
             band.setMinPercent(BigDecimal.valueOf(((Number) row[1]).doubleValue()));
             band.setMaxPercent(BigDecimal.valueOf(((Number) row[2]).doubleValue()));
-            band.setGradePoint(BigDecimal.valueOf(((Number) row[3]).doubleValue()));
+            band.setLabel((String) row[3]);
+            band.setResultType((GradeResultType) row[4]);
+            band.setGradePoint(BigDecimal.valueOf(((Number) row[5]).doubleValue()));
             band.setSequence(seq++);
             gs.getBands().add(band);
         }

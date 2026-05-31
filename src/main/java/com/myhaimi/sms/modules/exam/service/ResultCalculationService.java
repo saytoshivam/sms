@@ -462,14 +462,16 @@ public class ResultCalculationService {
 
     private GradingScheme resolveGradingScheme(Integer schoolId, Context ctx, Integer gradingSchemeId) {
         if (gradingSchemeId != null) {
-            return gradingSchemeRepo.findByIdAndSchool_Id(gradingSchemeId, schoolId)
+            GradingScheme explicit = gradingSchemeRepo.findByIdAndSchool_Id(gradingSchemeId, schoolId)
                     .orElseThrow(() -> new NoSuchElementException("Grading scheme not found: " + gradingSchemeId));
+            if (!isResolvableGradingScheme(explicit)) throw new IllegalStateException("Selected grading scheme is not active");
+            return explicit;
         }
         Integer academicYearId = ctx.scheme().getAcademicYear().getId();
         List<GradingScheme> matchingClassSchemes = gradingSchemeRepo.findBySchool_IdOrderByCreatedAtAsc(schoolId).stream()
-                .filter(gs -> gs.isActive())
+                .filter(this::isResolvableGradingScheme)
                 .filter(gs -> gs.getScope() == GradingSchemeScope.CLASS_GROUP)
-                .filter(gs -> gs.getClassGroup() != null && Objects.equals(gs.getClassGroup().getId(), ctx.classGroup().getId()))
+                .filter(gs -> appliesToClass(gs, ctx.classGroup().getId()))
                 .filter(gs -> includesAcademicYear(gs, academicYearId))
                 .toList();
         if (matchingClassSchemes.size() > 1) {
@@ -478,7 +480,7 @@ public class ResultCalculationService {
         if (matchingClassSchemes.size() == 1) return matchingClassSchemes.get(0);
 
         List<GradingScheme> matchingDefaultSchemes = gradingSchemeRepo.findBySchool_IdOrderByCreatedAtAsc(schoolId).stream()
-                .filter(gs -> gs.isActive())
+                .filter(this::isResolvableGradingScheme)
                 .filter(gs -> gs.getScope() == GradingSchemeScope.SCHOOL)
                 .filter(GradingScheme::isDefaultScheme)
                 .filter(gs -> includesAcademicYear(gs, academicYearId))
@@ -487,6 +489,17 @@ public class ResultCalculationService {
             throw new IllegalStateException("Multiple active default school-wide grading schemes match this academic year. Resolve grading scheme conflicts before calculating results.");
         }
         return matchingDefaultSchemes.isEmpty() ? null : matchingDefaultSchemes.get(0);
+    }
+
+    private boolean isResolvableGradingScheme(GradingScheme gs) {
+        return gs.getStatus() == GradingSchemeStatus.ACTIVE || (gs.getStatus() == null && gs.isActive());
+    }
+
+    private boolean appliesToClass(GradingScheme gs, Integer classGroupId) {
+        if (gs.getClassAssignments() != null && !gs.getClassAssignments().isEmpty()) {
+            return gs.getClassAssignments().stream().anyMatch(a -> Objects.equals(a.getClassGroup().getId(), classGroupId));
+        }
+        return gs.getClassGroup() != null && Objects.equals(gs.getClassGroup().getId(), classGroupId);
     }
 
     private boolean includesAcademicYear(GradingScheme gs, Integer academicYearId) {

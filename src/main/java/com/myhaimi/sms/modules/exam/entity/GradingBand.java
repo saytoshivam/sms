@@ -1,5 +1,6 @@
 package com.myhaimi.sms.modules.exam.entity;
 
+import com.myhaimi.sms.modules.exam.entity.enums.GradeResultType;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -33,6 +34,13 @@ public class GradingBand {
 
     @Column(name = "max_percent", nullable = false, precision = 5, scale = 2)
     private BigDecimal maxPercent;
+
+    @Column(nullable = false, length = 64)
+    private String label;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "result_type", nullable = false, length = 8)
+    private GradeResultType resultType = GradeResultType.PASS;
 
     /** Optional GPA/grade point (e.g. 10.0, 9.0 …). */
     @Column(name = "grade_point", precision = 4, scale = 2)
