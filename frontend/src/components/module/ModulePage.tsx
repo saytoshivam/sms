@@ -10,6 +10,8 @@ export type ModuleTab = {
   label: string;
   /** Optional badge (e.g. count of issues). */
   badge?: number | string | null;
+  /** Optional helper text shown as a native tooltip. */
+  hint?: string;
 };
 
 type Props = {
@@ -239,11 +241,11 @@ export function ModulePage({
                 </span>
               );
               return tabHrefBase ? (
-                <Link key={t.id} to={buildTabHref(t.id)} role="tab" aria-selected={isActive} style={{ textDecoration: 'none' }}>
+                <Link key={t.id} to={buildTabHref(t.id)} role="tab" aria-selected={isActive} title={t.hint} style={{ textDecoration: 'none' }}>
                   {inner}
                 </Link>
               ) : (
-                <span key={t.id} role="tab" aria-selected={isActive}>
+                <span key={t.id} role="tab" aria-selected={isActive} title={t.hint}>
                   {inner}
                 </span>
               );

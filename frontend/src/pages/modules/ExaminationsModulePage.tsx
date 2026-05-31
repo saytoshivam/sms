@@ -659,9 +659,9 @@ export function ExaminationsModulePage() {
     { id: 'overview', label: 'Overview' },
     { id: 'schemes', label: 'Assessment Schemes', badge: schemes.length || null },
     { id: 'grading', label: 'Grading', badge: (gradingQ.data?.length ?? 0) || null },
-    { id: 'schedule', label: 'Exam Schedule' },
-    { id: 'marks', label: 'Marks Entry' },
-    { id: 'results', label: 'Results' },
+    { id: 'schedule', label: 'Exam Schedule', hint: 'Complete and publish valid assessment schemes first.' },
+    { id: 'marks', label: 'Marks Entry', hint: 'Create and publish exam schedule first.' },
+    { id: 'results', label: 'Results', hint: 'Finalize marks entry first.' },
   ];
 
   return (
@@ -676,7 +676,7 @@ export function ExaminationsModulePage() {
       impact={null}
     >
       {tab === 'overview' ? (
-        <OverviewPanel schemeCount={schemes.length} gradingCount={gradingQ.data?.length ?? 0} />
+        <OverviewPanel schemes={schemes} gradingCount={gradingQ.data?.length ?? 0} />
       ) : null}
 
       {tab === 'schemes' ? (
@@ -746,23 +746,206 @@ export function ExaminationsModulePage() {
   );
 }
 
-function OverviewPanel({ schemeCount, gradingCount }: { schemeCount: number; gradingCount: number }) {
+function OverviewPanel({ schemes, gradingCount }: { schemes: AssessmentScheme[]; gradingCount: number }) {
+  const totalSchemes = schemes.length;
+  const archivedCount = schemes.filter((s) => s.status === 'ARCHIVED').length;
+  const activeCount = schemes.filter((s) => s.status !== 'ARCHIVED').length;
+  const draftCount = schemes.filter((s) => s.status === 'DRAFT').length;
+  const subjectOverrideCount = schemes.filter((s) => getOverridePriority(s) >= 4).length;
+  const conflictCount = schemes.filter((s) => computeSchemeState(s).state === 'Has Conflicts').length;
+  const validPublishedCount = schemes.filter((s) =>
+    s.status === 'PUBLISHED' &&
+    (s.components?.length ?? 0) > 0 &&
+    totalWeightage(s.components ?? []) === 100 &&
+    (s.assignments ?? []).some((a) => a.active),
+  ).length;
+  const hasValidPublishedSchemes = validPublishedCount > 0;
+  const hasGrading = gradingCount > 0;
+
+  const scheduleState = hasValidPublishedSchemes ? 'Ready' : 'Locked';
+  const nextTitle = hasValidPublishedSchemes
+    ? 'Review coverage and readiness before creating exam schedules.'
+    : 'Create and publish at least one valid assessment scheme to unlock scheduling.';
+  const nextHelper = !hasValidPublishedSchemes
+    ? 'A valid scheme needs active assignments, at least one component, and 100% total weightage.'
+    : !hasGrading
+      ? 'Schemes are ready. Configure grading next so result bands are available later.'
+      : 'Your foundation is ready. Review coverage before schedule generation.';
+
+  const workflowSteps: Array<{ label: string; status: 'Completed' | 'In progress' | 'Locked' | 'Not started'; helper: string; href: string }> = [
+    {
+      label: 'Assessment Schemes',
+      status: hasValidPublishedSchemes ? 'Completed' : totalSchemes > 0 ? 'In progress' : 'Not started',
+      helper: hasValidPublishedSchemes ? `${validPublishedCount} valid published scheme${validPublishedCount === 1 ? '' : 's'} available.` : 'Create and publish valid assessment schemes.',
+      href: '/app/examinations?tab=schemes',
+    },
+    {
+      label: 'Grading',
+      status: hasGrading ? 'Completed' : totalSchemes > 0 ? 'In progress' : 'Not started',
+      helper: hasGrading ? `${gradingCount} grading scheme${gradingCount === 1 ? '' : 's'} configured.` : 'Configure result bands and grade calculation.',
+      href: '/app/examinations?tab=grading',
+    },
+    {
+      label: 'Exam Schedule',
+      status: hasValidPublishedSchemes ? 'Not started' : 'Locked',
+      helper: hasValidPublishedSchemes ? 'Ready to create schedules.' : 'Complete and publish valid assessment schemes first.',
+      href: '/app/examinations?tab=schedule',
+    },
+    {
+      label: 'Marks Entry',
+      status: 'Locked',
+      helper: 'Create and publish exam schedule first.',
+      href: '/app/examinations?tab=marks',
+    },
+    {
+      label: 'Results',
+      status: 'Locked',
+      helper: 'Finalize marks entry first.',
+      href: '/app/examinations?tab=results',
+    },
+  ];
+
+  const statusStyle = (status: string): { bg: string; color: string; icon: string } => {
+    if (status === 'Completed') return { bg: '#d1fae5', color: '#065f46', icon: '✓' };
+    if (status === 'In progress') return { bg: '#dbeafe', color: '#1d4ed8', icon: '●' };
+    if (status === 'Locked') return { bg: '#f1f5f9', color: '#64748b', icon: '🔒' };
+    return { bg: '#f8fafc', color: '#475569', icon: '○' };
+  };
+
+  const moduleCards = [
+    {
+      title: 'Assessment Schemes',
+      value: totalSchemes,
+      status: `${activeCount} active · ${draftCount} drafts · ${archivedCount} archived · ${conflictCount} conflicts`,
+      helper: `${subjectOverrideCount} subject override${subjectOverrideCount === 1 ? '' : 's'} configured. Published valid schemes unlock scheduling.`,
+      level: conflictCount > 0 ? 'error' : hasValidPublishedSchemes ? 'ok' : totalSchemes > 0 ? 'warn' : 'idle',
+      href: '/app/examinations?tab=schemes',
+    },
+    {
+      title: 'Grading Schemes',
+      value: gradingCount,
+      status: gradingCount > 0 ? 'Configured' : 'Not configured',
+      helper: 'Used for result bands and grade calculation.',
+      level: gradingCount > 0 ? 'ok' : 'warn',
+      href: '/app/examinations?tab=grading',
+    },
+    {
+      title: 'Exam Schedule',
+      value: scheduleState === 'Locked' ? '🔒' : 'Ready',
+      status: scheduleState,
+      helper: hasValidPublishedSchemes ? 'Valid published schemes are available for schedule creation.' : 'Complete and publish valid assessment schemes first.',
+      level: hasValidPublishedSchemes ? 'ok' : 'idle',
+      href: '/app/examinations?tab=schedule',
+    },
+    {
+      title: 'Marks Entry',
+      value: '🔒',
+      status: 'Locked',
+      helper: 'Unlocks after exam schedule is published.',
+      level: 'idle',
+      href: '/app/examinations?tab=marks',
+    },
+    {
+      title: 'Results',
+      value: '🔒',
+      status: 'Locked',
+      helper: 'Unlocks after marks are finalized.',
+      level: 'idle',
+      href: '/app/examinations?tab=results',
+    },
+  ] as const;
+
   return (
     <div className="stack" style={{ gap: 12 }}>
-      <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div style={{ fontWeight: 900, fontSize: 14 }}>What you can do now</div>
-        <p className="muted" style={{ marginTop: 8, marginBottom: 0 }}>
-          Create assessment schemes, define components and weightages, validate readiness, and publish. Configure grading schemes used for result bands.
-        </p>
-      </div>
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-        <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Assessment schemes</div>
-          <div style={{ fontSize: 26, fontWeight: 900, marginTop: 4 }}>{schemeCount}</div>
+      <div className="card" style={{ padding: 16, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ maxWidth: 720 }}>
+            <div style={{ fontWeight: 950, fontSize: 15 }}>Module status</div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 5 }}>
+              Assessment schemes drive schedule creation. Grading supports result calculation, while schedule, marks, and results unlock in sequence.
+            </div>
+          </div>
+          <StatusChip
+            level={hasValidPublishedSchemes ? 'ok' : totalSchemes > 0 ? 'warn' : 'idle'}
+            label={hasValidPublishedSchemes ? 'Foundation ready' : totalSchemes > 0 ? 'Setup in progress' : 'Not started'}
+          />
         </div>
-        <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Grading schemes</div>
-          <div style={{ fontSize: 26, fontWeight: 900, marginTop: 4 }}>{gradingCount}</div>
+      </div>
+
+      <div className="card" style={{ padding: 16, border: '1px solid rgba(37,99,235,0.18)', background: 'linear-gradient(135deg, rgba(239,246,255,0.9), rgba(255,255,255,1))' }}>
+        <div className="row" style={{ justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Recommended next step</div>
+            <div style={{ fontSize: 18, fontWeight: 950, marginTop: 4 }}>{nextTitle}</div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 5 }}>{nextHelper}</div>
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {hasValidPublishedSchemes ? (
+              <>
+                <Link to="/app/examinations?tab=schemes" className="btn">Review Assessment Schemes</Link>
+                <Link to="/app/examinations?tab=grading" className="btn secondary">Configure Grading</Link>
+              </>
+            ) : (
+              <Link to="/app/examinations?tab=schemes" className="btn">Create Assessment Scheme</Link>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {totalSchemes === 0 ? (
+        <div className="card" style={{ padding: 16, border: '1px dashed rgba(249,115,22,0.35)', background: 'rgba(255,247,237,0.7)' }}>
+          <div style={{ fontWeight: 900 }}>Create your first assessment scheme</div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 5 }}>
+            Start with a school-wide or grade-level scheme, add components until total weightage is 100%, then publish it to unlock scheduling.
+          </div>
+          <Link to="/app/examinations?tab=schemes" className="btn" style={{ marginTop: 10, display: 'inline-flex' }}>Create Assessment Scheme</Link>
+        </div>
+      ) : !hasGrading ? (
+        <div className="card" style={{ padding: 14, border: '1px solid rgba(234,179,8,0.22)', background: 'rgba(254,243,199,0.35)' }}>
+          <div style={{ fontWeight: 900 }}>Grading is not configured yet</div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+            Add grading bands now so result generation can calculate grades consistently later.
+          </div>
+          <Link to="/app/examinations?tab=grading" className="btn secondary" style={{ marginTop: 10, display: 'inline-flex' }}>Configure Grading</Link>
+        </div>
+      ) : null}
+
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        {moduleCards.map((card) => (
+          <Link key={card.title} to={card.href} className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)', textDecoration: 'none', color: 'inherit', opacity: card.status === 'Locked' ? 0.78 : 1 }} title={card.helper}>
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>{card.title}</div>
+              <StatusChip level={card.level} label={card.status} />
+            </div>
+            <div style={{ fontSize: typeof card.value === 'number' ? 28 : 22, fontWeight: 950, marginTop: 8 }}>{card.value}</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.45 }}>{card.helper}</div>
+          </Link>
+        ))}
+      </div>
+
+      <div className="card" style={{ padding: 16, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div style={{ fontWeight: 950, marginBottom: 12 }}>Workflow progress</div>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+          {workflowSteps.map((step, index) => {
+            const s = statusStyle(step.status);
+            return (
+              <Link key={step.label} to={step.href} style={{ textDecoration: 'none', color: 'inherit' }} title={step.helper}>
+                <div style={{ border: '1px solid rgba(15,23,42,0.1)', borderRadius: 10, padding: 12, background: step.status === 'Locked' ? '#f8fafc' : '#fff', height: '100%' }}>
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                    <span style={{ width: 24, height: 24, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: s.bg, color: s.color, fontSize: 12, fontWeight: 900 }}>
+                      {s.icon}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 800 }}>Step {index + 1}</span>
+                  </div>
+                  <div style={{ fontWeight: 900, marginTop: 8 }}>{step.label}</div>
+                  <div style={{ display: 'inline-flex', marginTop: 6, fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 999, background: s.bg, color: s.color }}>
+                    {step.status}
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 7, lineHeight: 1.4 }}>{step.helper}</div>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </div>
     </div>
