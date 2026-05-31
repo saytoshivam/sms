@@ -437,9 +437,61 @@ function validateComponentRules(c: AssessmentComponent): string[] {
 function readiness(components: AssessmentComponent[]): { ready: boolean; label: string } {
   const t = totalWeightage(components);
   const hasRuleIssue = components.some((c) => validateComponentRules(c).length > 0);
+  if (components.length === 0) return { ready: false, label: 'Needs components' };
   if (t !== 100) return { ready: false, label: `Cannot publish: total weightage is ${t}% (must be 100%)` };
   if (hasRuleIssue) return { ready: false, label: 'Cannot publish: one or more component rules are invalid' };
   return { ready: true, label: 'Ready to publish' };
+}
+
+function schemeReadiness(s: AssessmentScheme): { ready: boolean; label: string; level: StatusLevel } {
+  if (s.status === 'ARCHIVED') return { ready: false, label: 'Archived / Read-only', level: 'idle' };
+  if (s.status === 'PUBLISHED') return { ready: true, label: 'Published', level: 'ok' };
+  const components = s.components ?? [];
+  if (components.length === 0) return { ready: false, label: 'Needs components', level: 'warn' };
+  if (!(s.assignments ?? []).some((a) => a.active)) return { ready: false, label: 'Needs assignment', level: 'warn' };
+  const t = totalWeightage(components);
+  if (t !== 100) return { ready: false, label: 'Weightage incomplete', level: 'warn' };
+  if (components.some((c) => validateComponentRules(c).length > 0)) return { ready: false, label: 'Invalid rule', level: 'error' };
+  return { ready: true, label: 'Ready to publish', level: 'ok' };
+}
+
+function formatAcademicYear(label: string | null | undefined): string {
+  const raw = (label ?? '2026-2027').trim();
+  const match = raw.match(/(\d{4})\D+(\d{2}|\d{4})/);
+  if (!match) return raw.replace(/-/g, '–');
+  const start = match[1];
+  const end = match[2].length === 2 ? `${start.slice(0, 2)}${match[2]}` : match[2];
+  return `${start}–${end}`;
+}
+
+function gradeSelectionLabel(grades: number[]): string {
+  const clean = Array.from(new Set(grades.filter((n) => Number.isFinite(n)))).sort((a, b) => a - b);
+  if (clean.length === 0) return '';
+  if (clean.length === 1) return `Grade ${clean[0]}`;
+  const contiguous = clean.every((grade, index) => index === 0 || grade === clean[index - 1] + 1);
+  return contiguous ? `Grades ${clean[0]}–${clean[clean.length - 1]}` : `Grades ${clean.join(', ')}`;
+}
+
+function calculationRuleLabel(c: AssessmentComponent): string {
+  if (c.calculationRule === 'BEST_N_OF_M' && c.bestOfCount && c.totalAssessments) return `Best ${c.bestOfCount} of ${c.totalAssessments}`;
+  if (c.calculationRule === 'SINGLE_ASSESSMENT') return 'Single Assessment';
+  if (c.calculationRule === 'ATTENDANCE_PERCENTAGE') return 'Attendance Percentage';
+  return toDisplayLabel(c.calculationRule);
+}
+
+function componentMaxMarksLabel(c: AssessmentComponent): string {
+  if (c.maxMarks == null) return '—';
+  const marks = `${c.maxMarks} marks`;
+  return c.calculationRule === 'BEST_N_OF_M' || c.calculationRule === 'SUM' || c.calculationRule === 'AVERAGE'
+    ? `${marks} each`
+    : marks;
+}
+
+function componentStatusLabel(c: AssessmentComponent): string {
+  if (Number(c.weightagePercent) <= 0) return 'Missing weightage';
+  const issues = validateComponentRules(c);
+  if (issues.length > 0) return 'Invalid rule';
+  return 'Ready';
 }
 
 function createEmptyComponent(sequence: number): ComponentForm {
@@ -681,6 +733,8 @@ function AssessmentSchemesPanel({
       const academicYearId = Number(form.academicYearId);
       if (!Number.isFinite(academicYearId) || academicYearId <= 0)
         throw new Error('Select an academic year.');
+      if (form.draftComponents.length === 0)
+        throw new Error('Add components or apply a preset before creating this scheme.');
 
       type AssignmentPayload = { scopeType: ScopeType; classGroupId?: number; subjectId?: number };
       let assignments: AssignmentPayload[] = [];
@@ -772,9 +826,8 @@ function AssessmentSchemesPanel({
   function renderSchemeRows(rows: AssessmentScheme[], archivedList: boolean) {
     return rows.map((s) => {
       const total = totalWeightage(s.components ?? []);
-      const r = readiness(s.components ?? []);
-      const hasAssignments = (s.assignments ?? []).some((a) => a.active);
-      const canPublish = s.status === 'DRAFT' && r.ready && hasAssignments;
+      const r = schemeReadiness(s);
+      const canPublish = s.status === 'DRAFT' && r.ready;
       return (
         <tr key={s.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', opacity: archivedList ? 0.78 : 1 }}>
           <td style={{ padding: '8px 6px', fontWeight: 700 }}>{s.name}</td>
@@ -783,22 +836,43 @@ function AssessmentSchemesPanel({
           <td style={{ padding: '8px 6px' }}>{s.status}</td>
           <td style={{ padding: '8px 6px' }}>{s.components?.length ?? 0}</td>
           <td style={{ padding: '8px 6px' }}>{total}%</td>
-          <td style={{ padding: '8px 6px' }}>{canPublish ? 'Ready' : (!hasAssignments ? 'Needs assignment' : r.label)}</td>
+          <td style={{ padding: '8px 6px' }}>{archivedList ? 'Read-only' : r.label}</td>
           <td style={{ padding: '8px 6px' }}>
             <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
               <button type="button" className="btn secondary" onClick={() => onOpenScheme(s.id)}>
-                Open
+                {s.status === 'DRAFT' && !r.ready ? 'Open setup' : 'Open'}
               </button>
-              {!archivedList ? (
+              {s.status === 'DRAFT' ? (
                 <>
+                  {canPublish ? (
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={publishScheme.isPending}
+                      onClick={() => publishScheme.mutate(s.id)}
+                    >
+                      Publish
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="btn secondary"
-                    disabled={!canPublish || publishScheme.isPending}
-                    onClick={() => publishScheme.mutate(s.id)}
+                    disabled={cloneScheme.isPending}
+                    onClick={() => cloneScheme.mutate(s.id)}
                   >
-                    Publish
+                    Clone
                   </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={archiveScheme.isPending}
+                    onClick={() => archiveScheme.mutate(s.id)}
+                  >
+                    Archive
+                  </button>
+                </>
+              ) : s.status === 'PUBLISHED' ? (
+                <>
                   <button
                     type="button"
                     className="btn secondary"
@@ -817,7 +891,14 @@ function AssessmentSchemesPanel({
                   </button>
                 </>
               ) : (
-                <span className="muted" style={{ fontSize: 12 }}>Archived</span>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  disabled={cloneScheme.isPending}
+                  onClick={() => cloneScheme.mutate(s.id)}
+                >
+                  Clone
+                </button>
               )}
             </div>
           </td>
@@ -827,11 +908,11 @@ function AssessmentSchemesPanel({
   }
 
   function suggestSchemeName(): string {
-    const ay = academicYears.find((y) => String(y.id) === form.academicYearId)?.label ?? '2026-27';
+    const ay = formatAcademicYear(academicYears.find((y) => String(y.id) === form.academicYearId)?.label);
     if (form.applicableScopeType === 'SCHOOL') return `School-wide Evaluation Scheme ${ay}`;
     if (form.applicableScopeType === 'SUBJECT' && form.subjectIds.length === 1) {
       const subject = subjects.find((s) => String(s.id) === form.subjectIds[0]);
-      return `${subject?.name ?? 'Subject'} Evaluation Scheme ${ay}`;
+      return `${subject?.name ?? 'Subject'} Scheme ${ay}`;
     }
     const grades = form.applicableScopeType === 'CLASS'
       ? form.classGrades.map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b)
@@ -840,8 +921,8 @@ function AssessmentSchemesPanel({
         .filter((n): n is number => typeof n === 'number')
         .filter((n, i, arr) => arr.indexOf(n) === i)
         .sort((a, b) => a - b);
-    if (grades.length === 1) return `Grade ${grades[0]} Evaluation Scheme ${ay}`;
-    if (grades.length > 1) return `Grade ${grades[0]}-${grades[grades.length - 1]} Evaluation Scheme ${ay}`;
+    const gradeLabel = gradeSelectionLabel(grades);
+    if (gradeLabel) return `${gradeLabel} Evaluation Scheme ${ay}`;
     return `Evaluation Scheme ${ay}`;
   }
 
@@ -922,7 +1003,7 @@ function AssessmentSchemesPanel({
                       const preset = PRESETS[Number(selectedPresetIndex)] ?? PRESETS[0];
                       setForm((p) => ({ ...p, draftComponents: presetToFormComponents(preset) }));
                     }}>
-                    Use selected preset
+                    Apply preset
                   </button>
                   <button type="button" className="btn secondary"
                     onClick={() => setForm((p) => ({ ...p, draftComponents: [...p.draftComponents, createEmptyComponent(p.draftComponents.length + 1)] }))}>
@@ -930,8 +1011,20 @@ function AssessmentSchemesPanel({
                   </button>
                 </div>
               </div>
+              {PRESETS[Number(selectedPresetIndex)] ? (
+                <div style={{ background: '#f8fafc', border: '1px solid rgba(15,23,42,0.08)', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 6 }}>Preset preview: {PRESETS[Number(selectedPresetIndex)].label}</div>
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    {PRESETS[Number(selectedPresetIndex)].components.map((c) => (
+                      <span key={`${c.name}-${c.sequence}`} style={{ fontSize: 12, background: '#fff', border: '1px solid rgba(15,23,42,0.08)', borderRadius: 999, padding: '4px 8px' }}>
+                        <strong>{c.name}</strong>: {c.weightagePercent}%{c.calculationRule === 'BEST_N_OF_M' && c.bestOfCount && c.totalAssessments ? `, Best ${c.bestOfCount} of ${c.totalAssessments}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {form.draftComponents.length === 0 ? (
-                <div className="muted" style={{ fontSize: 12 }}>No components added yet. You can still create a draft, but publishing requires 100% total weightage.</div>
+                <div style={{ color: '#b45309', fontSize: 12 }}>Add components or apply a preset before creating this scheme.</div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -1038,19 +1131,26 @@ function AssessmentSchemesPanel({
             <div className="card" style={{ padding: 12, border: '1px dashed rgba(15,23,42,0.18)' }}>
               <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Step 4: Review</div>
               <div className="muted" style={{ fontSize: 12 }}>
-                {form.name.trim() || suggestSchemeName()} · {form.draftComponents.length} component{form.draftComponents.length === 1 ? '' : 's'} · {
-                  form.applicableScopeType === 'SCHOOL' ? 'School-wide' :
-                  form.applicableScopeType === 'CLASS' ? `${form.classGrades.length} class selection${form.classGrades.length === 1 ? '' : 's'}` :
-                  form.applicableScopeType === 'SECTION' ? `${form.sectionClassGroupIds.length} section${form.sectionClassGroupIds.length === 1 ? '' : 's'}` :
-                  `${form.subjectIds.length} subject${form.subjectIds.length === 1 ? '' : 's'}`
-                }
+                {(() => {
+                  const componentCount = form.draftComponents.length;
+                  const total = form.draftComponents.reduce((sum, c) => sum + Number(c.weightagePercent || 0), 0);
+                  const assignmentCount = form.applicableScopeType === 'SCHOOL' ? 1 :
+                    form.applicableScopeType === 'CLASS' ? classGroups.filter((cg) => cg.gradeLevel != null && form.classGrades.map(Number).includes(cg.gradeLevel)).length :
+                    form.applicableScopeType === 'SECTION' ? form.sectionClassGroupIds.length : form.subjectIds.length;
+                  const issues = [
+                    componentCount === 0 ? 'Missing components' : null,
+                    assignmentCount === 0 ? 'Missing assignments' : null,
+                    componentCount > 0 && total !== 100 ? 'Weightage must equal 100%' : null,
+                  ].filter(Boolean).join(' · ');
+                  return `${form.name.trim() || suggestSchemeName()} · ${formatAcademicYear(academicYears.find((y) => String(y.id) === form.academicYearId)?.label)} · ${componentCount} component${componentCount === 1 ? '' : 's'} · ${assignmentCount} assignment${assignmentCount === 1 ? '' : 's'} · ${total}% weightage${issues ? ` · ${issues}` : ' · Ready to create'}`;
+                })()}
               </div>
             </div>
 
             <div className="row" style={{ justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
               {(() => {
                 const count =
-                  form.applicableScopeType === 'CLASS' ? form.classGrades.length :
+                  form.applicableScopeType === 'CLASS' ? classGroups.filter((cg) => cg.gradeLevel != null && form.classGrades.map(Number).includes(cg.gradeLevel)).length :
                   form.applicableScopeType === 'SECTION' ? form.sectionClassGroupIds.length :
                   form.applicableScopeType === 'SUBJECT' ? form.subjectIds.length : 0;
                 return count > 1 ? (
@@ -1062,7 +1162,7 @@ function AssessmentSchemesPanel({
               <button
                 type="button"
                 className="btn"
-                disabled={createScheme.isPending || !form.name.trim()}
+                disabled={createScheme.isPending || !form.name.trim() || form.draftComponents.length === 0}
                 onClick={() => createScheme.mutate()}
               >
                 {createScheme.isPending ? 'Creating…' : 'Create Scheme'}
@@ -1116,7 +1216,7 @@ function AssessmentSchemesPanel({
                     <th style={{ padding: '8px 6px' }}>Status</th>
                     <th style={{ padding: '8px 6px' }}>Components</th>
                     <th style={{ padding: '8px 6px' }}>Total weightage</th>
-                    <th style={{ padding: '8px 6px' }}>Readiness</th>
+                    <th style={{ padding: '8px 6px' }}>Read-only</th>
                     <th style={{ padding: '8px 6px' }}>Actions</th>
                   </tr>
                 </thead>
@@ -1150,7 +1250,7 @@ function SchemeDetailCard({
   onRefresh: () => Promise<void>;
 }) {
   const total = totalWeightage(scheme.components ?? []);
-  const ready = readiness(scheme.components ?? []);
+  const ready = schemeReadiness(scheme);
 
   const [editingComponentId, setEditingComponentId] = useState<number | null>(null);
   const [componentForm, setComponentForm] = useState<ComponentForm>(() =>
@@ -1202,14 +1302,13 @@ function SchemeDetailCard({
   const applyPreset = useMutation({
     mutationFn: async (preset: ComponentPreset) => {
       const current = scheme.components ?? [];
-      const presetTotal = preset.components.reduce((sum, c) => sum + c.weightagePercent, 0);
-      if (total + presetTotal > 100) {
-        throw new Error(`Preset exceeds total weightage limit. Current ${total}%, preset ${presetTotal}%`);
+      for (const c of current) {
+        await api.delete(`/api/exams/schemes/${scheme.id}/components/${c.id}`);
       }
       for (const p of preset.components) {
         await api.post(`/api/exams/schemes/${scheme.id}/components`, {
           ...p,
-          sequence: p.sequence + current.length,
+          sequence: p.sequence,
         });
       }
     },
@@ -1247,8 +1346,10 @@ function SchemeDetailCard({
             </div>
             <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <StatusChip level={scheme.status === 'DRAFT' ? 'warn' : scheme.status === 'PUBLISHED' ? 'ok' : 'idle'} label={scheme.status} />
-              <StatusChip level={ready.ready ? 'ok' : 'error'} label={ready.label} />
-              <StatusChip level={(scheme.assignments ?? []).some((a) => a.active) ? 'ok' : 'error'} label={(scheme.assignments ?? []).some((a) => a.active) ? scopeLabel(scheme) : 'Needs assignment'} />
+              <StatusChip level={ready.level} label={ready.label} />
+              {scheme.status === 'DRAFT' ? (
+                <StatusChip level={(scheme.assignments ?? []).some((a) => a.active) ? 'ok' : 'error'} label={(scheme.assignments ?? []).some((a) => a.active) ? scopeLabel(scheme) : 'Needs assignment'} />
+              ) : null}
             </div>
           </div>
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
@@ -1258,7 +1359,7 @@ function SchemeDetailCard({
             <button
               type="button"
               className="btn"
-              disabled={scheme.status !== 'DRAFT' || !ready.ready || !(scheme.assignments ?? []).some((a) => a.active) || publishScheme.isPending}
+              disabled={scheme.status !== 'DRAFT' || !ready.ready || publishScheme.isPending}
               onClick={() => publishScheme.mutate()}
             >
               {publishScheme.isPending ? 'Publishing...' : 'Publish'}
@@ -1270,26 +1371,30 @@ function SchemeDetailCard({
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ fontWeight: 900 }}>Components</div>
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <SelectKeeper
-              value={presetIndex}
-              onChange={(v) => setPresetIndex(v)}
-              emptyValueLabel="Use common pattern…"
-              options={PRESETS.map((p, i) => ({ value: String(i), label: p.label }))}
-            />
-            <button
-              type="button"
-              className="btn secondary"
-              disabled={scheme.status !== 'DRAFT' || presetIndex === '' || applyPreset.isPending}
-              onClick={() => {
-                const idx = Number(presetIndex);
-                if (!Number.isFinite(idx) || !PRESETS[idx]) return;
-                applyPreset.mutate(PRESETS[idx]);
-              }}
-            >
-              {applyPreset.isPending ? 'Applying...' : 'Apply preset'}
-            </button>
-          </div>
+          {scheme.status === 'DRAFT' ? (
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {(scheme.components?.length ?? 0) > 0 ? <span className="muted" style={{ fontSize: 12 }}>More actions:</span> : null}
+              <SelectKeeper
+                value={presetIndex}
+                onChange={(v) => setPresetIndex(v)}
+                emptyValueLabel={(scheme.components?.length ?? 0) === 0 ? 'Choose preset…' : 'Apply preset / Replace components…'}
+                options={PRESETS.map((p, i) => ({ value: String(i), label: p.label }))}
+              />
+              <button
+                type="button"
+                className={(scheme.components?.length ?? 0) === 0 ? 'btn' : 'btn secondary'}
+                disabled={presetIndex === '' || applyPreset.isPending}
+                onClick={() => {
+                  const idx = Number(presetIndex);
+                  if (!Number.isFinite(idx) || !PRESETS[idx]) return;
+                  if ((scheme.components?.length ?? 0) > 0 && !window.confirm('This will replace existing components. Continue?')) return;
+                  applyPreset.mutate(PRESETS[idx]);
+                }}
+              >
+                {applyPreset.isPending ? 'Applying...' : (scheme.components?.length ?? 0) === 0 ? 'Apply preset' : 'Replace components'}
+              </button>
+            </div>
+          ) : null}
         </div>
 
         {loading ? <div className="muted" style={{ marginTop: 10 }}>Loading scheme details...</div> : null}
@@ -1314,14 +1419,13 @@ function SchemeDetailCard({
                 .slice()
                 .sort((a, b) => a.sequence - b.sequence)
                 .map((c) => {
-                  const issues = validateComponentRules(c);
                   return (
                     <tr key={c.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
                       <td style={{ padding: '8px 6px', fontWeight: 700 }}>{c.name}</td>
                       <td style={{ padding: '8px 6px' }}>{toDisplayLabel(c.componentType)}</td>
                       <td style={{ padding: '8px 6px' }}>{c.weightagePercent}%</td>
-                      <td style={{ padding: '8px 6px' }}>{c.maxMarks == null ? '-' : `${c.maxMarks} marks each`}</td>
-                      <td style={{ padding: '8px 6px' }}>{toDisplayLabel(c.calculationRule)}</td>
+                      <td style={{ padding: '8px 6px' }}>{componentMaxMarksLabel(c)}</td>
+                      <td style={{ padding: '8px 6px' }}>{calculationRuleLabel(c)}</td>
                       <td style={{ padding: '8px 6px' }}>
                         {c.calculationRule === 'BEST_N_OF_M' && c.bestOfCount && c.totalAssessments
                           ? `Best ${c.bestOfCount} of ${c.totalAssessments}`
@@ -1330,26 +1434,14 @@ function SchemeDetailCard({
                             : '-'}
                       </td>
                       <td style={{ padding: '8px 6px' }}>Seq {c.sequence}</td>
-                      <td style={{ padding: '8px 6px' }}>{issues.length === 0 ? 'Ready' : issues.join(', ')}</td>
+                      <td style={{ padding: '8px 6px' }}>{componentStatusLabel(c)}</td>
                       <td style={{ padding: '8px 6px' }}>
-                        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                          <button
-                            type="button"
-                            className="btn secondary"
-                            disabled={scheme.status !== 'DRAFT'}
-                            onClick={() => onEditRow(c)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn secondary"
-                            disabled={scheme.status !== 'DRAFT' || removeComponent.isPending}
-                            onClick={() => removeComponent.mutate(c.id)}
-                          >
-                            Remove
-                          </button>
-                        </div>
+                        {scheme.status === 'DRAFT' ? (
+                          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                            <button type="button" className="btn secondary" onClick={() => onEditRow(c)}>Edit</button>
+                            <button type="button" className="btn secondary" disabled={removeComponent.isPending} onClick={() => removeComponent.mutate(c.id)}>Remove</button>
+                          </div>
+                        ) : <span className="muted" style={{ fontSize: 12 }}>Read-only</span>}
                       </td>
                     </tr>
                   );
@@ -1366,22 +1458,24 @@ function SchemeDetailCard({
         </div>
       </div>
 
-      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>{editingComponentId == null ? 'Add component' : 'Edit component'}</div>
-        <ComponentFormPanel
-          form={componentForm}
-          setForm={setComponentForm}
-          currentComponents={scheme.components ?? []}
-          editingComponentId={editingComponentId}
-          disabled={scheme.status !== 'DRAFT' || saveComponent.isPending}
-          onSave={() => saveComponent.mutate()}
-          onCancel={() => {
-            setEditingComponentId(null);
-            setComponentForm(createEmptyComponent((scheme.components?.length ?? 0) + 1));
-          }}
-          saveLabel={editingComponentId == null ? 'Add component' : 'Update component'}
-        />
-      </div>
+      {scheme.status === 'DRAFT' ? (
+        <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>{editingComponentId == null ? 'Add Component' : 'Edit Component'}</div>
+          <ComponentFormPanel
+            form={componentForm}
+            setForm={setComponentForm}
+            currentComponents={scheme.components ?? []}
+            editingComponentId={editingComponentId}
+            disabled={saveComponent.isPending}
+            onSave={() => saveComponent.mutate()}
+            onCancel={() => {
+              setEditingComponentId(null);
+              setComponentForm(createEmptyComponent((scheme.components?.length ?? 0) + 1));
+            }}
+            saveLabel={editingComponentId == null ? 'Add Component' : 'Update Component'}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
