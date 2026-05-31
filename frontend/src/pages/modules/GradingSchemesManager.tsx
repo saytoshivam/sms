@@ -337,6 +337,7 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
   const [filterScope, setFilterScope] = useState('');
   const [filterYear, setFilterYear] = useState('');
   const [filterState, setFilterState] = useState('');
+  const [activeMenuId, setActiveMenuId] = useState<number | null>(null);
   const selected = gradingSchemes.find((g) => g.id === selectedId) ?? null;
 
   const save = useMutation({
@@ -412,7 +413,100 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
       {createOpen ? <SchemeForm initial={formFromScheme(null)} academicYears={academicYears} classGroups={classGroups} saving={save.isPending} submitError={save.error} onCancel={() => setCreateOpen(false)} onSaveDraft={(form) => save.mutate({ form, status: 'DRAFT' })} onPublish={(form) => save.mutate({ form, status: 'ACTIVE' })} /> : null}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 12 }}><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search grading scheme..." style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', gridColumn: 'span 2' }} /><SmartSelect value={filterScope} onChange={setFilterScope} options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]} placeholder="All scopes" allowClear /><SmartSelect value={filterYear} onChange={setFilterYear} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="All academic years" allowClear /><SmartSelect value={filterState} onChange={setFilterState} options={['Active', 'Draft', 'Archived', 'Needs Setup', 'Has Conflict'].map((s) => ({ value: s, label: s }))} placeholder="All states" allowClear /></div>
-        <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}><thead><tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>{['Scheme Name', 'Scope', 'Applies To', 'Effective Period', 'Bands', 'Passing %', 'State', 'Actions'].map((h) => <th key={h} style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead><tbody>{filtered.length === 0 ? <tr><td colSpan={8} className="muted" style={{ padding: 16 }}>No grading schemes match the current filters.</td></tr> : filtered.map((g) => { const state = statusForScheme(g); const pp = passingPercent(g); const archived = g.status === 'ARCHIVED'; return <tr key={g.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', cursor: 'pointer' }} onClick={() => setSelectedId(g.id)}><td style={{ padding: '9px 8px', fontWeight: 800 }}><div className="row" style={{ gap: 6, alignItems: 'center' }}><span>{g.name}</span>{g.defaultScheme ? <StatusChip level="info" label="Default" /> : null}{g.conflict ? <StatusChip level="error" label="Conflict" /> : null}</div><div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{rowHelper(g)}</div></td><td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>{scopeLabel(g)}</td><td style={{ padding: '9px 8px' }}>{appliesToLabel(g)}</td><td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>{effectivePeriodLabel(g, academicYears)}</td><td style={{ padding: '9px 8px', textAlign: 'center' }}>{g.bands?.length ?? 0}</td><td style={{ padding: '9px 8px', textAlign: 'center' }}>{pp != null ? `${pp}%` : '—'}</td><td style={{ padding: '9px 8px' }}><StatusChip level={state.level} label={state.label} /></td><td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}><div className="row" style={{ gap: 4 }}><button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setSelectedId(g.id)}>View</button><button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => clone.mutate(g.id)}>Clone</button>{!archived ? <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => archive.mutate(g.id)}>Archive</button> : null}{!archived && g.scope !== 'CLASS_GROUP' && !g.defaultScheme ? <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setDefault.mutate(g.id)}>Set Default</button> : null}</div></td></tr>; })}</tbody></table></div>
+        <div style={{ overflowX: activeMenuId !== null ? 'visible' : 'auto' }} onClick={() => activeMenuId !== null && setActiveMenuId(null)}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
+                {['Scheme Name', 'Scope', 'Applies To', 'Effective Period', 'Bands', 'Passing %', 'State'].map((h) => (
+                  <th key={h} style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+                <th style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap', textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={8} className="muted" style={{ padding: 16 }}>No grading schemes match the current filters.</td></tr>
+              ) : filtered.map((g) => {
+                const state = statusForScheme(g);
+                const pp = passingPercent(g);
+                const archived = g.status === 'ARCHIVED';
+                const isDraft = g.status === 'DRAFT';
+                const isActive = g.status === 'ACTIVE' || g.active;
+                const isMenuOpen = activeMenuId === g.id;
+                return (
+                  <tr key={g.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', cursor: 'pointer' }} onClick={() => setSelectedId(g.id)}>
+                    <td style={{ padding: '9px 8px', fontWeight: 800 }}>
+                      <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                        <span>{g.name}</span>
+                        {g.defaultScheme ? <StatusChip level="info" label="Default" /> : null}
+                        {g.conflict ? <StatusChip level="error" label="Conflict" /> : null}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{rowHelper(g)}</div>
+                    </td>
+                    <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>{scopeLabel(g)}</td>
+                    <td style={{ padding: '9px 8px' }}>{appliesToLabel(g)}</td>
+                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>{effectivePeriodLabel(g, academicYears)}</td>
+                    <td style={{ padding: '9px 8px', textAlign: 'center' }}>{g.bands?.length ?? 0}</td>
+                    <td style={{ padding: '9px 8px', textAlign: 'center' }}>{pp != null ? `${pp}%` : '—'}</td>
+                    <td style={{ padding: '9px 8px' }}><StatusChip level={state.level} label={state.label} /></td>
+                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ fontSize: 11, padding: '3px 10px' }}
+                          onClick={() => setSelectedId(g.id)}
+                        >
+                          View
+                        </button>
+                        <div style={{ position: 'relative' }}>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 14, lineHeight: 1, color: '#64748b' }}
+                            onClick={(e) => { e.stopPropagation(); setActiveMenuId(isMenuOpen ? null : g.id); }}
+                            title="More actions"
+                          >
+                            ⋯
+                          </button>
+                          {isMenuOpen && (
+                            <div
+                              style={{ position: 'absolute', right: 0, top: '110%', zIndex: 50, background: '#fff', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 6, boxShadow: '0 4px 12px rgba(15,23,42,0.12)', minWidth: 160, padding: '4px 0' }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {!archived && (
+                                <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => { setSelectedId(g.id); setEditing(true); setActiveMenuId(null); }}>
+                                  ✎ Edit
+                                </button>
+                              )}
+                              {isDraft && (
+                                <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', color: '#065f46' }} disabled={publish.isPending} onClick={() => { publish.mutate(g.id); setActiveMenuId(null); }}>
+                                  ✓ Publish
+                                </button>
+                              )}
+                              <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }} disabled={clone.isPending} onClick={() => { clone.mutate(g.id); setActiveMenuId(null); }}>
+                                ⎘ Clone
+                              </button>
+                              {isActive && !g.defaultScheme && g.scope !== 'CLASS_GROUP' && (
+                                <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }} disabled={setDefault.isPending} onClick={() => { setDefault.mutate(g.id); setActiveMenuId(null); }}>
+                                  ★ Set as Default
+                                </button>
+                              )}
+                              {!archived && (
+                                <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', color: '#b45309' }} disabled={archive.isPending} onClick={() => { archive.mutate(g.id); setActiveMenuId(null); }}>
+                                  {isDraft ? '✕ Discard Draft' : '▾ Archive'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
