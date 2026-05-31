@@ -201,9 +201,14 @@ type SchemeForm = {
   academicYearId: string;
   description: string;
   applicableScopeType: ScopeType;
-  classGrade: string;
-  sectionClassGroupId: string;
-  subjectId: string;
+  /** Grade-level filter helper (SECTION scope only, not persisted). */
+  classGradeFilter: string;
+  /** Selected class-group IDs for SECTION scope (multi). */
+  sectionClassGroupIds: string[];
+  /** Selected grade levels for CLASS scope (multi). */
+  classGrades: string[];
+  /** Selected subject IDs for SUBJECT scope (multi). */
+  subjectIds: string[];
 };
 
 type ComponentForm = {
@@ -649,45 +654,64 @@ function AssessmentSchemesPanel({
     academicYearId: String(academicYears[0]?.id ?? ''),
     description: '',
     applicableScopeType: 'SCHOOL',
-    classGrade: '',
-    sectionClassGroupId: '',
-    subjectId: '',
+    classGradeFilter: '',
+    sectionClassGroupIds: [],
+    classGrades: [],
+    subjectIds: [],
   });
 
   const createScheme = useMutation({
     mutationFn: async () => {
       const academicYearId = Number(form.academicYearId);
-      if (!Number.isFinite(academicYearId) || academicYearId <= 0) throw new Error('Select an academic year.');
+      if (!Number.isFinite(academicYearId) || academicYearId <= 0)
+        throw new Error('Select an academic year.');
 
-      let applicableScopeId: number | null = null;
-      if (form.applicableScopeType === 'CLASS') {
-        applicableScopeId = Number(form.classGrade) || null;
+      // Build list of { scopeId, label } pairs based on the selected scope type
+      type ScopeItem = { scopeId: number | null; label: string };
+      let items: ScopeItem[] = [];
+
+      if (form.applicableScopeType === 'SCHOOL') {
+        items = [{ scopeId: null, label: '' }];
+      } else if (form.applicableScopeType === 'CLASS') {
+        if (form.classGrades.length === 0) throw new Error('Select at least one class.');
+        items = form.classGrades.map((g) => ({ scopeId: Number(g), label: `Grade ${g}` }));
       } else if (form.applicableScopeType === 'SECTION') {
-        applicableScopeId = Number(form.sectionClassGroupId) || null;
+        if (form.sectionClassGroupIds.length === 0) throw new Error('Select at least one section.');
+        items = form.sectionClassGroupIds.map((id) => {
+          const cg = classGroups.find((c) => String(c.id) === id);
+          return { scopeId: Number(id), label: cg?.displayName ?? id };
+        });
       } else if (form.applicableScopeType === 'SUBJECT') {
-        applicableScopeId = Number(form.subjectId) || null;
+        if (form.subjectIds.length === 0) throw new Error('Select at least one subject.');
+        items = form.subjectIds.map((id) => {
+          const s = subjects.find((x) => String(x.id) === id);
+          return { scopeId: Number(id), label: s?.name ?? id };
+        });
       }
 
-      if (form.applicableScopeType !== 'SCHOOL' && !applicableScopeId) {
-        throw new Error('Select a valid scope target.');
-      }
+      const baseName = form.name.trim();
+      const multiItem = items.length > 1;
 
-      return (
-        await api.post<AssessmentScheme>('/api/exams/schemes', {
-          academicYearId,
-          name: form.name.trim(),
-          description: form.description.trim() || null,
-          applicableScopeType: form.applicableScopeType,
-          applicableScopeId,
-        })
-      ).data;
+      const results = await Promise.all(
+        items.map(({ scopeId, label }) =>
+          api.post<AssessmentScheme>('/api/exams/schemes', {
+            academicYearId,
+            name: multiItem ? `${baseName} [${label}]` : baseName,
+            description: form.description.trim() || null,
+            applicableScopeType: form.applicableScopeType,
+            applicableScopeId: scopeId,
+          }),
+        ),
+      );
+      return results.map((r) => r.data);
     },
     onSuccess: async (created) => {
-      toast.success('Scheme created', 'You can now add assessment components.');
+      const count = created.length;
+      toast.success('Scheme created', count > 1 ? `${count} schemes created.` : 'You can now add assessment components.');
       setCreateOpen(false);
       setForm((prev) => ({ ...prev, name: '', description: '' }));
       await onRefresh();
-      onOpenScheme(created.id);
+      if (created.length === 1) onOpenScheme(created[0].id);
     },
     onError: (e) => toast.error('Could not create scheme', formatApiError(e)),
   });
@@ -721,7 +745,7 @@ function AssessmentSchemesPanel({
   });
 
   const sectionClassOptions = classGroups.filter((g) => {
-    const grade = Number(form.classGrade);
+    const grade = Number(form.classGradeFilter);
     if (!Number.isFinite(grade) || grade <= 0) return true;
     return g.gradeLevel === grade;
   });
@@ -774,9 +798,10 @@ function AssessmentSchemesPanel({
                     setForm((p) => ({
                       ...p,
                       applicableScopeType: v as ScopeType,
-                      classGrade: '',
-                      sectionClassGroupId: '',
-                      subjectId: '',
+                      classGradeFilter: '',
+                      sectionClassGroupIds: [],
+                      classGrades: [],
+                      subjectIds: [],
                     }))
                   }
                   options={[
@@ -790,12 +815,12 @@ function AssessmentSchemesPanel({
 
               {form.applicableScopeType === 'CLASS' ? (
                 <label className="stack" style={{ gap: 6 }}>
-                  <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class</span>
-                  <SelectKeeper
-                    value={form.classGrade}
-                    onChange={(v) => setForm((p) => ({ ...p, classGrade: v }))}
-                    emptyValueLabel="Select class…"
+                  <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Classes</span>
+                  <MultiSelectKeeper
+                    value={form.classGrades}
+                    onChange={(v) => setForm((p) => ({ ...p, classGrades: v }))}
                     options={gradeOptions.map((g) => ({ value: String(g), label: `Grade ${g}` }))}
+                    placeholder="Select classes…"
                   />
                 </label>
               ) : null}
@@ -803,25 +828,24 @@ function AssessmentSchemesPanel({
               {form.applicableScopeType === 'SECTION' ? (
                 <>
                   <label className="stack" style={{ gap: 6 }}>
-                    <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class</span>
+                    <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Filter by class</span>
                     <SelectKeeper
-                      value={form.classGrade}
-                      onChange={(v) => setForm((p) => ({ ...p, classGrade: v, sectionClassGroupId: '' }))}
+                      value={form.classGradeFilter}
+                      onChange={(v) => setForm((p) => ({ ...p, classGradeFilter: v, sectionClassGroupIds: [] }))}
                       emptyValueLabel="All classes"
                       options={gradeOptions.map((g) => ({ value: String(g), label: `Grade ${g}` }))}
                     />
                   </label>
                   <label className="stack" style={{ gap: 6 }}>
-                    <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Section</span>
-                    <SmartSelect
-                      value={form.sectionClassGroupId}
-                      onChange={(v) => setForm((p) => ({ ...p, sectionClassGroupId: v }))}
+                    <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Sections</span>
+                    <MultiSelectKeeper
+                      value={form.sectionClassGroupIds}
+                      onChange={(v) => setForm((p) => ({ ...p, sectionClassGroupIds: v }))}
                       options={sectionClassOptions.map((cg) => ({
                         value: String(cg.id),
                         label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}`,
                       }))}
-                      placeholder="Select section…"
-                      allowClear
+                      placeholder="Select sections…"
                     />
                   </label>
                 </>
@@ -829,31 +853,40 @@ function AssessmentSchemesPanel({
 
               {form.applicableScopeType === 'SUBJECT' ? (
                 <label className="stack" style={{ gap: 6 }}>
-                  <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
-                  <SmartSelect
-                    value={form.subjectId}
-                    onChange={(v) => setForm((p) => ({ ...p, subjectId: v }))}
+                  <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subjects</span>
+                  <MultiSelectKeeper
+                    value={form.subjectIds}
+                    onChange={(v) => setForm((p) => ({ ...p, subjectIds: v }))}
                     options={subjects.map((s) => ({
                       value: String(s.id),
                       label: s.name,
                       meta: s.code ?? undefined,
                     }))}
-                    placeholder="Select subject…"
-                    searchable
-                    allowClear
+                    placeholder="Select subjects…"
                   />
                 </label>
               ) : null}
             </div>
 
-            <div className="row" style={{ justifyContent: 'flex-end' }}>
+            <div className="row" style={{ justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
+              {(() => {
+                const count =
+                  form.applicableScopeType === 'CLASS' ? form.classGrades.length :
+                  form.applicableScopeType === 'SECTION' ? form.sectionClassGroupIds.length :
+                  form.applicableScopeType === 'SUBJECT' ? form.subjectIds.length : 0;
+                return count > 1 ? (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Will create {count} schemes
+                  </span>
+                ) : null;
+              })()}
               <button
                 type="button"
                 className="btn"
                 disabled={createScheme.isPending || !form.name.trim()}
                 onClick={() => createScheme.mutate()}
               >
-                {createScheme.isPending ? 'Creating...' : 'Create Scheme'}
+                {createScheme.isPending ? 'Creating…' : 'Create Scheme'}
               </button>
             </div>
           </div>
