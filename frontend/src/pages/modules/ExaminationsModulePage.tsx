@@ -421,14 +421,14 @@ function computeScopeLabel(s: AssessmentScheme): string {
       .filter((g): g is number => g != null),
   )].sort((a, b) => a - b);
 
-  // Build subject label: "[CODE] Name" when code is available
+  // Build subject label: "Name (CODE)" when code is available
   const subjectAssignments = active.filter(
     (a) => (a.scopeType === 'SUBJECT' || a.scopeType === 'CLASS_SUBJECT' || a.scopeType === 'SECTION_SUBJECT') && a.subjectName,
   );
   const uniqueSubjectLabels = [...new Map(
     subjectAssignments.map((a) => [
       a.subjectId,
-      a.subjectCode ? `[${a.subjectCode}] ${a.subjectName}` : a.subjectName!,
+      a.subjectCode ? `${a.subjectName} (${a.subjectCode})` : a.subjectName!,
     ]),
   ).values()];
 
