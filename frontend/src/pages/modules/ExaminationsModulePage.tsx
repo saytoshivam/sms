@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ModulePage, StatusChip, type StatusLevel } from '../../components/module/ModulePage';
@@ -1116,8 +1116,7 @@ function AssessmentSchemesPanel({
                     onChange={(v) => setForm((p) => ({ ...p, subjectIds: v }))}
                     options={subjects.map((s) => ({
                       value: String(s.id),
-                      label: s.name,
-                      meta: s.code ?? undefined,
+                      label: s.code ? `${s.code} – ${s.name}` : s.name,
                     }))}
                     placeholder="Select subjects…"
                   />
@@ -1970,7 +1969,7 @@ function ExamSchedulePanel({
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
             <SmartSelect value={filterSubjectId} onChange={setFilterSubjectId}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
               placeholder="All subjects" allowClear searchable />
           </label>
           <label className="stack" style={{ gap: 4 }}>
@@ -2193,7 +2192,7 @@ function CreateAssessmentForm({
           <label className="stack" style={{ gap: 6 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
             <SmartSelect value={form.subjectId} onChange={(v) => set('subjectId', v)}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
               placeholder="Select subject…" allowClear searchable />
           </label>
           <label className="stack" style={{ gap: 6 }}>
@@ -2314,7 +2313,7 @@ function EditAssessmentForm({
           <label className="stack" style={{ gap: 6 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
             <SmartSelect value={form.subjectId} onChange={(v) => set('subjectId', v)}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
               placeholder="Select subject…" searchable />
           </label>
           <label className="stack" style={{ gap: 6 }}>
@@ -2438,7 +2437,7 @@ function BulkGeneratePanel({
           <label className="stack" style={{ gap: 6 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subjects</span>
             <MultiSelectKeeper value={selectedSubjectIds} onChange={setSelectedSubjectIds}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.name }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
               placeholder="Select subjects…" />
           </label>
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
@@ -2568,7 +2567,7 @@ function MarksEntryPanel({
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
             <SmartSelect value={filterSubjectId} onChange={setFilterSubjectId}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
               placeholder="All subjects" allowClear searchable />
           </label>
           <label className="stack" style={{ gap: 4 }}>
@@ -3236,7 +3235,7 @@ function ResultsPanel({
             <SmartSelect
               value={filterSubjectId}
               onChange={(v) => { setFilterSubjectId(v); setPreviewResults(null); }}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.name, meta: s.code ?? undefined }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
               placeholder="All subjects"
               allowClear
               searchable
