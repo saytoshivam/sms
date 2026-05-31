@@ -409,6 +409,30 @@ function scopeLabel(s: AssessmentScheme): string {
   return s.assignmentLabel || 'Not assigned';
 }
 
+function computeScopeLabel(s: AssessmentScheme): string {
+  const active = (s.assignments ?? []).filter((a) => a.active);
+  if (active.length === 0) return s.assignmentLabel || 'Not assigned';
+  const first = active[0];
+  if (first.scopeType === 'SCHOOL') return 'School-wide';
+  const gradeNumbers = [...new Set(
+    active
+      .filter((a) => a.scopeType === 'CLASS' || a.scopeType === 'SECTION')
+      .map((a) => a.gradeLevel)
+      .filter((g): g is number => g != null),
+  )].sort((a, b) => a - b);
+  const subjectNames = active
+    .filter((a) => (a.scopeType === 'SUBJECT' || a.scopeType === 'CLASS_SUBJECT' || a.scopeType === 'SECTION_SUBJECT') && a.subjectName)
+    .map((a) => a.subjectName!);
+  const uniqueSubjects = [...new Set(subjectNames)];
+  const gradeLabel = gradeNumbers.length > 0 ? gradeSelectionLabel(gradeNumbers) : null;
+  if (uniqueSubjects.length === 1 && gradeLabel) return `${uniqueSubjects[0]} · ${gradeLabel}`;
+  if (uniqueSubjects.length > 1 && gradeLabel) return `${uniqueSubjects.length} subjects · ${gradeLabel}`;
+  if (uniqueSubjects.length === 1) return uniqueSubjects[0];
+  if (uniqueSubjects.length > 1) return `${uniqueSubjects.length} subject overrides`;
+  if (active.length === 1 && active[0].scopeType === 'SECTION') return active[0].classGroupLabel ?? gradeLabel ?? 'Section';
+  return gradeLabel ?? s.assignmentLabel ?? 'Not assigned';
+}
+
 function toDisplayLabel(v: string): string {
   return v
     .toLowerCase()
@@ -714,6 +738,7 @@ function AssessmentSchemesPanel({
   onRefresh: () => Promise<void>;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [schemeSearch, setSchemeSearch] = useState('');
   const [selectedPresetIndex, setSelectedPresetIndex] = useState('0');
   const [form, setForm] = useState<SchemeForm>({
     name: '',
@@ -825,76 +850,88 @@ function AssessmentSchemesPanel({
 
   function renderSchemeRows(rows: AssessmentScheme[], archivedList: boolean) {
     return rows.map((s) => {
-      const total = totalWeightage(s.components ?? []);
       const r = schemeReadiness(s);
       const canPublish = s.status === 'DRAFT' && r.ready;
+      const isDraft = s.status === 'DRAFT';
+      const isPublished = s.status === 'PUBLISHED';
+      const isArchived = s.status === 'ARCHIVED';
+
+      const statusBadge = (
+        <span style={{
+          fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap',
+          background: isDraft ? '#fef3c7' : isPublished ? '#d1fae5' : '#f1f5f9',
+          color: isDraft ? '#92400e' : isPublished ? '#065f46' : '#64748b',
+        }}>
+          {isDraft ? 'Draft' : isPublished ? 'Published' : 'Archived'}
+        </span>
+      );
+
+      const readinessBadge = !isArchived ? (
+        <span style={{
+          fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap',
+          background: r.level === 'ok' ? '#d1fae5' : r.level === 'warn' ? '#fef3c7' : r.level === 'error' ? '#fee2e2' : '#f1f5f9',
+          color: r.level === 'ok' ? '#065f46' : r.level === 'warn' ? '#92400e' : r.level === 'error' ? '#991b1b' : '#64748b',
+        }}>
+          {r.label}
+        </span>
+      ) : (
+        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
+          Read-only
+        </span>
+      );
+
+      const primaryLabel = isDraft ? (r.ready ? 'Open setup' : 'Open setup') : 'View';
+
       return (
-        <tr key={s.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', opacity: archivedList ? 0.78 : 1, cursor: 'pointer' }} onClick={() => onOpenScheme(s.id)}>
+        <tr
+          key={s.id}
+          style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', opacity: isArchived ? 0.78 : 1, cursor: 'pointer' }}
+          onClick={() => onOpenScheme(s.id)}
+        >
           <td style={{ padding: '8px 6px', fontWeight: 700 }}>{s.name}</td>
-          <td style={{ padding: '8px 6px' }}>{s.academicYearLabel ?? `Year ${s.academicYearId}`}</td>
-          <td style={{ padding: '8px 6px' }}>{scopeLabel(s)}</td>
-          <td style={{ padding: '8px 6px' }}>{s.status}</td>
-          <td style={{ padding: '8px 6px' }}>{s.components?.length ?? 0}</td>
-          <td style={{ padding: '8px 6px' }}>{total}%</td>
-          <td style={{ padding: '8px 6px' }}>{archivedList ? 'Read-only' : r.label}</td>
-          <td style={{ padding: '8px 6px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-              {s.status === 'DRAFT' ? (
-                <>
-                  {canPublish ? (
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      disabled={publishScheme.isPending}
-                      onClick={() => publishScheme.mutate(s.id)}
-                    >
-                      Publish
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    disabled={cloneScheme.isPending}
-                    onClick={() => cloneScheme.mutate(s.id)}
-                  >
-                    Clone
-                  </button>
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    disabled={archiveScheme.isPending}
-                    onClick={() => archiveScheme.mutate(s.id)}
-                  >
-                    Archive
-                  </button>
-                </>
-              ) : s.status === 'PUBLISHED' ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    disabled={cloneScheme.isPending}
-                    onClick={() => cloneScheme.mutate(s.id)}
-                  >
-                    Clone
-                  </button>
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    disabled={archiveScheme.isPending}
-                    onClick={() => archiveScheme.mutate(s.id)}
-                  >
-                    Archive
-                  </button>
-                </>
-              ) : (
+          <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{s.academicYearLabel ?? `Year ${s.academicYearId}`}</td>
+          <td style={{ padding: '8px 6px' }}>{computeScopeLabel(s)}</td>
+          <td style={{ padding: '8px 6px' }}>{statusBadge}</td>
+          <td style={{ padding: '8px 6px' }}>{readinessBadge}</td>
+          <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn"
+                style={{ fontSize: 12, padding: '4px 10px' }}
+                onClick={() => onOpenScheme(s.id)}
+              >
+                {primaryLabel}
+              </button>
+              {isDraft && canPublish && (
                 <button
                   type="button"
                   className="btn secondary"
-                  disabled={cloneScheme.isPending}
-                  onClick={() => cloneScheme.mutate(s.id)}
+                  style={{ fontSize: 12, padding: '4px 10px' }}
+                  disabled={publishScheme.isPending}
+                  onClick={() => publishScheme.mutate(s.id)}
                 >
-                  Clone
+                  Publish
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn secondary"
+                style={{ fontSize: 12, padding: '4px 10px' }}
+                disabled={cloneScheme.isPending}
+                onClick={() => cloneScheme.mutate(s.id)}
+              >
+                Clone
+              </button>
+              {!isArchived && (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ fontSize: 12, padding: '4px 10px' }}
+                  disabled={archiveScheme.isPending}
+                  onClick={() => archiveScheme.mutate(s.id)}
+                >
+                  Archive
                 </button>
               )}
             </div>
@@ -907,9 +944,12 @@ function AssessmentSchemesPanel({
   function suggestSchemeName(): string {
     const ay = formatAcademicYear(academicYears.find((y) => String(y.id) === form.academicYearId)?.label);
     if (form.applicableScopeType === 'SCHOOL') return `School-wide Evaluation Scheme ${ay}`;
-    if (form.applicableScopeType === 'SUBJECT' && form.subjectIds.length === 1) {
-      const subject = subjects.find((s) => String(s.id) === form.subjectIds[0]);
-      return `${subject?.name ?? 'Subject'} Scheme ${ay}`;
+    if (form.applicableScopeType === 'SUBJECT') {
+      if (form.subjectIds.length === 1) {
+        const subject = subjects.find((s) => String(s.id) === form.subjectIds[0]);
+        return `${subject?.name ?? 'Subject'} Evaluation Scheme ${ay}`;
+      }
+      if (form.subjectIds.length > 1) return `${form.subjectIds.length} Subjects Evaluation Scheme ${ay}`;
     }
     const grades = form.applicableScopeType === 'CLASS'
       ? form.classGrades.map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b)
@@ -941,7 +981,12 @@ function AssessmentSchemesPanel({
     <div className="stack" style={{ gap: 12 }}>
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontWeight: 900 }}>Assessment Schemes</div>
+          <div>
+            <div style={{ fontWeight: 900 }}>Assessment Schemes</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>
+              Create reusable assessment patterns and assign them to school, classes, sections, or subject overrides. More specific schemes override broader ones.
+            </div>
+          </div>
           <button type="button" className="btn" onClick={() => setCreateOpen((v) => !v)}>
             {createOpen ? 'Close form' : 'Create Scheme'}
           </button>
@@ -1171,7 +1216,15 @@ function AssessmentSchemesPanel({
       {!selectedScheme ? (
         <>
         <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-          <div style={{ fontWeight: 900, marginBottom: 10 }}>Active Assessment Schemes</div>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            <div style={{ fontWeight: 900 }}>Active Assessment Schemes</div>
+            <input
+              value={schemeSearch}
+              onChange={(e) => setSchemeSearch(e.target.value)}
+              placeholder="Search by name…"
+              style={{ fontSize: 13, padding: '5px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', width: 220 }}
+            />
+          </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -1180,17 +1233,18 @@ function AssessmentSchemesPanel({
                   <th style={{ padding: '8px 6px' }}>Academic year</th>
                   <th style={{ padding: '8px 6px' }}>Assigned to</th>
                   <th style={{ padding: '8px 6px' }}>Status</th>
-                  <th style={{ padding: '8px 6px' }}>Components</th>
-                  <th style={{ padding: '8px 6px' }}>Total weightage</th>
                   <th style={{ padding: '8px 6px' }}>Readiness</th>
                   <th style={{ padding: '8px 6px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {renderSchemeRows(activeSchemes, false)}
+                {renderSchemeRows(
+                  activeSchemes.filter((s) => !schemeSearch.trim() || s.name.toLowerCase().includes(schemeSearch.toLowerCase())),
+                  false,
+                )}
                 {activeSchemes.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ padding: 14 }} className="muted">
+                    <td colSpan={6} style={{ padding: 14 }} className="muted">
                       No active schemes created yet.
                     </td>
                   </tr>
@@ -1210,9 +1264,7 @@ function AssessmentSchemesPanel({
                     <th style={{ padding: '8px 6px' }}>Academic year</th>
                     <th style={{ padding: '8px 6px' }}>Assigned to</th>
                     <th style={{ padding: '8px 6px' }}>Status</th>
-                    <th style={{ padding: '8px 6px' }}>Components</th>
-                    <th style={{ padding: '8px 6px' }}>Total weightage</th>
-                    <th style={{ padding: '8px 6px' }}>Read-only</th>
+                    <th style={{ padding: '8px 6px' }}>Readiness</th>
                     <th style={{ padding: '8px 6px' }}>Actions</th>
                   </tr>
                 </thead>
@@ -1295,6 +1347,16 @@ function SchemeDetailCard({
     onError: (e) => toast.error('Could not publish scheme', formatApiError(e)),
   });
 
+  const cloneForRevise = useMutation({
+    mutationFn: async () => (await api.post<AssessmentScheme>(`/api/exams/schemes/${scheme.id}/clone`)).data,
+    onSuccess: async (created) => {
+      toast.success('Scheme cloned', 'A draft copy has been created — you can now edit it.');
+      await onRefresh();
+      onClose();
+    },
+    onError: (e) => toast.error('Could not clone scheme', formatApiError(e)),
+  });
+
   const applyPreset = useMutation({
     mutationFn: async (preset: ComponentPreset) => {
       const current = scheme.components ?? [];
@@ -1331,6 +1393,9 @@ function SchemeDetailCard({
     });
   };
 
+  const isReadOnly = scheme.status === 'PUBLISHED' || scheme.status === 'ARCHIVED';
+  const statusLabel = scheme.status === 'DRAFT' ? 'Draft' : scheme.status === 'PUBLISHED' ? 'Published' : 'Archived';
+
   return (
     <div className="stack" style={{ gap: 12 }}>
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
@@ -1338,28 +1403,50 @@ function SchemeDetailCard({
           <div>
             <h2 style={{ margin: 0, fontSize: 18 }}>{scheme.name}</h2>
             <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-              {scheme.academicYearLabel ?? `Year ${scheme.academicYearId}`} · {scopeLabel(scheme)} · Total weightage: {total}%
+              {scheme.academicYearLabel ?? `Year ${scheme.academicYearId}`} · {computeScopeLabel(scheme)} · Total weightage: {total}%
             </div>
             <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-              <StatusChip level={scheme.status === 'DRAFT' ? 'warn' : scheme.status === 'PUBLISHED' ? 'ok' : 'idle'} label={scheme.status} />
-              <StatusChip level={ready.level} label={ready.label} />
-              {scheme.status === 'DRAFT' ? (
-                <StatusChip level={(scheme.assignments ?? []).some((a) => a.active) ? 'ok' : 'error'} label={(scheme.assignments ?? []).some((a) => a.active) ? scopeLabel(scheme) : 'Needs assignment'} />
-              ) : null}
+              <StatusChip
+                level={scheme.status === 'DRAFT' ? 'warn' : scheme.status === 'PUBLISHED' ? 'ok' : 'idle'}
+                label={statusLabel}
+              />
+              {!isReadOnly && <StatusChip level={ready.level} label={ready.label} />}
+              {isReadOnly && (
+                <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
+                  Read-only · Clone to revise
+                </span>
+              )}
+              {scheme.status === 'DRAFT' && (
+                <StatusChip
+                  level={(scheme.assignments ?? []).some((a) => a.active) ? 'ok' : 'error'}
+                  label={(scheme.assignments ?? []).some((a) => a.active) ? computeScopeLabel(scheme) : 'Needs assignment'}
+                />
+              )}
             </div>
           </div>
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
             <button type="button" className="btn secondary" onClick={onClose}>
               Back to list
             </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={scheme.status !== 'DRAFT' || !ready.ready || publishScheme.isPending}
-              onClick={() => publishScheme.mutate()}
-            >
-              {publishScheme.isPending ? 'Publishing...' : 'Publish'}
-            </button>
+            {isReadOnly ? (
+              <button
+                type="button"
+                className="btn secondary"
+                disabled={cloneForRevise.isPending}
+                onClick={() => cloneForRevise.mutate()}
+              >
+                {cloneForRevise.isPending ? 'Cloning…' : 'Clone to revise'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                disabled={!ready.ready || publishScheme.isPending}
+                onClick={() => publishScheme.mutate()}
+              >
+                {publishScheme.isPending ? 'Publishing...' : 'Publish'}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1367,7 +1454,7 @@ function SchemeDetailCard({
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ fontWeight: 900 }}>Components</div>
-          {scheme.status === 'DRAFT' ? (
+          {!isReadOnly ? (
             <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               {(scheme.components?.length ?? 0) > 0 ? <span className="muted" style={{ fontSize: 12 }}>More actions:</span> : null}
               <SelectKeeper
@@ -1405,9 +1492,9 @@ function SchemeDetailCard({
                 <th style={{ padding: '8px 6px' }}>Max Marks</th>
                 <th style={{ padding: '8px 6px' }}>Calculation Rule</th>
                 <th style={{ padding: '8px 6px' }}>Assessments Rule</th>
-                <th style={{ padding: '8px 6px' }}>Sequence</th>
-                <th style={{ padding: '8px 6px' }}>Status</th>
-                <th style={{ padding: '8px 6px' }}>Actions</th>
+                <th style={{ padding: '8px 6px' }}>Seq</th>
+                <th style={{ padding: '8px 6px' }}>Validity</th>
+                {!isReadOnly && <th style={{ padding: '8px 6px' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -1427,24 +1514,24 @@ function SchemeDetailCard({
                           ? `Best ${c.bestOfCount} of ${c.totalAssessments}`
                           : c.calculationRule === 'SINGLE_ASSESSMENT'
                             ? 'Single assessment'
-                            : '-'}
+                            : '—'}
                       </td>
-                      <td style={{ padding: '8px 6px' }}>Seq {c.sequence}</td>
+                      <td style={{ padding: '8px 6px' }}>{c.sequence}</td>
                       <td style={{ padding: '8px 6px' }}>{componentStatusLabel(c)}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        {scheme.status === 'DRAFT' ? (
+                      {!isReadOnly && (
+                        <td style={{ padding: '8px 6px' }}>
                           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                            <button type="button" className="btn secondary" onClick={() => onEditRow(c)}>Edit</button>
-                            <button type="button" className="btn secondary" disabled={removeComponent.isPending} onClick={() => removeComponent.mutate(c.id)}>Remove</button>
+                            <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '3px 8px' }} onClick={() => onEditRow(c)}>Edit</button>
+                            <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '3px 8px' }} disabled={removeComponent.isPending} onClick={() => removeComponent.mutate(c.id)}>Remove</button>
                           </div>
-                        ) : <span className="muted" style={{ fontSize: 12 }}>Read-only</span>}
-                      </td>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
               {(scheme.components?.length ?? 0) === 0 ? (
                 <tr>
-                  <td colSpan={9} className="muted" style={{ padding: 12 }}>
+                  <td colSpan={isReadOnly ? 8 : 9} className="muted" style={{ padding: 12 }}>
                     No components added yet.
                   </td>
                 </tr>
@@ -1454,7 +1541,7 @@ function SchemeDetailCard({
         </div>
       </div>
 
-      {scheme.status === 'DRAFT' ? (
+      {!isReadOnly ? (
         <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
           <div style={{ fontWeight: 900, marginBottom: 8 }}>{editingComponentId == null ? 'Add Component' : 'Edit Component'}</div>
           <ComponentFormPanel
