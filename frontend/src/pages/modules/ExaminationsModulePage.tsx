@@ -662,6 +662,7 @@ function AssessmentSchemesPanel({
   onRefresh: () => Promise<void>;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [selectedPresetIndex, setSelectedPresetIndex] = useState('0');
   const [form, setForm] = useState<SchemeForm>({
     name: '',
     academicYearId: String(academicYears[0]?.id ?? ''),
@@ -784,6 +785,20 @@ function AssessmentSchemesPanel({
     return `Evaluation Scheme ${ay}`;
   }
 
+  function presetToFormComponents(preset: ComponentPreset): ComponentForm[] {
+    return preset.components.map((c) => ({
+      name: c.name,
+      componentType: c.componentType,
+      weightagePercent: String(c.weightagePercent),
+      maxMarks: c.maxMarks == null ? '' : String(c.maxMarks),
+      calculationRule: c.calculationRule,
+      totalAssessments: c.totalAssessments == null ? '' : String(c.totalAssessments),
+      bestOfCount: c.bestOfCount == null ? '' : String(c.bestOfCount),
+      mandatory: c.mandatory,
+      sequence: String(c.sequence),
+    }));
+  }
+
   return (
     <div className="stack" style={{ gap: 12 }}>
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
@@ -833,20 +848,21 @@ function AssessmentSchemesPanel({
                   <div style={{ fontWeight: 800, fontSize: 13 }}>Step 2: Components</div>
                   <div className="muted" style={{ fontSize: 12 }}>Use a preset or add components manually before assigning the scheme.</div>
                 </div>
-                <div className="row" style={{ gap: 8 }}>
+                <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <SelectKeeper
+                    value={selectedPresetIndex}
+                    onChange={setSelectedPresetIndex}
+                    options={PRESETS.map((p, index) => ({
+                      value: String(index),
+                      label: `${p.label} (${p.components.length} components)`,
+                    }))}
+                  />
                   <button type="button" className="btn secondary"
-                    onClick={() => setForm((p) => ({ ...p, draftComponents: PRESETS[0].components.map((c) => ({
-                      name: c.name,
-                      componentType: c.componentType,
-                      weightagePercent: String(c.weightagePercent),
-                      maxMarks: c.maxMarks == null ? '' : String(c.maxMarks),
-                      calculationRule: c.calculationRule,
-                      totalAssessments: c.totalAssessments == null ? '' : String(c.totalAssessments),
-                      bestOfCount: c.bestOfCount == null ? '' : String(c.bestOfCount),
-                      mandatory: c.mandatory,
-                      sequence: String(c.sequence),
-                    })) }))}>
-                    Use preset
+                    onClick={() => {
+                      const preset = PRESETS[Number(selectedPresetIndex)] ?? PRESETS[0];
+                      setForm((p) => ({ ...p, draftComponents: presetToFormComponents(preset) }));
+                    }}>
+                    Use selected preset
                   </button>
                   <button type="button" className="btn secondary"
                     onClick={() => setForm((p) => ({ ...p, draftComponents: [...p.draftComponents, createEmptyComponent(p.draftComponents.length + 1)] }))}>
