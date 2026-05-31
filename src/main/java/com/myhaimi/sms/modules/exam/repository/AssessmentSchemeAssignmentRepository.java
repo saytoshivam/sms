@@ -26,6 +26,7 @@ public interface AssessmentSchemeAssignmentRepository extends JpaRepository<Asse
               and (:classGroupId is null or a.classGroup.id = :classGroupId)
               and (:subjectId is null or a.subject.id = :subjectId)
               and (:excludeSchemeId is null or a.scheme.id <> :excludeSchemeId)
+              and a.scheme.status = com.myhaimi.sms.modules.exam.entity.enums.AssessmentSchemeStatus.PUBLISHED
             """)
     List<AssessmentSchemeAssignment> findConflicts(
             @Param("schoolId") Integer schoolId,
