@@ -407,7 +407,7 @@ public class AssessmentSchemeService {
         gs.getClassAssignments().clear();
         for (ClassGroup cg : classGroups) addGradingClassAssignment(gs, cg);
         if (update) {
-            gradingBandRepo.deleteAll(gs.getBands());
+            gradingBandRepo.deleteByGradingSchemeId(gs.getId());
             gradingBandRepo.flush();
         }
         gs.getBands().clear();
