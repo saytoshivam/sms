@@ -403,9 +403,13 @@ public class AssessmentSchemeService {
         }
         gs = gradingSchemeRepo.save(gs);
         gradingClassAssignmentRepo.deleteByGradingScheme_Id(gs.getId());
+        gradingClassAssignmentRepo.flush();
         gs.getClassAssignments().clear();
         for (ClassGroup cg : classGroups) addGradingClassAssignment(gs, cg);
-        if (update) gradingBandRepo.deleteAll(gs.getBands());
+        if (update) {
+            gradingBandRepo.deleteAll(gs.getBands());
+            gradingBandRepo.flush();
+        }
         gs.getBands().clear();
         int seq = 1;
         for (GradingBandCreateDTO b : dto.bands()) {
