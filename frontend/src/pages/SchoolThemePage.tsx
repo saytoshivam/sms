@@ -11,6 +11,85 @@ type Me = {
   schoolId?: number | null;
 };
 
+const BRAND_SWATCHES = [
+  '#ea580c', '#f97316', '#f59e0b', '#eab308', '#16a34a', '#059669',
+  '#0ea5e9', '#2563eb', '#4f46e5', '#7c3aed', '#db2777', '#dc2626',
+];
+
+const SURFACE_SWATCHES = [
+  '#ffffff', '#f8fafc', '#f1f5f9', '#fffbeb', '#fef3c7', '#ecfeff',
+  '#eff6ff', '#f5f3ff', '#0f172a', '#1e293b', '#334155', '#475569',
+];
+
+function pickerValue(value: string, fallback: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(value.trim()) ? value.trim() : fallback;
+}
+
+function ColorField({
+  label,
+  value,
+  onChange,
+  swatches,
+  fallback,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  swatches: string[];
+  fallback: string;
+}) {
+  const safePickerValue = pickerValue(value, fallback);
+  return (
+    <div style={{ flex: 1, minWidth: 240 }} className="stack">
+      <label>{label}</label>
+      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+        <input
+          type="color"
+          value={safePickerValue}
+          onChange={(e) => onChange(e.target.value)}
+          title={`Pick ${label.toLowerCase()} color`}
+          style={{ width: 44, height: 38, padding: 2, cursor: 'pointer' }}
+        />
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="#000000"
+          style={{ flex: 1, minWidth: 120 }}
+        />
+        <span
+          aria-label={`${label} preview`}
+          title={value}
+          style={{ width: 34, height: 34, borderRadius: 10, border: '1px solid rgba(15,23,42,0.18)', background: safePickerValue, boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.35)' }}
+        />
+      </div>
+      <div className="muted" style={{ fontSize: 11 }}>Color chart</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 24px)', gap: 6 }}>
+        {swatches.map((color) => {
+          const selected = value.toLowerCase() === color.toLowerCase();
+          return (
+            <button
+              key={`${label}-${color}`}
+              type="button"
+              aria-label={`Use ${color} for ${label}`}
+              title={color}
+              onClick={() => onChange(color)}
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 999,
+                border: selected ? '2px solid #0f172a' : '1px solid rgba(15,23,42,0.18)',
+                background: color,
+                cursor: 'pointer',
+                boxShadow: selected ? '0 0 0 2px rgba(14,165,233,0.25)' : 'none',
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function SchoolThemePage() {
   const qc = useQueryClient();
   const { refresh } = useBranding();
@@ -71,30 +150,15 @@ export function SchoolThemePage() {
         ) : null}
 
         <div className="row">
-          <div style={{ flex: 1, minWidth: 180 }} className="stack">
-            <label>Primary</label>
-            <input value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} />
-          </div>
-          <div style={{ flex: 1, minWidth: 180 }} className="stack">
-            <label>Accent</label>
-            <input value={accentColor} onChange={(e) => setAccentColor(e.target.value)} />
-          </div>
+          <ColorField label="Primary" value={primaryColor} onChange={setPrimaryColor} swatches={BRAND_SWATCHES} fallback={defaults.primaryColor} />
+          <ColorField label="Accent" value={accentColor} onChange={setAccentColor} swatches={BRAND_SWATCHES} fallback={defaults.accentColor} />
         </div>
         <div className="row">
-          <div style={{ flex: 1, minWidth: 180 }} className="stack">
-            <label>Background</label>
-            <input value={backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} />
-          </div>
-          <div style={{ flex: 1, minWidth: 180 }} className="stack">
-            <label>Text</label>
-            <input value={textColor} onChange={(e) => setTextColor(e.target.value)} />
-          </div>
+          <ColorField label="Background" value={backgroundColor} onChange={setBackgroundColor} swatches={SURFACE_SWATCHES} fallback={defaults.backgroundColor} />
+          <ColorField label="Text" value={textColor} onChange={setTextColor} swatches={SURFACE_SWATCHES} fallback={defaults.textColor} />
         </div>
         <div className="row">
-          <div style={{ flex: 1, minWidth: 180 }} className="stack">
-            <label>Nav text</label>
-            <input value={navTextColor} onChange={(e) => setNavTextColor(e.target.value)} />
-          </div>
+          <ColorField label="Nav text" value={navTextColor} onChange={setNavTextColor} swatches={SURFACE_SWATCHES} fallback={defaults.navTextColor} />
           <div style={{ alignSelf: 'end' }} className="row">
             <button
               type="button"
