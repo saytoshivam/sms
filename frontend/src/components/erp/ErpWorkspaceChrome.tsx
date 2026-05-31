@@ -19,6 +19,7 @@ import {
   Menu,
   MessageSquare,
   Network,
+  Palette,
   PanelLeft,
   PanelLeftClose,
   Presentation,
@@ -111,6 +112,7 @@ function buildLeaderNavGroups(attendancePath: string, roles: string[]): NavGroup
         { to: withWorkspaceReadOnly('/app/teachers'), label: 'Teachers', icon: GraduationCap, prefix: '/app/teachers' },
         { to: withWorkspaceReadOnly('/app/subjects'), label: 'Subjects', icon: BookOpen, prefix: '/app/subjects' },
         { to: withWorkspaceReadOnly('/app/academic'), label: 'Academic structure', icon: Network, prefix: '/app/academic' },
+        { to: withWorkspaceReadOnly('/app/lectures'), label: 'Lectures', icon: Presentation, prefix: '/app/lectures' },
         { to: withWorkspaceReadOnly('/app/fees'), label: 'Fees', icon: IndianRupee, prefix: '/app/fees' },
       ],
     },
@@ -141,6 +143,7 @@ function buildLeaderNavGroups(attendancePath: string, roles: string[]): NavGroup
       label: 'System',
       items: [
         { to: '/app/school/management', label: 'Settings', icon: Settings2, prefix: '/app/school/management' },
+        { to: '/app/school-theme', label: 'Brand', icon: Palette, prefix: '/app/school-theme' },
         { to: '/app/school/document-requirements', label: 'Document Requirements', icon: FileText, prefix: '/app/school/document-requirements' },
         { to: '/app/onboarding', label: 'Imports', icon: Upload, prefix: '/app/onboarding' },
         { to: '/app/user-access', label: 'Access', icon: Shield, prefix: '/app/user-access' },
