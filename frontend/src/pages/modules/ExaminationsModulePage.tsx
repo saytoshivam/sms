@@ -420,15 +420,23 @@ function computeScopeLabel(s: AssessmentScheme): string {
       .map((a) => a.gradeLevel)
       .filter((g): g is number => g != null),
   )].sort((a, b) => a - b);
-  const subjectNames = active
-    .filter((a) => (a.scopeType === 'SUBJECT' || a.scopeType === 'CLASS_SUBJECT' || a.scopeType === 'SECTION_SUBJECT') && a.subjectName)
-    .map((a) => a.subjectName!);
-  const uniqueSubjects = [...new Set(subjectNames)];
+
+  // Build subject label: "[CODE] Name" when code is available
+  const subjectAssignments = active.filter(
+    (a) => (a.scopeType === 'SUBJECT' || a.scopeType === 'CLASS_SUBJECT' || a.scopeType === 'SECTION_SUBJECT') && a.subjectName,
+  );
+  const uniqueSubjectLabels = [...new Map(
+    subjectAssignments.map((a) => [
+      a.subjectId,
+      a.subjectCode ? `[${a.subjectCode}] ${a.subjectName}` : a.subjectName!,
+    ]),
+  ).values()];
+
   const gradeLabel = gradeNumbers.length > 0 ? gradeSelectionLabel(gradeNumbers) : null;
-  if (uniqueSubjects.length === 1 && gradeLabel) return `${uniqueSubjects[0]} · ${gradeLabel}`;
-  if (uniqueSubjects.length > 1 && gradeLabel) return `${uniqueSubjects.length} subjects · ${gradeLabel}`;
-  if (uniqueSubjects.length === 1) return uniqueSubjects[0];
-  if (uniqueSubjects.length > 1) return `${uniqueSubjects.length} subject overrides`;
+  if (uniqueSubjectLabels.length === 1 && gradeLabel) return `${uniqueSubjectLabels[0]} · ${gradeLabel}`;
+  if (uniqueSubjectLabels.length > 1 && gradeLabel) return `${uniqueSubjectLabels.length} subjects · ${gradeLabel}`;
+  if (uniqueSubjectLabels.length === 1) return uniqueSubjectLabels[0];
+  if (uniqueSubjectLabels.length > 1) return `${uniqueSubjectLabels.length} subject overrides`;
   if (active.length === 1 && active[0].scopeType === 'SECTION') return active[0].classGroupLabel ?? gradeLabel ?? 'Section';
   return gradeLabel ?? s.assignmentLabel ?? 'Not assigned';
 }
