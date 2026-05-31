@@ -829,7 +829,7 @@ function AssessmentSchemesPanel({
       const r = schemeReadiness(s);
       const canPublish = s.status === 'DRAFT' && r.ready;
       return (
-        <tr key={s.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', opacity: archivedList ? 0.78 : 1 }}>
+        <tr key={s.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', opacity: archivedList ? 0.78 : 1, cursor: 'pointer' }} onClick={() => onOpenScheme(s.id)}>
           <td style={{ padding: '8px 6px', fontWeight: 700 }}>{s.name}</td>
           <td style={{ padding: '8px 6px' }}>{s.academicYearLabel ?? `Year ${s.academicYearId}`}</td>
           <td style={{ padding: '8px 6px' }}>{scopeLabel(s)}</td>
@@ -837,11 +837,8 @@ function AssessmentSchemesPanel({
           <td style={{ padding: '8px 6px' }}>{s.components?.length ?? 0}</td>
           <td style={{ padding: '8px 6px' }}>{total}%</td>
           <td style={{ padding: '8px 6px' }}>{archivedList ? 'Read-only' : r.label}</td>
-          <td style={{ padding: '8px 6px' }}>
+          <td style={{ padding: '8px 6px' }} onClick={(e) => e.stopPropagation()}>
             <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-              <button type="button" className="btn secondary" onClick={() => onOpenScheme(s.id)}>
-                {s.status === 'DRAFT' && !r.ready ? 'Open setup' : 'Open'}
-              </button>
               {s.status === 'DRAFT' ? (
                 <>
                   {canPublish ? (
