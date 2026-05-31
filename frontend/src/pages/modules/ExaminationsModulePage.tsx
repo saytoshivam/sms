@@ -1375,7 +1375,7 @@ function AssessmentSchemesPanel({
                   <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12 }}>Scheme Name</th>
                   <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Scope</th>
                   <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>Applies To</th>
-                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center' }}>Comps</th>
+                  <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center' }}>Components</th>
                   <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12, textAlign: 'center' }}>Weightage</th>
                   <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12 }}>State</th>
                   <th style={{ padding: '8px 8px', fontWeight: 700, fontSize: 12 }}>Actions</th>
@@ -1424,7 +1424,7 @@ function AssessmentSchemesPanel({
                       <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>Scheme Name</th>
                       <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>Scope</th>
                       <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>Applies To</th>
-                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11, textAlign: 'center' }}>Comps</th>
+                      <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11, textAlign: 'center' }}>Components</th>
                       <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11, textAlign: 'center' }}>Weightage</th>
                       <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>State</th>
                       <th style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11 }}>Actions</th>
