@@ -52,7 +52,7 @@ public class ResultCalculationService {
     public List<StudentResultDTO> previewResult(ResultCalculationRequestDTO req) {
         Integer schoolId = requireSchoolId();
         Context ctx = buildContext(schoolId, req.classGroupId(), req.schemeId(), req.subjectId());
-        GradingScheme gradingScheme = resolveGradingScheme(schoolId, ctx.scheme(), req.gradingSchemeId());
+        GradingScheme gradingScheme = resolveGradingScheme(schoolId, ctx, req.gradingSchemeId());
 
         return ctx.students().stream()
                 .map(student -> computeResult(student, ctx, gradingScheme, false))
@@ -65,7 +65,7 @@ public class ResultCalculationService {
     public List<StudentResultDTO> generateResults(ResultCalculationRequestDTO req) {
         Integer schoolId = requireSchoolId();
         Context ctx = buildContext(schoolId, req.classGroupId(), req.schemeId(), req.subjectId());
-        GradingScheme gradingScheme = resolveGradingScheme(schoolId, ctx.scheme(), req.gradingSchemeId());
+        GradingScheme gradingScheme = resolveGradingScheme(schoolId, ctx, req.gradingSchemeId());
 
         List<StudentResultDTO> results = new ArrayList<>();
         for (Student student : ctx.students()) {
@@ -460,20 +460,39 @@ public class ResultCalculationService {
                 .orElse(null);
     }
 
-    private GradingScheme resolveGradingScheme(Integer schoolId, AssessmentScheme scheme, Integer gradingSchemeId) {
+    private GradingScheme resolveGradingScheme(Integer schoolId, Context ctx, Integer gradingSchemeId) {
         if (gradingSchemeId != null) {
             return gradingSchemeRepo.findByIdAndSchool_Id(gradingSchemeId, schoolId)
                     .orElseThrow(() -> new NoSuchElementException("Grading scheme not found: " + gradingSchemeId));
         }
-        // Try active scheme for the same academic year first, then any active scheme for the school
-        return gradingSchemeRepo.findBySchool_IdOrderByCreatedAtAsc(schoolId)
-                .stream()
-                .filter(gs -> gs.isActive()
-                        && (gs.getAcademicYear() == null
-                        || gs.getAcademicYear().getId().equals(scheme.getAcademicYear().getId())))
-                .findFirst()
-                .orElseGet(() -> gradingSchemeRepo.findBySchool_IdOrderByCreatedAtAsc(schoolId)
-                        .stream().filter(GradingScheme::isActive).findFirst().orElse(null));
+        Integer academicYearId = ctx.scheme().getAcademicYear().getId();
+        List<GradingScheme> matchingClassSchemes = gradingSchemeRepo.findBySchool_IdOrderByCreatedAtAsc(schoolId).stream()
+                .filter(gs -> gs.isActive())
+                .filter(gs -> gs.getScope() == GradingSchemeScope.CLASS_GROUP)
+                .filter(gs -> gs.getClassGroup() != null && Objects.equals(gs.getClassGroup().getId(), ctx.classGroup().getId()))
+                .filter(gs -> includesAcademicYear(gs, academicYearId))
+                .toList();
+        if (matchingClassSchemes.size() > 1) {
+            throw new IllegalStateException("Multiple active class-group grading schemes match this academic year. Resolve grading scheme conflicts before calculating results.");
+        }
+        if (matchingClassSchemes.size() == 1) return matchingClassSchemes.get(0);
+
+        List<GradingScheme> matchingDefaultSchemes = gradingSchemeRepo.findBySchool_IdOrderByCreatedAtAsc(schoolId).stream()
+                .filter(gs -> gs.isActive())
+                .filter(gs -> gs.getScope() == GradingSchemeScope.SCHOOL)
+                .filter(GradingScheme::isDefaultScheme)
+                .filter(gs -> includesAcademicYear(gs, academicYearId))
+                .toList();
+        if (matchingDefaultSchemes.size() > 1) {
+            throw new IllegalStateException("Multiple active default school-wide grading schemes match this academic year. Resolve grading scheme conflicts before calculating results.");
+        }
+        return matchingDefaultSchemes.isEmpty() ? null : matchingDefaultSchemes.get(0);
+    }
+
+    private boolean includesAcademicYear(GradingScheme gs, Integer academicYearId) {
+        Integer fromId = gs.getEffectiveFromAcademicYear() == null ? null : gs.getEffectiveFromAcademicYear().getId();
+        Integer toId = gs.getEffectiveToAcademicYear() == null ? null : gs.getEffectiveToAcademicYear().getId();
+        return (fromId == null || academicYearId >= fromId) && (toId == null || academicYearId <= toId);
     }
 
     // ─────────────────────────────── Context builders ─────────────────────────

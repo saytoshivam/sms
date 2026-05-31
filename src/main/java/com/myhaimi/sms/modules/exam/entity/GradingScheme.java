@@ -1,7 +1,9 @@
 package com.myhaimi.sms.modules.exam.entity;
 
 import com.myhaimi.sms.entity.AcademicYear;
+import com.myhaimi.sms.entity.ClassGroup;
 import com.myhaimi.sms.entity.School;
+import com.myhaimi.sms.modules.exam.entity.enums.GradingSchemeScope;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -13,15 +15,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A named grading scheme (e.g. "CBSE 10-point scale") for a school/academic year.
- * Each school auto-seeds a default grading scheme on first use.
+ * A reusable grading scheme (e.g. "CBSE 10-point scale") for a school.
+ * Optional effective academic-year bounds constrain when it applies.
  */
 @Getter
 @Setter
 @Entity
 @Table(name = "grading_schemes", indexes = {
         @Index(name = "idx_gs_school", columnList = "school_id"),
-        @Index(name = "idx_gs_academic_year", columnList = "academic_year_id")
+        @Index(name = "idx_gs_academic_year", columnList = "academic_year_id"),
+        @Index(name = "idx_gs_effective_from", columnList = "effective_from_academic_year_id"),
+        @Index(name = "idx_gs_effective_to", columnList = "effective_to_academic_year_id"),
+        @Index(name = "idx_gs_scope_class", columnList = "scope,class_group_id")
 })
 public class GradingScheme {
 
@@ -36,6 +41,28 @@ public class GradingScheme {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "academic_year_id")
     private AcademicYear academicYear;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private GradingSchemeScope scope = GradingSchemeScope.SCHOOL;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "class_group_id")
+    private ClassGroup classGroup;
+
+    @Column(name = "default_scheme", nullable = false)
+    private boolean defaultScheme = true;
+
+    @Column(name = "passing_percent", nullable = false, precision = 5, scale = 2)
+    private java.math.BigDecimal passingPercent = new java.math.BigDecimal("33.00");
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "effective_from_academic_year_id")
+    private AcademicYear effectiveFromAcademicYear;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "effective_to_academic_year_id")
+    private AcademicYear effectiveToAcademicYear;
 
     @Column(nullable = false, length = 128)
     private String name;

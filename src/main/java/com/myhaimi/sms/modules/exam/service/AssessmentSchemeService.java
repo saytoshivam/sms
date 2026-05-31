@@ -9,6 +9,7 @@ import com.myhaimi.sms.modules.exam.entity.*;
 import com.myhaimi.sms.modules.exam.entity.enums.AssessmentSchemeStatus;
 import com.myhaimi.sms.modules.exam.entity.enums.CalculationRule;
 import com.myhaimi.sms.modules.exam.entity.enums.ExamApplicableScopeType;
+import com.myhaimi.sms.modules.exam.entity.enums.GradingSchemeScope;
 import com.myhaimi.sms.modules.exam.repository.*;
 import com.myhaimi.sms.repository.AcademicYearRepo;
 import com.myhaimi.sms.repository.ClassGroupRepo;
@@ -265,12 +266,40 @@ public class AssessmentSchemeService {
     public GradingSchemeDTO createGradingScheme(GradingSchemeCreateDTO dto) {
         Integer schoolId = requireSchoolId();
         School school = requireSchool(schoolId);
-        AcademicYear ay = dto.academicYearId() == null ? null : requireAcademicYear(dto.academicYearId(), schoolId);
+        AcademicYear legacyAy = dto.academicYearId() == null ? null : requireAcademicYear(dto.academicYearId(), schoolId);
+        AcademicYear fromAy = dto.effectiveFromAcademicYearId() == null
+                ? legacyAy
+                : requireAcademicYear(dto.effectiveFromAcademicYearId(), schoolId);
+        AcademicYear toAy = dto.effectiveToAcademicYearId() == null
+                ? legacyAy
+                : requireAcademicYear(dto.effectiveToAcademicYearId(), schoolId);
+        if (fromAy != null && toAy != null && fromAy.getId() > toAy.getId()) {
+            throw new IllegalArgumentException("Effective From academic year must be before or equal to Effective To academic year");
+        }
+        GradingSchemeScope scope = parseGradingScope(dto.scope());
+        ClassGroup classGroup = null;
+        if (scope == GradingSchemeScope.CLASS_GROUP) {
+            if (dto.classGroupId() == null) throw new IllegalArgumentException("Class group is required for class-group grading schemes");
+            classGroup = classGroupRepo.findByIdAndSchool_Id(dto.classGroupId(), schoolId)
+                    .orElseThrow(() -> new IllegalArgumentException("Class group not found: " + dto.classGroupId()));
+        }
+        BigDecimal passingPercent = dto.passingPercent() == null ? new BigDecimal("33.00") : dto.passingPercent();
+        if (passingPercent.compareTo(BigDecimal.ZERO) < 0 || passingPercent.compareTo(new BigDecimal("100.00")) > 0) {
+            throw new IllegalArgumentException("Passing percentage must be between 0 and 100");
+        }
+        boolean defaultScheme = dto.defaultScheme() == null ? scope == GradingSchemeScope.SCHOOL : dto.defaultScheme();
         GradingScheme gs = new GradingScheme();
         gs.setSchool(school);
-        gs.setAcademicYear(ay);
+        gs.setAcademicYear(legacyAy);
+        gs.setEffectiveFromAcademicYear(fromAy);
+        gs.setEffectiveToAcademicYear(toAy);
+        gs.setScope(scope);
+        gs.setClassGroup(classGroup);
+        gs.setDefaultScheme(defaultScheme);
+        gs.setPassingPercent(passingPercent);
         gs.setName(dto.name().trim());
         gs.setActive(dto.active());
+        validateGradingConflict(gs, null);
         gs = gradingSchemeRepo.save(gs);
         int seq = 1;
         for (GradingBandCreateDTO b : dto.bands()) {
@@ -285,6 +314,42 @@ public class AssessmentSchemeService {
             gradingBandRepo.save(band);
         }
         return toGradingDTO(gradingSchemeRepo.findById(gs.getId()).orElseThrow());
+    }
+
+    private GradingSchemeScope parseGradingScope(String raw) {
+        if (raw == null || raw.isBlank()) return GradingSchemeScope.SCHOOL;
+        String normalized = raw.trim().toUpperCase(Locale.ROOT);
+        if (normalized.equals("CLASS") || normalized.equals("CLASS_GROUP")) return GradingSchemeScope.CLASS_GROUP;
+        if (normalized.equals("SCHOOL") || normalized.equals("SCHOOL_WIDE")) return GradingSchemeScope.SCHOOL;
+        throw new IllegalArgumentException("Unsupported grading scope: " + raw);
+    }
+
+    private void validateGradingConflict(GradingScheme candidate, Integer excludeId) {
+        if (!candidate.isActive()) return;
+        Integer schoolId = candidate.getSchool().getId();
+        List<GradingScheme> existing = gradingSchemeRepo.findBySchool_IdOrderByCreatedAtAsc(schoolId);
+        for (GradingScheme other : existing) {
+            if (excludeId != null && Objects.equals(other.getId(), excludeId)) continue;
+            if (!other.isActive()) continue;
+            if (!effectivePeriodsOverlap(candidate, other)) continue;
+            if (candidate.getScope() == GradingSchemeScope.SCHOOL && candidate.isDefaultScheme()
+                    && other.getScope() == GradingSchemeScope.SCHOOL && other.isDefaultScheme()) {
+                throw new IllegalStateException("Only one active default school-wide grading scheme can exist for an overlapping effective period");
+            }
+            if (candidate.getScope() == GradingSchemeScope.CLASS_GROUP && other.getScope() == GradingSchemeScope.CLASS_GROUP
+                    && candidate.getClassGroup() != null && other.getClassGroup() != null
+                    && Objects.equals(candidate.getClassGroup().getId(), other.getClassGroup().getId())) {
+                throw new IllegalStateException("Only one active class-group grading scheme can apply to the same class for an overlapping effective period");
+            }
+        }
+    }
+
+    private boolean effectivePeriodsOverlap(GradingScheme a, GradingScheme b) {
+        int aStart = a.getEffectiveFromAcademicYear() == null ? Integer.MIN_VALUE : a.getEffectiveFromAcademicYear().getId();
+        int aEnd = a.getEffectiveToAcademicYear() == null ? Integer.MAX_VALUE : a.getEffectiveToAcademicYear().getId();
+        int bStart = b.getEffectiveFromAcademicYear() == null ? Integer.MIN_VALUE : b.getEffectiveFromAcademicYear().getId();
+        int bEnd = b.getEffectiveToAcademicYear() == null ? Integer.MAX_VALUE : b.getEffectiveToAcademicYear().getId();
+        return aStart <= bEnd && bStart <= aEnd;
     }
 
     // ─────────────────────────────── Validation ───────────────────────────────
@@ -446,7 +511,15 @@ public class AssessmentSchemeService {
                 .map(b -> new GradingBandDTO(b.getId(), b.getGrade(), b.getMinPercent(), b.getMaxPercent(), b.getGradePoint(), b.getRemarks(), b.getSequence()))
                 .toList();
         Integer ayId = gs.getAcademicYear() != null ? gs.getAcademicYear().getId() : null;
-        return new GradingSchemeDTO(gs.getId(), gs.getSchool().getId(), ayId, gs.getName(), gs.isActive(), gs.getCreatedAt(), gs.getUpdatedAt(), bands);
+        Integer fromAyId = gs.getEffectiveFromAcademicYear() != null ? gs.getEffectiveFromAcademicYear().getId() : null;
+        Integer toAyId = gs.getEffectiveToAcademicYear() != null ? gs.getEffectiveToAcademicYear().getId() : null;
+        Integer classGroupId = gs.getClassGroup() != null ? gs.getClassGroup().getId() : null;
+        String classGroupLabel = gs.getClassGroup() != null ? classLabel(gs.getClassGroup()) : null;
+        return new GradingSchemeDTO(
+                gs.getId(), gs.getSchool().getId(), ayId, fromAyId, toAyId,
+                gs.getScope().name(), classGroupId, classGroupLabel,
+                gs.getName(), gs.isDefaultScheme(), gs.getPassingPercent(), gs.isActive(),
+                gs.getCreatedAt(), gs.getUpdatedAt(), bands);
     }
 }
 

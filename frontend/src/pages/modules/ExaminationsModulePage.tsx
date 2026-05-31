@@ -102,6 +102,13 @@ type GradingScheme = {
   id: number;
   name: string;
   academicYearId: number | null;
+  effectiveFromAcademicYearId?: number | null;
+  effectiveToAcademicYearId?: number | null;
+  scope?: 'SCHOOL' | 'CLASS_GROUP' | string | null;
+  classGroupId?: number | null;
+  classGroupLabel?: string | null;
+  defaultScheme?: boolean;
+  passingPercent?: number | string | null;
   active: boolean;
   bands: GradingBand[];
 };
@@ -713,6 +720,7 @@ export function ExaminationsModulePage() {
         <GradingPanel
           gradingSchemes={gradingQ.data ?? []}
           academicYears={academicYearsQ.data ?? []}
+          classGroups={classGroups}
           onCreated={async () => {
             await qc.invalidateQueries({ queryKey: ['grading-schemes'] });
           }}
@@ -2142,9 +2150,26 @@ function ComponentFormPanel({
 }
 
 function academicYearDisplay(academicYears: AcademicYear[], academicYearId: number | null): string {
-  if (academicYearId == null) return 'Academic Year not assigned';
+  if (academicYearId == null) return 'Effective Period: Always';
   const label = academicYears.find((y) => y.id === academicYearId)?.label;
   return label ? formatAcademicYear(label) : `Year ${academicYearId}`;
+}
+
+function gradingEffectivePeriodLabel(g: GradingScheme, academicYears: AcademicYear[]): string {
+  const fromId = g.effectiveFromAcademicYearId ?? g.academicYearId ?? null;
+  const toId = g.effectiveToAcademicYearId ?? g.academicYearId ?? null;
+  if (fromId == null && toId == null) return 'Always';
+  const from = fromId == null ? 'Beginning' : academicYearDisplay(academicYears, fromId);
+  const to = toId == null ? 'No end' : academicYearDisplay(academicYears, toId);
+  return fromId === toId ? from : `${from} → ${to}`;
+}
+
+function gradingScopeLabel(g: GradingScheme): string {
+  return g.scope === 'CLASS_GROUP' ? 'Class Group' : 'School-wide';
+}
+
+function gradingAppliesToLabel(g: GradingScheme): string {
+  return g.scope === 'CLASS_GROUP' ? (g.classGroupLabel ?? 'Selected class') : 'All classes';
 }
 function gradingBandLabel(grade: string): string {
   const labels: Record<string, string> = {
@@ -2161,6 +2186,7 @@ function gradingBandLabel(grade: string): string {
   return labels[grade.toUpperCase()] ?? toDisplayLabel(grade);
 }
 function gradingPassingPercent(g: GradingScheme): number | null {
+  if (g.passingPercent != null && Number.isFinite(Number(g.passingPercent))) return Number(g.passingPercent);
   const bands = (g.bands ?? []).filter((b) => Number.isFinite(Number(b.minPercent)) && Number.isFinite(Number(b.maxPercent)));
   const explicitPass = bands.find((b) => b.grade.toUpperCase() === 'D');
   if (explicitPass) return Number(explicitPass.minPercent);
@@ -2198,16 +2224,24 @@ function gradingState(g: GradingScheme): { label: 'Active' | 'Draft' | 'Has Conf
 function GradingPanel({
   gradingSchemes,
   academicYears,
+  classGroups,
   onCreated,
 }: {
   gradingSchemes: GradingScheme[];
   academicYears: AcademicYear[];
+  classGroups: ClassGroup[];
   onCreated: () => Promise<void>;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedGradingId, setSelectedGradingId] = useState<number | null>(null);
   const [gradingName, setGradingName] = useState('Default Grading Scheme');
-  const [academicYearId, setAcademicYearId] = useState<string>('');
+  const [gradingScope, setGradingScope] = useState<'SCHOOL' | 'CLASS_GROUP'>('SCHOOL');
+  const [classGroupId, setClassGroupId] = useState('');
+  const [passingPercent, setPassingPercent] = useState('33');
+  const [defaultScheme, setDefaultScheme] = useState(true);
+  const [effectiveFromAcademicYearId, setEffectiveFromAcademicYearId] = useState('');
+  const [effectiveToAcademicYearId, setEffectiveToAcademicYearId] = useState('');
+  const [draftBands, setDraftBands] = useState(() => DEFAULT_GRADING_BANDS.map((b, i) => ({ ...b, gradePoint: null as number | null, sequence: i + 1 })));
   const [gradingSearch, setGradingSearch] = useState('');
   const [filterScope, setFilterScope] = useState('');
   const [filterAcademicYearId, setFilterAcademicYearId] = useState('');
@@ -2215,12 +2249,16 @@ function GradingPanel({
   const [activeMenuId, setActiveMenuId] = useState<number | null>(null);
   const createBasicGrading = useMutation({
     mutationFn: async () => {
-      const resolvedYearId = academicYearId.trim() ? Number(academicYearId) : null;
       const payload = {
         name: gradingName.trim() || 'Default Grading Scheme',
-        academicYearId: resolvedYearId,
+        scope: gradingScope,
+        classGroupId: gradingScope === 'CLASS_GROUP' && classGroupId ? Number(classGroupId) : null,
+        defaultScheme,
+        passingPercent: Number(passingPercent) || 33,
+        effectiveFromAcademicYearId: effectiveFromAcademicYearId ? Number(effectiveFromAcademicYearId) : null,
+        effectiveToAcademicYearId: effectiveToAcademicYearId ? Number(effectiveToAcademicYearId) : null,
         active: true,
-        bands: DEFAULT_GRADING_BANDS,
+        bands: draftBands.map((b, i) => ({ ...b, sequence: b.sequence ?? i + 1 })),
       };
       return (await api.post<GradingScheme>('/api/exams/grading-schemes', payload)).data;
     },
@@ -2228,7 +2266,13 @@ function GradingPanel({
       toast.success('Grading scheme created');
       setCreateOpen(false);
       setGradingName('Default Grading Scheme');
-      setAcademicYearId('');
+      setGradingScope('SCHOOL');
+      setClassGroupId('');
+      setPassingPercent('33');
+      setDefaultScheme(true);
+      setEffectiveFromAcademicYearId('');
+      setEffectiveToAcademicYearId('');
+      setDraftBands(DEFAULT_GRADING_BANDS.map((b, i) => ({ ...b, gradePoint: null as number | null, sequence: i + 1 })));
       await onCreated();
     },
     onError: (e) => toast.error('Could not create grading scheme', formatApiError(e)),
@@ -2244,9 +2288,14 @@ function GradingPanel({
   const filtered = gradingSchemes.filter((g) => {
     const q = gradingSearch.trim().toLowerCase();
     const state = gradingState(g).label;
-    if (q && !g.name.toLowerCase().includes(q)) return false;
-    if (filterScope && filterScope !== 'School-wide') return false;
-    if (filterAcademicYearId && String(g.academicYearId ?? '') !== filterAcademicYearId) return false;
+    if (q && !g.name.toLowerCase().includes(q) && !gradingAppliesToLabel(g).toLowerCase().includes(q)) return false;
+    if (filterScope && g.scope !== filterScope) return false;
+    if (filterAcademicYearId) {
+      const yearId = Number(filterAcademicYearId);
+      const from = g.effectiveFromAcademicYearId ?? g.academicYearId ?? null;
+      const to = g.effectiveToAcademicYearId ?? g.academicYearId ?? null;
+      if (!((from == null || yearId >= from) && (to == null || yearId <= to))) return false;
+    }
     if (filterState && state !== filterState) return false;
     return true;
   });
@@ -2286,7 +2335,7 @@ function GradingPanel({
         <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
           <div style={{ fontWeight: 900 }}>Create Grading Scheme</div>
           <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-            Starts with the standard A1–E bands. You can refine bands after update APIs are enabled.
+            Define reusable grade bands. Leave the effective period empty to apply across academic years.
           </div>
           <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 10 }}>
             <label className="stack" style={{ gap: 6 }}>
@@ -2294,16 +2343,60 @@ function GradingPanel({
               <input value={gradingName} onChange={(e) => setGradingName(e.target.value)} />
             </label>
             <label className="stack" style={{ gap: 6 }}>
-              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic year (optional)</span>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scope</span>
               <SmartSelect
-                value={academicYearId}
-                onChange={setAcademicYearId}
-                options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
-                placeholder="Not assigned"
-                allowClear
-                clearLabel="— Not assigned —"
+                value={gradingScope}
+                onChange={(v) => { setGradingScope((v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP'); if (v !== 'CLASS_GROUP') setClassGroupId(''); }}
+                options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]}
+                placeholder="Select scope"
               />
             </label>
+            {gradingScope === 'CLASS_GROUP' ? (
+              <label className="stack" style={{ gap: 6 }}>
+                <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Applies to class</span>
+                <SmartSelect
+                  value={classGroupId}
+                  onChange={setClassGroupId}
+                  options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Grade ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
+                  placeholder="Select class"
+                  searchable
+                />
+              </label>
+            ) : null}
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Passing percentage</span>
+              <input type="number" min={0} max={100} step="0.01" value={passingPercent} onChange={(e) => setPassingPercent(e.target.value)} />
+            </label>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Effective From (optional)</span>
+              <SmartSelect value={effectiveFromAcademicYearId} onChange={setEffectiveFromAcademicYearId} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="Always" allowClear />
+            </label>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Effective To (optional)</span>
+              <SmartSelect value={effectiveToAcademicYearId} onChange={setEffectiveToAcademicYearId} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="Always" allowClear />
+            </label>
+            <label className="row" style={{ gap: 8, alignItems: 'center', marginTop: 22 }}>
+              <input type="checkbox" checked={defaultScheme} onChange={(e) => setDefaultScheme(e.target.checked)} />
+              <span style={{ fontSize: 13 }}>Default scheme</span>
+            </label>
+          </div>
+          <div style={{ overflowX: 'auto', marginTop: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Grade bands</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>{['Grade', 'Min %', 'Max %', 'Grade Point'].map((h) => <th key={h} style={{ textAlign: 'left', padding: 6 }}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {draftBands.map((b, idx) => (
+                  <tr key={idx}>
+                    <td style={{ padding: 4 }}><input value={b.grade} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} style={{ width: 70 }} /></td>
+                    <td style={{ padding: 4 }}><input type="number" value={b.minPercent} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, minPercent: Number(e.target.value) } : r))} style={{ width: 80 }} /></td>
+                    <td style={{ padding: 4 }}><input type="number" value={b.maxPercent} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, maxPercent: Number(e.target.value) } : r))} style={{ width: 80 }} /></td>
+                    <td style={{ padding: 4 }}><input type="number" value={b.gradePoint ?? ''} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, gradePoint: e.target.value === '' ? null : Number(e.target.value) } : r))} style={{ width: 90 }} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
             <button type="button" className="btn secondary" onClick={() => setCreateOpen(false)}>Cancel</button>
@@ -2324,7 +2417,7 @@ function GradingPanel({
           <SmartSelect
             value={filterScope}
             onChange={setFilterScope}
-            options={[{ value: 'School-wide', label: 'School-wide' }]}
+            options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]}
             placeholder="All scopes"
             allowClear
           />
@@ -2347,14 +2440,14 @@ function GradingPanel({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
-                {['Scheme Name', 'Scope', 'Applies To', 'Bands', 'Passing %', 'State', 'Actions'].map((h) => (
+                {['Scheme Name', 'Scope', 'Applies To', 'Effective Period', 'Bands', 'Passing %', 'State', 'Actions'].map((h) => (
                   <th key={h} style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={7} className="muted" style={{ padding: 16 }}>No grading schemes match the current filters.</td></tr>
+                <tr><td colSpan={8} className="muted" style={{ padding: 16 }}>No grading schemes match the current filters.</td></tr>
               ) : filtered.map((g) => {
                 const state = gradingState(g);
                 const passing = gradingPassingPercent(g);
@@ -2362,8 +2455,9 @@ function GradingPanel({
                 return (
                   <tr key={g.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', cursor: 'pointer' }} onClick={() => setSelectedGradingId(g.id)}>
                     <td style={{ padding: '9px 8px', fontWeight: 800 }}>{g.name}</td>
-                    <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>School-wide</td>
-                    <td style={{ padding: '9px 8px' }}>All classes</td>
+                    <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>{gradingScopeLabel(g)}</td>
+                    <td style={{ padding: '9px 8px' }}>{gradingAppliesToLabel(g)}</td>
+                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>{gradingEffectivePeriodLabel(g, academicYears)}</td>
                     <td style={{ padding: '9px 8px', textAlign: 'center' }}>{g.bands?.length ?? 0}</td>
                     <td style={{ padding: '9px 8px', textAlign: 'center' }}>{passing != null ? `${passing}%` : '—'}</td>
                     <td style={{ padding: '9px 8px' }}><StatusChip level={state.level} label={state.label} /></td>
@@ -2412,7 +2506,7 @@ function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingS
   const issues = validateGradingScheme(scheme);
   const passing = gradingPassingPercent(scheme);
   const state = gradingState(scheme);
-  const academicYear = academicYearDisplay(academicYears, scheme.academicYearId);
+  const effectivePeriod = gradingEffectivePeriodLabel(scheme, academicYears);
   const validationRows = [
     { label: 'No overlapping ranges', ok: !issues.some((i) => i.includes('overlapping')) },
     { label: 'No missing percentage gaps', ok: !issues.some((i) => i.includes('missing percentage gap')) },
@@ -2429,13 +2523,12 @@ function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingS
             <button type="button" className="btn secondary" onClick={onBack} style={{ marginBottom: 10 }}>← Back to grading schemes</button>
             <h2 style={{ margin: 0, fontSize: 18 }}>{scheme.name}</h2>
             <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-              {scheme.academicYearId == null ? (
-                <span style={{ color: '#b45309', fontWeight: 700 }}>Academic Year not assigned</span>
-              ) : (
-                <>Academic Year: {academicYear}</>
-              )}
-              {' · '}Scope: School-wide · Applies To: All classes
+              Effective Period: {effectivePeriod === 'Always' ? 'Always' : effectivePeriod}
+              {' · '}Scope: {gradingScopeLabel(scheme)} · Applies To: {gradingAppliesToLabel(scheme)}
             </div>
+            {effectivePeriod === 'Always' ? (
+              <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>Applies across academic years.</div>
+            ) : null}
             <div className="muted" style={{ marginTop: 5, fontSize: 12 }}>
               Used in result calculation after weighted scores are computed. The final percentage is mapped to these grade bands.
             </div>
