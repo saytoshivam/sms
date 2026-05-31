@@ -1336,34 +1336,27 @@ function AssessmentSchemesPanel({
               placeholder="Search scheme, class, subject…"
               style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', gridColumn: 'span 2' }}
             />
-            <select
+            <SmartSelect
               value={filterScope}
-              onChange={(e) => setFilterScope(e.target.value)}
-              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', color: filterScope ? '#0f172a' : '#94a3b8' }}
-            >
-              <option value="">All scopes</option>
-              {['School-wide','Class Group','Class Section','Subject Override','Class + Subject Override','Unassigned'].map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-            <select
+              onChange={setFilterScope}
+              options={['School-wide','Class Group','Class Section','Subject Override','Class + Subject Override','Unassigned'].map((v) => ({ value: v, label: v }))}
+              placeholder="All scopes"
+              allowClear
+            />
+            <SmartSelect
               value={filterAcademicYearFilter}
-              onChange={(e) => setFilterAcademicYearFilter(e.target.value)}
-              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', color: filterAcademicYearFilter ? '#0f172a' : '#94a3b8' }}
-            >
-              <option value="">All years</option>
-              {academicYears.map((y) => <option key={y.id} value={String(y.id)}>{y.label}</option>)}
-            </select>
-            <select
+              onChange={setFilterAcademicYearFilter}
+              options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+              placeholder="All years"
+              allowClear
+            />
+            <SmartSelect
               value={filterState}
-              onChange={(e) => setFilterState(e.target.value)}
-              style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', color: filterState ? '#0f172a' : '#94a3b8' }}
-            >
-              <option value="">All states</option>
-              {(['Needs Setup','Ready to Publish','Published','Has Conflicts'] as SchemeState[]).map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
+              onChange={setFilterState}
+              options={(['Needs Setup','Ready to Publish','Published','Has Conflicts'] as SchemeState[]).map((v) => ({ value: v, label: v }))}
+              placeholder="All states"
+              allowClear
+            />
           </div>
 
           {/* Table */}
