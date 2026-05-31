@@ -2141,6 +2141,60 @@ function ComponentFormPanel({
   );
 }
 
+function academicYearDisplay(academicYears: AcademicYear[], academicYearId: number | null): string {
+  if (academicYearId == null) return 'Academic Year not assigned';
+  const label = academicYears.find((y) => y.id === academicYearId)?.label;
+  return label ? formatAcademicYear(label) : `Year ${academicYearId}`;
+}
+function gradingBandLabel(grade: string): string {
+  const labels: Record<string, string> = {
+    A1: 'Outstanding',
+    A2: 'Excellent',
+    B1: 'Very Good',
+    B2: 'Good',
+    C1: 'Average',
+    C2: 'Below Average',
+    D: 'Pass',
+    E: 'Fail',
+    F: 'Fail',
+  };
+  return labels[grade.toUpperCase()] ?? toDisplayLabel(grade);
+}
+function gradingPassingPercent(g: GradingScheme): number | null {
+  const bands = (g.bands ?? []).filter((b) => Number.isFinite(Number(b.minPercent)) && Number.isFinite(Number(b.maxPercent)));
+  const explicitPass = bands.find((b) => b.grade.toUpperCase() === 'D');
+  if (explicitPass) return Number(explicitPass.minPercent);
+  const passBands = bands.filter((b) => !['E', 'F', 'FAIL'].includes(b.grade.toUpperCase()));
+  if (passBands.length === 0) return null;
+  return Math.min(...passBands.map((b) => Number(b.minPercent)));
+}
+function validateGradingScheme(g: GradingScheme): string[] {
+  const issues: string[] = [];
+  const bands = (g.bands ?? []).slice().sort((a, b) => Number(a.minPercent) - Number(b.minPercent));
+  if (bands.length === 0) issues.push('At least one grade band is required.');
+  const labels = new Set<string>();
+  for (const band of bands) {
+    if (labels.has(band.grade.toUpperCase())) issues.push(`Duplicate grade label: ${band.grade}`);
+    labels.add(band.grade.toUpperCase());
+    if (Number(band.minPercent) > Number(band.maxPercent)) issues.push(`${band.grade}: min percentage must be less than or equal to max percentage.`);
+  }
+  for (let i = 1; i < bands.length; i += 1) {
+    const prev = bands[i - 1];
+    const cur = bands[i];
+    if (Number(cur.minPercent) <= Number(prev.maxPercent)) issues.push(`${prev.grade}/${cur.grade}: overlapping percentage ranges.`);
+    if (Number(cur.minPercent) > Number(prev.maxPercent) + 1) issues.push(`${prev.grade}/${cur.grade}: missing percentage gap.`);
+  }
+  if (bands.length > 0) {
+    if (Number(bands[0].minPercent) > 0) issues.push('Ranges must cover 0%.');
+    if (Number(bands[bands.length - 1].maxPercent) < 100) issues.push('Ranges must cover 100%.');
+  }
+  if (gradingPassingPercent(g) == null) issues.push('Passing threshold is not configured.');
+  return Array.from(new Set(issues));
+}
+function gradingState(g: GradingScheme): { label: 'Active' | 'Draft' | 'Has Conflicts'; level: StatusLevel } {
+  if (validateGradingScheme(g).length > 0) return { label: 'Has Conflicts', level: 'error' };
+  return g.active ? { label: 'Active', level: 'ok' } : { label: 'Draft', level: 'warn' };
+}
 function GradingPanel({
   gradingSchemes,
   academicYears,
@@ -2150,14 +2204,20 @@ function GradingPanel({
   academicYears: AcademicYear[];
   onCreated: () => Promise<void>;
 }) {
-  const [gradingName, setGradingName] = useState('Default grading scheme');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [selectedGradingId, setSelectedGradingId] = useState<number | null>(null);
+  const [gradingName, setGradingName] = useState('Default Grading Scheme');
   const [academicYearId, setAcademicYearId] = useState<string>('');
-
+  const [gradingSearch, setGradingSearch] = useState('');
+  const [filterScope, setFilterScope] = useState('');
+  const [filterAcademicYearId, setFilterAcademicYearId] = useState('');
+  const [filterState, setFilterState] = useState('');
+  const [activeMenuId, setActiveMenuId] = useState<number | null>(null);
   const createBasicGrading = useMutation({
     mutationFn: async () => {
       const resolvedYearId = academicYearId.trim() ? Number(academicYearId) : null;
       const payload = {
-        name: gradingName.trim() || 'Default grading scheme',
+        name: gradingName.trim() || 'Default Grading Scheme',
         academicYearId: resolvedYearId,
         active: true,
         bands: DEFAULT_GRADING_BANDS,
@@ -2166,94 +2226,280 @@ function GradingPanel({
     },
     onSuccess: async () => {
       toast.success('Grading scheme created');
+      setCreateOpen(false);
+      setGradingName('Default Grading Scheme');
+      setAcademicYearId('');
       await onCreated();
     },
     onError: (e) => toast.error('Could not create grading scheme', formatApiError(e)),
   });
-
+  const selectedGrading = gradingSchemes.find((g) => g.id === selectedGradingId) ?? null;
+  if (selectedGrading) {
+    return <GradingDetailCard scheme={selectedGrading} academicYears={academicYears} onBack={() => setSelectedGradingId(null)} />;
+  }
+  const total = gradingSchemes.length;
+  const active = gradingSchemes.filter((g) => g.active).length;
+  const drafts = gradingSchemes.filter((g) => !g.active).length;
+  const conflicts = gradingSchemes.filter((g) => validateGradingScheme(g).length > 0).length;
+  const filtered = gradingSchemes.filter((g) => {
+    const q = gradingSearch.trim().toLowerCase();
+    const state = gradingState(g).label;
+    if (q && !g.name.toLowerCase().includes(q)) return false;
+    if (filterScope && filterScope !== 'School-wide') return false;
+    if (filterAcademicYearId && String(g.academicYearId ?? '') !== filterAcademicYearId) return false;
+    if (filterState && state !== filterState) return false;
+    return true;
+  });
+  const summaryCards = [
+    { label: 'Total grading schemes', value: total, bg: '#eff6ff', color: '#1d4ed8' },
+    { label: 'Active schemes', value: active, bg: '#d1fae5', color: '#065f46' },
+    { label: 'Draft schemes', value: drafts, bg: '#fef3c7', color: '#92400e' },
+    { label: 'Conflicts', value: conflicts, bg: conflicts > 0 ? '#fee2e2' : '#f1f5f9', color: conflicts > 0 ? '#991b1b' : '#475569' },
+  ];
   return (
     <div className="stack" style={{ gap: 12 }}>
-      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div style={{ fontWeight: 900 }}>Grading schemes</div>
-        <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-          Existing grading schemes are listed below. Editing support can be added once update APIs are available.
+      <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontWeight: 950, fontSize: 18 }}>Grading Schemes</div>
+            <div className="muted" style={{ marginTop: 5, fontSize: 13 }}>
+              Create and manage grade bands used for result calculation.
+            </div>
+            <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+              Grading schemes define grade bands used after weighted score calculation.
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={() => setCreateOpen((v) => !v)} disabled={createBasicGrading.isPending}>
+            {createOpen ? 'Close form' : 'Create Grading Scheme'}
+          </button>
         </div>
       </div>
-
-      {gradingSchemes.map((g) => (
-        <div key={g.id} className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <div>
-              <div style={{ fontWeight: 900 }}>{g.name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>Academic year id: {g.academicYearId ?? '-'}</div>
-            </div>
-            <StatusChip level={g.active ? 'ok' : 'idle'} label={g.active ? 'Active' : 'Inactive'} />
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+        {summaryCards.map((card) => (
+          <div key={card.label} className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.08)', background: card.bg }}>
+            <div style={{ fontSize: 11, fontWeight: 900, color: card.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{card.label}</div>
+            <div style={{ fontSize: 26, fontWeight: 950, color: card.color, marginTop: 4 }}>{card.value}</div>
           </div>
-
-          <div style={{ overflowX: 'auto', marginTop: 10 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
-                  <th style={{ padding: '8px 6px' }}>Grade</th>
-                  <th style={{ padding: '8px 6px' }}>Range</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(g.bands ?? [])
-                  .slice()
-                  .sort((a, b) => a.sequence - b.sequence)
-                  .map((b) => (
-                    <tr key={b.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
-                      <td style={{ padding: '8px 6px', fontWeight: 700 }}>{b.grade}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        {b.minPercent}-{b.maxPercent}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+        ))}
+      </div>
+      {createOpen ? (
+        <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+          <div style={{ fontWeight: 900 }}>Create Grading Scheme</div>
+          <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+            Starts with the standard A1–E bands. You can refine bands after update APIs are enabled.
+          </div>
+          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 10 }}>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme name</span>
+              <input value={gradingName} onChange={(e) => setGradingName(e.target.value)} />
+            </label>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic year (optional)</span>
+              <SmartSelect
+                value={academicYearId}
+                onChange={setAcademicYearId}
+                options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+                placeholder="Not assigned"
+                allowClear
+                clearLabel="— Not assigned —"
+              />
+            </label>
+          </div>
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+            <button type="button" className="btn secondary" onClick={() => setCreateOpen(false)}>Cancel</button>
+            <button type="button" className="btn" onClick={() => createBasicGrading.mutate()} disabled={createBasicGrading.isPending}>
+              {createBasicGrading.isPending ? 'Creating…' : 'Create Grading Scheme'}
+            </button>
           </div>
         </div>
-      ))}
-
+      ) : null}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div style={{ fontWeight: 900 }}>Create basic grading scheme</div>
-        <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-          A1 (91-100), A2 (81-90), B1 (71-80), B2 (61-70), C1 (51-60), C2 (41-50), D (33-40), E (0-32)
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 12 }}>
+          <input
+            value={gradingSearch}
+            onChange={(e) => setGradingSearch(e.target.value)}
+            placeholder="Search grading scheme..."
+            style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', gridColumn: 'span 2' }}
+          />
+          <SmartSelect
+            value={filterScope}
+            onChange={setFilterScope}
+            options={[{ value: 'School-wide', label: 'School-wide' }]}
+            placeholder="All scopes"
+            allowClear
+          />
+          <SmartSelect
+            value={filterAcademicYearId}
+            onChange={setFilterAcademicYearId}
+            options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+            placeholder="All academic years"
+            allowClear
+          />
+          <SmartSelect
+            value={filterState}
+            onChange={setFilterState}
+            options={['Active', 'Draft', 'Has Conflicts'].map((s) => ({ value: s, label: s }))}
+            placeholder="All states"
+            allowClear
+          />
         </div>
-        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 10 }}>
-          <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme name</span>
-            <input value={gradingName} onChange={(e) => setGradingName(e.target.value)} />
-          </label>
-          <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic year (optional)</span>
-            <SmartSelect
-              value={academicYearId}
-              onChange={(v) => setAcademicYearId(v)}
-              options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
-              placeholder="Not set"
-              allowClear
-              clearLabel="— Not set —"
-            />
-          </label>
-        </div>
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10 }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => createBasicGrading.mutate()}
-            disabled={createBasicGrading.isPending}
-          >
-            {createBasicGrading.isPending ? 'Creating...' : 'Create grading scheme'}
-          </button>
+        <div style={{ overflowX: 'auto' }} onClick={() => activeMenuId !== null && setActiveMenuId(null)}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
+                {['Scheme Name', 'Scope', 'Applies To', 'Bands', 'Passing %', 'State', 'Actions'].map((h) => (
+                  <th key={h} style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={7} className="muted" style={{ padding: 16 }}>No grading schemes match the current filters.</td></tr>
+              ) : filtered.map((g) => {
+                const state = gradingState(g);
+                const passing = gradingPassingPercent(g);
+                const isMenuOpen = activeMenuId === g.id;
+                return (
+                  <tr key={g.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', cursor: 'pointer' }} onClick={() => setSelectedGradingId(g.id)}>
+                    <td style={{ padding: '9px 8px', fontWeight: 800 }}>{g.name}</td>
+                    <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>School-wide</td>
+                    <td style={{ padding: '9px 8px' }}>All classes</td>
+                    <td style={{ padding: '9px 8px', textAlign: 'center' }}>{g.bands?.length ?? 0}</td>
+                    <td style={{ padding: '9px 8px', textAlign: 'center' }}>{passing != null ? `${passing}%` : '—'}</td>
+                    <td style={{ padding: '9px 8px' }}><StatusChip level={state.level} label={state.label} /></td>
+                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setSelectedGradingId(g.id)}>View</button>
+                        <div style={{ position: 'relative' }}>
+                          <button
+                            type="button"
+                            title="More actions"
+                            style={{ background: 'none', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 14, lineHeight: 1, color: '#64748b' }}
+                            onClick={(e) => { e.stopPropagation(); setActiveMenuId(isMenuOpen ? null : g.id); }}
+                          >
+                            ⋯
+                          </button>
+                          {isMenuOpen ? (
+                            <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 50, background: '#fff', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 6, boxShadow: '0 4px 12px rgba(15,23,42,0.12)', minWidth: 160, padding: '4px 0' }}>
+                              {['Edit', 'Clone', 'Archive', 'Set as Default'].map((action) => (
+                                <button
+                                  key={action}
+                                  type="button"
+                                  disabled
+                                  title={`${action} API pending`}
+                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', color: '#94a3b8', cursor: 'not-allowed' }}
+                                >
+                                  {action}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
   );
 }
-
-// ─────────────────────────── Instance status helpers ────────────────────────
+function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingScheme; academicYears: AcademicYear[]; onBack: () => void }) {
+  const sortedBands = (scheme.bands ?? []).slice().sort((a, b) => b.maxPercent - a.maxPercent);
+  const issues = validateGradingScheme(scheme);
+  const passing = gradingPassingPercent(scheme);
+  const state = gradingState(scheme);
+  const academicYear = academicYearDisplay(academicYears, scheme.academicYearId);
+  const validationRows = [
+    { label: 'No overlapping ranges', ok: !issues.some((i) => i.includes('overlapping')) },
+    { label: 'No missing percentage gaps', ok: !issues.some((i) => i.includes('missing percentage gap')) },
+    { label: 'Covers 0–100', ok: !issues.some((i) => i.includes('cover')) },
+    { label: 'Passing threshold configured', ok: passing != null },
+    { label: 'Grade labels are unique', ok: !issues.some((i) => i.includes('Duplicate grade label')) },
+    { label: 'Min percentage is less than or equal to max percentage', ok: !issues.some((i) => i.includes('min percentage')) },
+  ];
+  return (
+    <div className="stack" style={{ gap: 12 }}>
+      <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <button type="button" className="btn secondary" onClick={onBack} style={{ marginBottom: 10 }}>← Back to grading schemes</button>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{scheme.name}</h2>
+            <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
+              {scheme.academicYearId == null ? (
+                <span style={{ color: '#b45309', fontWeight: 700 }}>Academic Year not assigned</span>
+              ) : (
+                <>Academic Year: {academicYear}</>
+              )}
+              {' · '}Scope: School-wide · Applies To: All classes
+            </div>
+            <div className="muted" style={{ marginTop: 5, fontSize: 12 }}>
+              Used in result calculation after weighted scores are computed. The final percentage is mapped to these grade bands.
+            </div>
+            <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <StatusChip level={state.level} label={state.label} />
+              <StatusChip level={passing != null ? 'ok' : 'warn'} label={passing != null ? `Passing rule: ${passing}% and above` : 'Passing rule missing'} />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Grade Bands</div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
+                {['Grade', 'Min %', 'Max %', 'Label', 'Result'].map((h) => (
+                  <th key={h} style={{ padding: '8px 6px' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sortedBands.map((b) => {
+                const isPass = passing != null && b.maxPercent >= passing;
+                return (
+                  <tr key={b.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                    <td style={{ padding: '8px 6px', fontWeight: 800 }}>{b.grade}</td>
+                    <td style={{ padding: '8px 6px' }}>{b.minPercent}</td>
+                    <td style={{ padding: '8px 6px' }}>{b.maxPercent}</td>
+                    <td style={{ padding: '8px 6px' }}>{gradingBandLabel(b.grade)}</td>
+                    <td style={{ padding: '8px 6px' }}>
+                      <StatusChip level={isPass ? 'ok' : 'error'} label={isPass ? 'Pass' : 'Fail'} />
+                    </td>
+                  </tr>
+                );
+              })}
+              {sortedBands.length === 0 ? (
+                <tr><td colSpan={5} className="muted" style={{ padding: 12 }}>No grade bands configured.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="card" style={{ padding: 12, border: `1px solid ${issues.length ? 'rgba(220,38,38,0.2)' : 'rgba(22,163,74,0.2)'}` }}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Validation</div>
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+          {validationRows.map((row) => (
+            <div key={row.label} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <span style={{ color: row.ok ? '#16a34a' : '#dc2626', fontWeight: 900 }}>{row.ok ? '✓' : '!'}</span>
+              <span>{row.label}</span>
+            </div>
+          ))}
+        </div>
+        {issues.length > 0 ? (
+          <ul style={{ margin: '10px 0 0', paddingLeft: 18, color: '#991b1b', fontSize: 12 }}>
+            {issues.map((issue) => <li key={issue}>{issue}</li>)}
+          </ul>
+        ) : (
+          <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>All grade band validations passed.</div>
+        )}
+      </div>
+    </div>
+  );
+}// ─────────────────────────── Instance status helpers ────────────────────────
 
 function instanceStatusLevel(status: AssessmentInstanceStatus): StatusLevel {
   switch (status) {
