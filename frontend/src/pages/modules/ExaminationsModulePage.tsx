@@ -433,10 +433,11 @@ function computeScopeLabel(s: AssessmentScheme): string {
   ).values()];
 
   const gradeLabel = gradeNumbers.length > 0 ? gradeSelectionLabel(gradeNumbers) : null;
+  const subjectLabel = uniqueSubjectLabels.join(', ');
   if (uniqueSubjectLabels.length === 1 && gradeLabel) return `${uniqueSubjectLabels[0]} · ${gradeLabel}`;
-  if (uniqueSubjectLabels.length > 1 && gradeLabel) return `${uniqueSubjectLabels.length} subjects · ${gradeLabel}`;
+  if (uniqueSubjectLabels.length > 1 && gradeLabel) return `${subjectLabel} · ${gradeLabel}`;
   if (uniqueSubjectLabels.length === 1) return uniqueSubjectLabels[0];
-  if (uniqueSubjectLabels.length > 1) return `${uniqueSubjectLabels.length} subject overrides`;
+  if (uniqueSubjectLabels.length > 1) return subjectLabel;
   if (active.length === 1 && active[0].scopeType === 'SECTION') return active[0].classGroupLabel ?? gradeLabel ?? 'Section';
   return gradeLabel ?? s.assignmentLabel ?? 'Not assigned';
 }
