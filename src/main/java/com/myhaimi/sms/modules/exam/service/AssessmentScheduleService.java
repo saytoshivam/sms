@@ -12,11 +12,13 @@ import com.myhaimi.sms.modules.exam.dto.AssessmentInstanceUpdateDTO;
 import com.myhaimi.sms.modules.exam.entity.AssessmentComponent;
 import com.myhaimi.sms.modules.exam.entity.AssessmentInstance;
 import com.myhaimi.sms.modules.exam.entity.AssessmentScheme;
+import com.myhaimi.sms.modules.exam.entity.AssessmentSchemeAssignment;
 import com.myhaimi.sms.modules.exam.entity.enums.AssessmentInstanceStatus;
 import com.myhaimi.sms.modules.exam.entity.enums.AssessmentSchemeStatus;
 import com.myhaimi.sms.modules.exam.entity.enums.CalculationRule;
 import com.myhaimi.sms.modules.exam.repository.AssessmentComponentRepository;
 import com.myhaimi.sms.modules.exam.repository.AssessmentInstanceRepository;
+import com.myhaimi.sms.modules.exam.repository.AssessmentSchemeAssignmentRepository;
 import com.myhaimi.sms.modules.exam.repository.AssessmentSchemeRepository;
 import com.myhaimi.sms.repository.ClassGroupRepo;
 import com.myhaimi.sms.repository.RoomRepo;
@@ -45,6 +47,7 @@ public class AssessmentScheduleService {
     private final AssessmentInstanceRepository instanceRepo;
     private final AssessmentSchemeRepository schemeRepo;
     private final AssessmentComponentRepository componentRepo;
+    private final AssessmentSchemeAssignmentRepository assignmentRepo;
     private final SchoolRepo schoolRepo;
     private final SubjectRepo subjectRepo;
     private final ClassGroupRepo classGroupRepo;
@@ -138,10 +141,41 @@ public class AssessmentScheduleService {
         Integer schoolId = requireSchoolId();
         AssessmentScheme scheme = requirePublishedScheme(schemeId, schoolId);
 
-        List<Integer> classGroupIds = dto.classGroupIds().stream().filter(Objects::nonNull).distinct().toList();
-        List<Integer> subjectIds = dto.subjectIds().stream().filter(Objects::nonNull).distinct().toList();
+        List<Integer> classGroupIds = dto.classGroupIds() == null ? List.of()
+                : dto.classGroupIds().stream().filter(Objects::nonNull).distinct().toList();
+        List<Integer> subjectIds = dto.subjectIds() == null ? List.of()
+                : dto.subjectIds().stream().filter(Objects::nonNull).distinct().toList();
+
         if (classGroupIds.isEmpty() || subjectIds.isEmpty()) {
-            throw new IllegalArgumentException("classGroupIds and subjectIds are required");
+            List<AssessmentSchemeAssignment> assignments = assignmentRepo.findActiveForGeneration(
+                    schoolId, scheme.getAcademicYear().getId(), scheme.getId());
+            if (classGroupIds.isEmpty()) {
+                classGroupIds = assignments.stream()
+                        .map(AssessmentSchemeAssignment::getClassGroup)
+                        .filter(Objects::nonNull)
+                        .map(ClassGroup::getId)
+                        .distinct()
+                        .toList();
+                if (classGroupIds.isEmpty()) {
+                    classGroupIds = classGroupRepo.findAllBySchool_IdAndIsDeletedFalseOrderByGradeLevelAscCodeAsc(schoolId)
+                            .stream().map(ClassGroup::getId).toList();
+                }
+            }
+            if (subjectIds.isEmpty()) {
+                subjectIds = assignments.stream()
+                        .map(AssessmentSchemeAssignment::getSubject)
+                        .filter(Objects::nonNull)
+                        .map(Subject::getId)
+                        .distinct()
+                        .toList();
+                if (subjectIds.isEmpty()) {
+                    subjectIds = subjectRepo.findBySchool_IdAndIsDeletedFalseOrderByCodeAsc(schoolId)
+                            .stream().map(Subject::getId).toList();
+                }
+            }
+        }
+        if (classGroupIds.isEmpty() || subjectIds.isEmpty()) {
+            throw new IllegalArgumentException("No class/subject targets found. Assign the scheme or provide classGroupIds and subjectIds.");
         }
 
         Map<Integer, ClassGroup> classGroupById = new HashMap<>();

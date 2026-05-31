@@ -3,7 +3,6 @@ package com.myhaimi.sms.modules.exam.entity;
 import com.myhaimi.sms.entity.AcademicYear;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.modules.exam.entity.enums.AssessmentSchemeStatus;
-import com.myhaimi.sms.modules.exam.entity.enums.ExamApplicableScopeType;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -15,8 +14,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Configurable assessment scheme (e.g. "CBSE Term 2025-26").
- * A DRAFT scheme is editable; once PUBLISHED it is read-only and can only be cloned.
+ * Reusable assessment pattern (components and weightages). Applicability is held
+ * in {@link AssessmentSchemeAssignment}; do not duplicate schemes per target.
  */
 @Getter
 @Setter
@@ -24,8 +23,7 @@ import java.util.List;
 @Table(name = "assessment_schemes", indexes = {
         @Index(name = "idx_as_school", columnList = "school_id"),
         @Index(name = "idx_as_academic_year", columnList = "academic_year_id"),
-        @Index(name = "idx_as_status", columnList = "status"),
-        @Index(name = "idx_as_scope", columnList = "applicable_scope_type, applicable_scope_id")
+        @Index(name = "idx_as_status", columnList = "status")
 })
 public class AssessmentScheme {
 
@@ -46,14 +44,6 @@ public class AssessmentScheme {
 
     @Column(columnDefinition = "TEXT")
     private String description;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "applicable_scope_type", nullable = false, length = 32)
-    private ExamApplicableScopeType applicableScopeType;
-
-    /** ID of the entity identified by {@code applicableScopeType} (class, section, subject). Null for SCHOOL scope. */
-    @Column(name = "applicable_scope_id")
-    private Integer applicableScopeId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
@@ -79,4 +69,7 @@ public class AssessmentScheme {
     @OneToMany(mappedBy = "scheme", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sequence ASC")
     private List<AssessmentComponent> components = new ArrayList<>();
+
+    @OneToMany(mappedBy = "scheme", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<AssessmentSchemeAssignment> assignments = new ArrayList<>();
 }

@@ -23,6 +23,8 @@ import java.util.List;
  * POST   /api/exams/schemes/{schemeId}/publish
  * POST   /api/exams/schemes/{schemeId}/archive
  * POST   /api/exams/schemes/{schemeId}/clone
+ * POST   /api/exams/schemes/{schemeId}/assignments
+ * DELETE /api/exams/schemes/{schemeId}/assignments/{assignmentId}
  *
  * POST   /api/exams/schemes/{schemeId}/components
  * PUT    /api/exams/schemes/{schemeId}/components/{componentId}
@@ -78,6 +80,21 @@ public class AssessmentSchemeController {
     @PostMapping("/schemes/{schemeId}/clone")
     public ResponseEntity<AssessmentSchemeDTO> cloneScheme(@PathVariable Integer schemeId) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.cloneScheme(schemeId));
+    }
+
+    @PostMapping("/schemes/{schemeId}/assignments")
+    public ResponseEntity<AssessmentSchemeDTO> addAssignment(
+            @PathVariable Integer schemeId,
+            @Valid @RequestBody AssessmentSchemeAssignmentCreateDTO dto) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.addAssignment(schemeId, dto));
+    }
+
+    @DeleteMapping("/schemes/{schemeId}/assignments/{assignmentId}")
+    public ResponseEntity<Void> deleteAssignment(
+            @PathVariable Integer schemeId,
+            @PathVariable Integer assignmentId) {
+        service.deleteAssignment(schemeId, assignmentId);
+        return ResponseEntity.noContent().build();
     }
 
     // ─────────────────────────────── Components ──────────────────────────────
