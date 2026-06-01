@@ -137,6 +137,58 @@ public class AssessmentScheduleService {
     }
 
     @Transactional
+    public AssessmentInstanceDTO publishAssessment(Integer assessmentId) {
+        AssessmentInstance instance = requireInstance(assessmentId, requireSchoolId());
+        if (instance.getStatus() != AssessmentInstanceStatus.DRAFT) {
+            throw new IllegalStateException("Only DRAFT assessments can be published/scheduled");
+        }
+        if (instance.getAssessmentDate() == null) {
+            throw new IllegalStateException("Assessment date is required before publishing");
+        }
+        if (instance.getStartTime() == null || instance.getEndTime() == null) {
+            throw new IllegalStateException("Start time and end time are required before publishing");
+        }
+        if (instance.getMaxMarks() == null || instance.getMaxMarks().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalStateException("Max marks must be greater than 0 before publishing");
+        }
+        instance.setStatus(AssessmentInstanceStatus.SCHEDULED);
+        return toDTO(instanceRepo.save(instance));
+    }
+
+    @Transactional
+    public AssessmentInstanceDTO cloneAssessment(Integer assessmentId) {
+        Integer schoolId = requireSchoolId();
+        AssessmentInstance source = requireInstance(assessmentId, schoolId);
+        AssessmentInstance clone = new AssessmentInstance();
+        clone.setSchool(source.getSchool());
+        clone.setAcademicYear(source.getAcademicYear());
+        clone.setScheme(source.getScheme());
+        clone.setComponent(source.getComponent());
+        clone.setName(source.getName() + " (Copy)");
+        clone.setSubject(source.getSubject());
+        clone.setClassGroup(source.getClassGroup());
+        clone.setAssessmentDate(null);
+        clone.setStartTime(source.getStartTime());
+        clone.setEndTime(source.getEndTime());
+        clone.setRoom(source.getRoom());
+        clone.setMaxMarks(source.getMaxMarks());
+        clone.setSequence(source.getSequence());
+        clone.setStatus(AssessmentInstanceStatus.DRAFT);
+        return toDTO(instanceRepo.save(clone));
+    }
+
+    @Transactional
+    public void deleteAssessment(Integer assessmentId) {
+        Integer schoolId = requireSchoolId();
+        AssessmentInstance instance = requireInstance(assessmentId, schoolId);
+        if (instance.getStatus() != AssessmentInstanceStatus.DRAFT
+                && instance.getStatus() != AssessmentInstanceStatus.CANCELLED) {
+            throw new IllegalStateException("Only DRAFT or CANCELLED assessments can be deleted");
+        }
+        instanceRepo.delete(instance);
+    }
+
+    @Transactional
     public List<AssessmentInstanceDTO> generateAssessmentsForClassScheme(Integer schemeId, AssessmentGenerateRequestDTO dto) {
         Integer schoolId = requireSchoolId();
         AssessmentScheme scheme = requirePublishedScheme(schemeId, schoolId);

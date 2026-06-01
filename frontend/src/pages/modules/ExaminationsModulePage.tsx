@@ -1,4 +1,5 @@
 ﻿import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ModulePage, StatusChip, type StatusLevel } from '../../components/module/ModulePage';
@@ -1037,12 +1038,12 @@ function AssessmentSchemesPanel({
         name: c.name.trim(),
         componentType: c.componentType,
         weightagePercent: Number(c.weightagePercent),
-        maxMarks: c.maxMarks ? Number(c.maxMarks) : null,
+        maxMarks: c.maxMarks == null ? '' : String(c.maxMarks),
         calculationRule: c.calculationRule,
-        totalAssessments: c.totalAssessments ? Number(c.totalAssessments) : null,
-        bestOfCount: c.bestOfCount ? Number(c.bestOfCount) : null,
+        totalAssessments: c.totalAssessments == null ? '' : String(c.totalAssessments),
+        bestOfCount: c.bestOfCount == null ? '' : String(c.bestOfCount),
         mandatory: c.mandatory,
-        sequence: Number(c.sequence),
+        sequence: String(c.sequence),
       }));
 
       return (await api.post<AssessmentScheme>('/api/exams/schemes', {
@@ -1828,93 +1829,31 @@ function SchemeDetailCard({
       </div>
 
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontWeight: 900 }}>Components</div>
-          {!isReadOnly ? (
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              {(scheme.components?.length ?? 0) > 0 ? <span className="muted" style={{ fontSize: 12 }}>More actions:</span> : null}
-              <SelectKeeper
-                value={presetIndex}
-                onChange={(v) => setPresetIndex(v)}
-                emptyValueLabel={(scheme.components?.length ?? 0) === 0 ? 'Choose preset…' : 'Apply preset / Replace components…'}
-                options={PRESETS.map((p, i) => ({ value: String(i), label: p.label }))}
-              />
-              <button
-                type="button"
-                className={(scheme.components?.length ?? 0) === 0 ? 'btn' : 'btn secondary'}
-                disabled={presetIndex === '' || applyPreset.isPending}
-                onClick={() => {
-                  const idx = Number(presetIndex);
-                  if (!Number.isFinite(idx) || !PRESETS[idx]) return;
-                  if ((scheme.components?.length ?? 0) > 0 && !window.confirm('This will replace existing components. Continue?')) return;
-                  applyPreset.mutate(PRESETS[idx]);
-                }}
-              >
-                {applyPreset.isPending ? 'Applying...' : (scheme.components?.length ?? 0) === 0 ? 'Apply preset' : 'Replace components'}
-              </button>
-            </div>
-          ) : null}
-        </div>
-
-        {loading ? <div className="muted" style={{ marginTop: 10 }}>Loading scheme details...</div> : null}
-
-        <div style={{ overflowX: 'auto', marginTop: 10 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(15,23,42,0.12)', textAlign: 'left' }}>
-                <th style={{ padding: '8px 6px' }}>Component name</th>
-                <th style={{ padding: '8px 6px' }}>Type</th>
-                <th style={{ padding: '8px 6px' }}>Weightage %</th>
-                <th style={{ padding: '8px 6px' }}>Max Marks</th>
-                <th style={{ padding: '8px 6px' }}>Calculation Rule</th>
-                <th style={{ padding: '8px 6px' }}>Assessments Rule</th>
-                <th style={{ padding: '8px 6px' }}>Seq</th>
-                <th style={{ padding: '8px 6px' }}>Validity</th>
-                {!isReadOnly && <th style={{ padding: '8px 6px' }}>Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {(scheme.components ?? [])
-                .slice()
-                .sort((a, b) => a.sequence - b.sequence)
-                .map((c) => {
-                  return (
-                    <tr key={c.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
-                      <td style={{ padding: '8px 6px', fontWeight: 700 }}>{c.name}</td>
-                      <td style={{ padding: '8px 6px' }}>{toDisplayLabel(c.componentType)}</td>
-                      <td style={{ padding: '8px 6px' }}>{c.weightagePercent}%</td>
-                      <td style={{ padding: '8px 6px' }}>{componentMaxMarksLabel(c)}</td>
-                      <td style={{ padding: '8px 6px' }}>{calculationRuleLabel(c)}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        {c.calculationRule === 'BEST_N_OF_M' && c.bestOfCount && c.totalAssessments
-                          ? `Best ${c.bestOfCount} of ${c.totalAssessments}`
-                          : c.calculationRule === 'SINGLE_ASSESSMENT'
-                            ? 'Single assessment'
-                            : '—'}
-                      </td>
-                      <td style={{ padding: '8px 6px' }}>{c.sequence}</td>
-                      <td style={{ padding: '8px 6px' }}>{componentStatusLabel(c)}</td>
-                      {!isReadOnly && (
-                        <td style={{ padding: '8px 6px' }}>
-                          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                            <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '3px 8px' }} onClick={() => onEditRow(c)}>Edit</button>
-                            <button type="button" className="btn secondary" style={{ fontSize: 12, padding: '3px 8px' }} disabled={removeComponent.isPending} onClick={() => removeComponent.mutate(c.id)}>Remove</button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              {(scheme.components?.length ?? 0) === 0 ? (
-                <tr>
-                  <td colSpan={isReadOnly ? 8 : 9} className="muted" style={{ padding: 12 }}>
-                    No components added yet.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Components</div>
+        {!isReadOnly ? (
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {(scheme.components?.length ?? 0) > 0 ? <span className="muted" style={{ fontSize: 12 }}>More actions:</span> : null}
+            <SelectKeeper
+              value={presetIndex}
+              onChange={(v) => setPresetIndex(v)}
+              emptyValueLabel={(scheme.components?.length ?? 0) === 0 ? 'Choose preset…' : 'Apply preset / Replace components…'}
+              options={PRESETS.map((p, i) => ({ value: String(i), label: p.label }))}
+            />
+            <button
+              type="button"
+              className={(scheme.components?.length ?? 0) === 0 ? 'btn' : 'btn secondary'}
+              disabled={presetIndex === '' || applyPreset.isPending}
+              onClick={() => {
+                const idx = Number(presetIndex);
+                if (!Number.isFinite(idx) || !PRESETS[idx]) return;
+                if ((scheme.components?.length ?? 0) > 0 && !window.confirm('This will replace existing components. Continue?')) return;
+                applyPreset.mutate(PRESETS[idx]);
+              }}
+            >
+              {applyPreset.isPending ? 'Applying...' : (scheme.components?.length ?? 0) === 0 ? 'Apply preset' : 'Replace components'}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {!isReadOnly ? (
@@ -2347,7 +2286,7 @@ function GradingPanel({
               <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scope</span>
               <SmartSelect
                 value={gradingScope}
-                onChange={(v) => { setGradingScope((v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP'); if (v !== 'CLASS_GROUP') setClassGroupId(''); }}
+                onChange={(v) => { setGradingScope((v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP'; if (v !== 'CLASS_GROUP') setClassGroupId(''); }}
                 options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]}
                 placeholder="Select scope"
               />
@@ -2390,10 +2329,18 @@ function GradingPanel({
               <tbody>
                 {draftBands.map((b, idx) => (
                   <tr key={idx}>
-                    <td style={{ padding: 4 }}><input value={b.grade} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} style={{ width: 70 }} /></td>
-                    <td style={{ padding: 4 }}><input type="number" value={b.minPercent} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, minPercent: Number(e.target.value) } : r))} style={{ width: 80 }} /></td>
-                    <td style={{ padding: 4 }}><input type="number" value={b.maxPercent} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, maxPercent: Number(e.target.value) } : r))} style={{ width: 80 }} /></td>
-                    <td style={{ padding: 4 }}><input type="number" value={b.gradePoint ?? ''} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, gradePoint: e.target.value === '' ? null : Number(e.target.value) } : r))} style={{ width: 90 }} /></td>
+                    <td style={{ padding: '4px 6px' }}>
+                      <input value={b.grade} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} style={{ width: 70 }} />
+                    </td>
+                    <td style={{ padding: '4px 6px' }}>
+                      <input type="number" value={b.minPercent} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, minPercent: Number(e.target.value) } : r))} style={{ width: 80 }} />
+                    </td>
+                    <td style={{ padding: '4px 6px' }}>
+                      <input type="number" value={b.maxPercent} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, maxPercent: Number(e.target.value) } : r))} style={{ width: 80 }} />
+                    </td>
+                    <td style={{ padding: '4px 6px' }}>
+                      <input type="number" value={b.gradePoint ?? ''} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, gradePoint: e.target.value === '' ? null : Number(e.target.value) } : r))} style={{ width: 90 }} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2432,7 +2379,7 @@ function GradingPanel({
           <SmartSelect
             value={filterState}
             onChange={setFilterState}
-            options={['Active', 'Draft', 'Has Conflicts'].map((s) => ({ value: s, label: s }))}
+            options={(['Active', 'Draft', 'Has Conflicts'].map((s) => ({ value: s, label: s }))}
             placeholder="All states"
             allowClear
           />
@@ -2444,6 +2391,17 @@ function GradingPanel({
                 {['Scheme Name', 'Scope', 'Applies To', 'Effective Period', 'Bands', 'Passing %', 'State', 'Actions'].map((h) => (
                   <th key={h} style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
+              </tr>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.03)' }}>
+                <th style={{ padding: '8px 6px', fontWeight: 700 }}>Component name</th>
+                <th style={{ padding: '8px 6px' }}>Type</th>
+                <th style={{ padding: '8px 6px' }}>Weightage %</th>
+                <th style={{ padding: '8px 6px' }}>Max Marks</th>
+                <th style={{ padding: '8px 6px' }}>Calculation Rule</th>
+                <th style={{ padding: '8px 6px' }}>Assessments Rule</th>
+                <th style={{ padding: '8px 6px' }}>Seq</th>
+                <th style={{ padding: '8px 6px' }}>Validity</th>
+                {!isReadOnly && <th style={{ padding: '8px 6px' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -2540,7 +2498,7 @@ function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingS
           </div>
         </div>
       </div>
-      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
+      <div className="card" style={{ padding: 12, border: `1px solid ${issues.length ? 'rgba(220,38,38,0.2)' : 'rgba(22,163,74,0.2)'}` }}>
         <div style={{ fontWeight: 900, marginBottom: 10 }}>Grade Bands</div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -2550,31 +2508,28 @@ function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingS
                   <th key={h} style={{ padding: '8px 6px' }}>{h}</th>
                 ))}
               </tr>
-            </thead>
-            <tbody>
-              {sortedBands.map((b) => {
-                const isPass = passing != null && b.maxPercent >= passing;
-                return (
-                  <tr key={b.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
-                    <td style={{ padding: '8px 6px', fontWeight: 800 }}>{b.grade}</td>
-                    <td style={{ padding: '8px 6px' }}>{b.minPercent}</td>
-                    <td style={{ padding: '8px 6px' }}>{b.maxPercent}</td>
-                    <td style={{ padding: '8px 6px' }}>{gradingBandLabel(b.grade)}</td>
-                    <td style={{ padding: '8px 6px' }}>
-                      <StatusChip level={isPass ? 'ok' : 'error'} label={isPass ? 'Pass' : 'Fail'} />
-                    </td>
-                  </tr>
-                );
-              })}
-              {sortedBands.length === 0 ? (
-                <tr><td colSpan={5} className="muted" style={{ padding: 12 }}>No grade bands configured.</td></tr>
-              ) : null}
-            </tbody>
-          </table>
+              <tbody>
+                {sortedBands.map((b) => {
+                  const isPass = passing != null && b.maxPercent >= passing;
+                  return (
+                    <tr key={b.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                      <td style={{ padding: '8px 6px', fontWeight: 800 }}>{b.grade}</td>
+                      <td style={{ padding: '8px 6px' }}>{b.minPercent}</td>
+                      <td style={{ padding: '8px 6px' }}>{b.maxPercent}</td>
+                      <td style={{ padding: '8px 6px' }}>{gradingBandLabel(b.grade)}</td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <StatusChip level={isPass ? 'ok' : 'error'} label={isPass ? 'Pass' : 'Fail'} />
+                      </td>
+                    </tr>
+                  );
+                })}
+                {sortedBands.length === 0 ? (
+                  <tr><td colSpan={5} className="muted" style={{ padding: 12 }}>No grade bands configured.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-      <div className="card" style={{ padding: 12, border: `1px solid ${issues.length ? 'rgba(220,38,38,0.2)' : 'rgba(22,163,74,0.2)'}` }}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Validation</div>
         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
           {validationRows.map((row) => (
             <div key={row.label} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
@@ -2593,7 +2548,9 @@ function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingS
       </div>
     </div>
   );
-}// ─────────────────────────── Instance status helpers ────────────────────────
+}
+
+// ─────────────────────────── Instance status helpers ────────────────────────
 
 function instanceStatusLevel(status: AssessmentInstanceStatus): StatusLevel {
   switch (status) {
@@ -2629,6 +2586,14 @@ function resolveInstancesToGenerate(component: AssessmentComponent): number {
 function defaultGeneratedName(component: AssessmentComponent, sequence: number): string {
   if (sequence <= 1 && component.calculationRule === 'SINGLE_ASSESSMENT') return component.name;
   return `${component.name} ${sequence}`;
+}
+
+function menuItemStyle(color?: string): React.CSSProperties {
+  return {
+    display: 'block', width: '100%', textAlign: 'left', padding: '8px 14px', fontSize: 13,
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: color ?? '#0f172a', whiteSpace: 'nowrap',
+  };
 }
 
 // ─────────────────────���───────── Exam Schedule Panel ────────────────────────────────
@@ -2688,26 +2653,39 @@ function ExamSchedulePanel({
 
   const cancelMutation = useMutation({
     mutationFn: async (id: number) => (await api.post<AssessmentInstance>(`/api/exams/assessments/${id}/cancel`)).data,
-    onSuccess: async () => {
-      toast.success('Assessment cancelled');
-      await qc.invalidateQueries({ queryKey: ['exam-assessments'] });
-    },
+    onSuccess: async () => { toast.success('Assessment cancelled'); await qc.invalidateQueries({ queryKey: ['exam-assessments'] }); },
     onError: (e) => toast.error('Could not cancel', formatApiError(e)),
   });
 
-  const openMarksMutation = useMutation({
-    mutationFn: async (id: number) => (await api.post<AssessmentInstance>(`/api/exams/assessments/${id}/open-marks`)).data,
-    onSuccess: async () => {
-      toast.success('Marks entry opened');
-      await qc.invalidateQueries({ queryKey: ['exam-assessments'] });
-    },
-    onError: (e) => toast.error('Could not open marks entry', formatApiError(e)),
+  const publishMutation = useMutation({
+    mutationFn: async (id: number) => (await api.post<AssessmentInstance>(`/api/exams/assessments/${id}/publish`)).data,
+    onSuccess: async () => { toast.success('Assessment scheduled/published'); await qc.invalidateQueries({ queryKey: ['exam-assessments'] }); },
+    onError: (e) => toast.error('Could not publish', formatApiError(e)),
+  });
+
+  const cloneMutation = useMutation({
+    mutationFn: async (id: number) => (await api.post<AssessmentInstance>(`/api/exams/assessments/${id}/clone`)).data,
+    onSuccess: async () => { toast.success('Assessment cloned as draft'); await qc.invalidateQueries({ queryKey: ['exam-assessments'] }); },
+    onError: (e) => toast.error('Could not clone', formatApiError(e)),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => api.delete(`/api/exams/assessments/${id}`),
+    onSuccess: async () => { toast.success('Draft deleted'); await qc.invalidateQueries({ queryKey: ['exam-assessments'] }); },
+    onError: (e) => toast.error('Could not delete', formatApiError(e)),
   });
 
   const onRefresh = async () => { await qc.invalidateQueries({ queryKey: ['exam-assessments'] }); };
 
   const publishedSchemes = schemes.filter((s) => s.status === 'PUBLISHED');
   const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
+
+  // Summary counts (from unfiltered data)
+  const allData = assessmentsQ.data ?? [];
+  const draftCount = allData.filter((a) => a.status === 'DRAFT').length;
+  const scheduledCount = allData.filter((a) => a.status === 'SCHEDULED').length;
+  const activeCount = allData.filter((a) => ['MARKS_ENTRY_OPEN','MARKS_SUBMITTED','LOCKED','PUBLISHED'].includes(a.status)).length;
+  const cancelledCount = allData.filter((a) => a.status === 'CANCELLED').length;
 
   // Grade options derived from classGroups
   const gradeOptions = useMemo(() => {
@@ -2728,18 +2706,19 @@ function ExamSchedulePanel({
     return schemes.filter((s) => s.status === filterSchemeStatus);
   }, [schemes, filterSchemeStatus]);
 
+  // Row action menu
+  const [menuRect, setMenuRect] = useState<{ id: number; rect: DOMRect } | null>(null);
+
   return (
     <div className="stack" style={{ gap: 12 }}>
       {/* Header */}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontWeight: 900 }}>
-            Exam Schedule
-            {assessments.length > 0 ? (
-              <span className="muted" style={{ fontWeight: 400, fontSize: 13, marginLeft: 8 }}>
-                ({assessments.length})
-              </span>
-            ) : null}
+          <div>
+            <div style={{ fontWeight: 900 }}>Exam Schedule</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>
+              Schedule exams from published assessment schemes or create manually.
+            </div>
           </div>
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
             <button
@@ -2754,11 +2733,29 @@ function ExamSchedulePanel({
               className="btn"
               onClick={() => { setPanelMode(panelMode === 'create' ? 'none' : 'create'); setEditingInstance(null); }}
             >
-              {panelMode === 'create' ? 'Close form' : '+ Create Assessment'}
+              {panelMode === 'create' ? 'Close form' : '+ Schedule Assessment'}
             </button>
           </div>
         </div>
       </div>
+
+      {/* Summary cards */}
+      {allData.length > 0 && (
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
+          {[
+            { label: 'Total', value: allData.length, bg: '#eff6ff', color: '#1d4ed8' },
+            { label: 'Drafts', value: draftCount, bg: '#fef3c7', color: '#92400e' },
+            { label: 'Scheduled', value: scheduledCount, bg: '#d1fae5', color: '#065f46' },
+            { label: 'In Progress', value: activeCount, bg: '#ede9fe', color: '#4338ca' },
+            { label: 'Cancelled', value: cancelledCount, bg: cancelledCount > 0 ? '#fee2e2' : '#f1f5f9', color: cancelledCount > 0 ? '#991b1b' : '#475569' },
+          ].map((c) => (
+            <div key={c.label} style={{ background: c.bg, borderRadius: 8, padding: '10px 14px' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: c.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{c.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: c.color, marginTop: 2 }}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
@@ -2866,65 +2863,96 @@ function ExamSchedulePanel({
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
-                  {['Assessment', 'Component', 'Class / Section', 'Subject', 'Date', 'Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
-                    <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{h}</th>
+                <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
+                  {['Assessment', 'Scheme', 'Component', 'Class / Section', 'Subject', 'Date & Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
+                    <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontWeight: 800, fontSize: 12 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {assessments.map((a) => {
-                  const canEdit = a.status !== 'LOCKED' && a.status !== 'PUBLISHED' && a.status !== 'CANCELLED';
-                  const canOpenMarks = a.status === 'DRAFT' || a.status === 'SCHEDULED';
-                  const canCancel = a.status !== 'CANCELLED' && a.status !== 'LOCKED' && a.status !== 'PUBLISHED';
-                  const timeStr = a.startTime ? (a.endTime ? `${a.startTime}–${a.endTime}` : a.startTime) : '—';
+                {assessments.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} style={{ padding: 32, textAlign: 'center' }}>
+                      <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+                        {allData.length === 0
+                          ? 'No exams scheduled yet. Generate schedules from a published assessment scheme or schedule an assessment manually.'
+                          : 'No assessments match the current filters.'}
+                      </div>
+                      {allData.length === 0 && (
+                        <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
+                          <button type="button" className="btn secondary" onClick={(e) => { e.stopPropagation(); setPanelMode('bulk'); setEditingInstance(null); }}>
+                            Generate from Scheme
+                          </button>
+                          <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setPanelMode('create'); setEditingInstance(null); }}>
+                            + Schedule Assessment
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ) : assessments.map((a) => {
+                  const isDraft = a.status === 'DRAFT';
+                  const isScheduled = a.status === 'SCHEDULED';
+                  const isActive = ['MARKS_ENTRY_OPEN','MARKS_SUBMITTED','LOCKED','PUBLISHED'].includes(a.status);
+                  const isCancelled = a.status === 'CANCELLED';
+                  const canEdit = isDraft || isScheduled;
+                  const canPublish = isDraft;
+                  const canCancel = isDraft || isScheduled;
+                  const canClone = isScheduled || isActive || isCancelled;
+                  const canDelete = isDraft || isCancelled;
+                  const hasMenu = canPublish || canClone || canCancel || canDelete;
+                  const timeStr = a.startTime ? (a.endTime ? `${a.startTime.slice(0,5)}–${a.endTime.slice(0,5)}` : a.startTime.slice(0,5)) : '';
+                  const isMenuOpen = menuRect?.id === a.id;
                   return (
                     <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
                       <td style={{ padding: '8px 6px', fontWeight: 700 }}>{a.name}</td>
-                      <td style={{ padding: '8px 6px' }}>{a.componentName}</td>
-                      <td style={{ padding: '8px 6px' }}>{a.classGroupLabel}</td>
-                      <td style={{ padding: '8px 6px' }}>{a.subjectName}</td>
-                      <td style={{ padding: '8px 6px' }}>{a.assessmentDate ?? '—'}</td>
-                      <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{timeStr}</td>
-                      <td style={{ padding: '8px 6px' }}>{a.roomLabel ?? '—'}</td>
-                      <td style={{ padding: '8px 6px' }}>{a.maxMarks}</td>
+                      <td style={{ padding: '8px 6px', color: '#475569', fontSize: 12 }}>{a.schemeName}</td>
+                      <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.componentName}</td>
+                      <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.classGroupLabel}</td>
+                      <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.subjectName}</td>
+                      <td style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontSize: 12 }}>
+                        {a.assessmentDate ? (
+                          <div><div>{a.assessmentDate}</div>{timeStr && <div className="muted" style={{ fontSize: 11 }}>{timeStr}</div>}</div>
+                        ) : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.roomLabel ?? <span className="muted">—</span>}</td>
+                      <td style={{ padding: '8px 6px', textAlign: 'right', fontSize: 12 }}>{a.maxMarks}</td>
                       <td style={{ padding: '8px 6px' }}>
                         <StatusChip level={instanceStatusLevel(a.status)} label={instanceStatusLabel(a.status)} />
                       </td>
-                      <td style={{ padding: '8px 6px' }}>
-                        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                          {canEdit ? (
-                            <button type="button" className="btn secondary"
-                              onClick={() => { setEditingInstance(a); setPanelMode('none'); }}>
-                              Edit
-                            </button>
-                          ) : null}
-                          {canOpenMarks ? (
-                            <button type="button" className="btn secondary"
-                              disabled={openMarksMutation.isPending}
-                              onClick={() => openMarksMutation.mutate(a.id)}>
-                              Open Marks
-                            </button>
-                          ) : null}
-                          {canCancel ? (
-                            <button type="button" className="btn secondary"
-                              disabled={cancelMutation.isPending}
-                              onClick={() => cancelMutation.mutate(a.id)}>
-                              Cancel
-                            </button>
-                          ) : null}
+                      <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }}
+                            onClick={() => { setEditingInstance(a); setPanelMode('none'); }}>
+                            {canEdit ? 'Edit' : 'View'}
+                          </button>
+                          {hasMenu && (
+                            <>
+                              <button type="button"
+                                style={{ background: 'none', border: '1.5px solid rgba(15,23,42,0.15)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: '#64748b' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                  setMenuRect((prev) => prev?.id === a.id ? null : { id: a.id, rect });
+                                }}
+                                title="More actions"
+                              >⋯</button>
+                              {isMenuOpen && createPortal(
+                                <div style={{ position: 'fixed', top: Math.max(8, menuRect!.rect.bottom + 6), right: Math.max(8, window.innerWidth - menuRect!.rect.right), zIndex: 9999, background: '#fff', border: '1.5px solid rgba(15,23,42,0.12)', borderRadius: 10, boxShadow: '0 8px 30px rgba(15,23,42,0.14)', padding: '4px 0', minWidth: 172 }}>
+                                  {canPublish && <button type="button" style={menuItemStyle('#065f46')} disabled={publishMutation.isPending} onClick={() => { publishMutation.mutate(a.id); setMenuRect(null); }}>✓ Publish / Schedule</button>}
+                                  {canClone && <button type="button" style={menuItemStyle()} disabled={cloneMutation.isPending} onClick={() => { cloneMutation.mutate(a.id); setMenuRect(null); }}>⎘ Clone as Draft</button>}
+                                  {canCancel && <button type="button" style={menuItemStyle('#b45309')} disabled={cancelMutation.isPending} onClick={() => { cancelMutation.mutate(a.id); setMenuRect(null); }}>✕ Cancel</button>}
+                                  {canDelete && <button type="button" style={menuItemStyle('#b91c1c')} disabled={deleteMutation.isPending} onClick={() => { deleteMutation.mutate(a.id); setMenuRect(null); }}>🗑 Delete Draft</button>}
+                                </div>,
+                                document.body
+                              )}
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
                   );
                 })}
-                {assessments.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="muted" style={{ padding: 14 }}>
-                      No assessments found. Use filters or create/generate assessments above.
-                    </td>
-                  </tr>
-                ) : null}
               </tbody>
             </table>
           </div>
@@ -3386,6 +3414,18 @@ function MarksEntryPanel({
               Showing assessments where marks can be entered. Use "Open Marks" on the Schedule tab to enable marks entry for an assessment.
             </div>
           </div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn secondary"
+              onClick={() => { setPanelMode(panelMode === 'bulk' ? 'none' : 'bulk'); setEditingInstance(null); }}
+            >
+              {panelMode === 'bulk' ? 'Close' : 'Generate from Scheme'}
+            </button>
+            <button type="button" className="btn"
+              onClick={() => { setPanelMode(panelMode === 'create' ? 'none' : 'create'); setEditingInstance(null); }}
+            >
+              {panelMode === 'create' ? 'Close form' : '+ Schedule Assessment'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3448,9 +3488,9 @@ function MarksEntryPanel({
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
+                <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
                   {['Assessment', 'Component', 'Class / Section', 'Subject', 'Date', 'Max Marks', 'Status', 'Action'].map((h) => (
-                    <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontWeight: 800, fontSize: 12 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -3461,12 +3501,12 @@ function MarksEntryPanel({
                     <td style={{ padding: '8px 6px' }}>{a.componentName}</td>
                     <td style={{ padding: '8px 6px' }}>{a.classGroupLabel}</td>
                     <td style={{ padding: '8px 6px' }}>{a.subjectName}</td>
-                    <td style={{ padding: '8px 6px' }}>{a.assessmentDate ?? '—'}</td>
-                    <td style={{ padding: '8px 6px' }}>{a.maxMarks}</td>
+                    <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{a.assessmentDate ?? '—'}</td>
+                    <td style={{ padding: '8px 6px', textAlign: 'right', fontSize: 12 }}>{a.maxMarks}</td>
                     <td style={{ padding: '8px 6px' }}>
                       <StatusChip level={instanceStatusLevel(a.status)} label={instanceStatusLabel(a.status)} />
                     </td>
-                    <td style={{ padding: '8px 6px' }}>
+                    <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
                       {a.status === 'MARKS_ENTRY_OPEN' ? (
                         <button type="button" className="btn"
                           onClick={() => setEnteringInstanceId(a.id)}>
@@ -3485,7 +3525,7 @@ function MarksEntryPanel({
                 ))}
                 {assessments.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="muted" style={{ padding: 14 }}>
+                    <td colSpan={8} style={{ padding: 14, textAlign: 'center' }}>
                       {filterStatus === 'MARKS_ENTRY_OPEN'
                         ? 'No assessments with marks entry open. Open marks entry from the Exam Schedule tab.'
                         : 'No assessments found for the selected filters.'}
@@ -4162,7 +4202,7 @@ function ResultsPanel({
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.12)' }}>
+                <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
                   <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Student</th>
                   <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Roll No</th>
                   <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Subject</th>
@@ -4257,16 +4297,22 @@ function ResultsPanel({
                             )}
                             <div style={{ marginTop: 10, display: 'flex', gap: 16, fontSize: 13 }}>
                               <span>
-                                <span className="muted">Total: </span>
-                                <strong>{r.totalWeightedScore != null ? r.totalWeightedScore.toFixed(2) : '—'}</strong>
+                                <span className="muted" style={{ fontSize: 11 }}>
+                                  <span className="muted">Total: </span>
+                                  <strong>{r.totalWeightedScore != null ? r.totalWeightedScore.toFixed(2) : '—'}</strong>
+                                </span>
                               </span>
                               <span>
-                                <span className="muted">Percentage: </span>
-                                <strong style={{ color: '#2563eb' }}>{r.percentage != null ? `${r.percentage.toFixed(1)}%` : '—'}</strong>
+                                <span className="muted" style={{ fontSize: 11 }}>
+                                  <span className="muted">Percentage: </span>
+                                  <strong style={{ color: '#2563eb' }}>{r.percentage != null ? `${r.percentage.toFixed(1)}%` : '—'}</strong>
+                                </span>
                               </span>
                               <span>
-                                <span className="muted">Grade: </span>
-                                <strong>{r.grade ?? '—'}</strong>
+                                <span className="muted" style={{ fontSize: 11 }}>
+                                  <span className="muted">Grade: </span>
+                                  <strong>{r.grade ?? '—'}</strong>
+                                </span>
                               </span>
                               {r.generatedAt ? (
                                 <span className="muted" style={{ fontSize: 11 }}>

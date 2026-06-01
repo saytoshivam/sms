@@ -214,6 +214,22 @@ public class AssessmentSchemeController {
         return ResponseEntity.ok(assessmentScheduleService.cancelAssessment(id));
     }
 
+    @PostMapping("/assessments/{id}/publish")
+    public ResponseEntity<AssessmentInstanceDTO> publishAssessment(@PathVariable Integer id) {
+        return ResponseEntity.ok(assessmentScheduleService.publishAssessment(id));
+    }
+
+    @PostMapping("/assessments/{id}/clone")
+    public ResponseEntity<AssessmentInstanceDTO> cloneAssessment(@PathVariable Integer id) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(assessmentScheduleService.cloneAssessment(id));
+    }
+
+    @DeleteMapping("/assessments/{id}")
+    public ResponseEntity<Void> deleteAssessment(@PathVariable Integer id) {
+        assessmentScheduleService.deleteAssessment(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/assessments/{id}/open-marks")
     public ResponseEntity<AssessmentInstanceDTO> openMarksEntry(@PathVariable Integer id) {
         return ResponseEntity.ok(assessmentScheduleService.openMarksEntry(id));
