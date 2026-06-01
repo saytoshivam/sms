@@ -281,6 +281,21 @@ function BandEditor({ bands, onChange }: { bands: DraftBand[]; onChange: (bands:
   );
 }
 
+/** Derive selected grade levels and specific sections from a list of classGroupIds */
+function deriveClassSelection(ids: number[], classGroups: ClassGroup[]): { grades: string[]; sections: number[] } {
+  if (ids.length === 0) return { grades: [], sections: [] };
+  const levels = new Set<string>();
+  ids.forEach((id) => {
+    const cg = classGroups.find((c) => c.id === id);
+    if (cg?.gradeLevel != null) levels.add(String(cg.gradeLevel));
+  });
+  const grades = Array.from(levels);
+  // If ALL classGroups for those grade levels are included → "all sections" mode (no specific sections)
+  const allForLevels = classGroups.filter((cg) => cg.gradeLevel != null && levels.has(String(cg.gradeLevel)));
+  const allIncluded = allForLevels.length > 0 && allForLevels.every((cg) => ids.includes(cg.id));
+  return { grades, sections: allIncluded ? [] : ids };
+}
+
 function SchemeForm({
   initial,
   academicYears,
@@ -302,33 +317,39 @@ function SchemeForm({
 }) {
   const [form, setForm] = useState<FormState>(initial);
 
-  // Derive initial selected grade level from existing classGroupIds
-  const initialGradeLevel = useMemo(() => {
-    if (initial.classGroupIds.length > 0) {
-      const cg = classGroups.find((c) => c.id === initial.classGroupIds[0]);
-      return cg?.gradeLevel != null ? String(cg.gradeLevel) : '';
-    }
-    return '';
-  }, [initial.classGroupIds, classGroups]);
-
-  const [selectedGradeLevel, setSelectedGradeLevel] = useState<string>(initialGradeLevel);
+  // selGrades: which grade levels are checked (multi-select)
+  // selSections: specific section ClassGroup IDs checked (empty = all sections of selGrades)
+  const [selGrades, setSelGrades] = useState<string[]>(() => deriveClassSelection(initial.classGroupIds, classGroups).grades);
+  const [selSections, setSelSections] = useState<number[]>(() => deriveClassSelection(initial.classGroupIds, classGroups).sections);
 
   useEffect(() => {
     setForm(initial);
-    // Re-derive grade level when initial changes (e.g. switching between edit targets)
-    if (initial.classGroupIds.length > 0) {
-      const cg = classGroups.find((c) => c.id === initial.classGroupIds[0]);
-      setSelectedGradeLevel(cg?.gradeLevel != null ? String(cg.gradeLevel) : '');
-    } else {
-      setSelectedGradeLevel('');
-    }
+    const { grades, sections } = deriveClassSelection(initial.classGroupIds, classGroups);
+    setSelGrades(grades);
+    setSelSections(sections);
   }, [initial, classGroups]);
 
-  const draftIssues = validateForm(form, false);
-  const publishIssues = validateForm(form, true);
   const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
 
-  // Unique sorted grade levels
+  // Resolve final classGroupIds for submission
+  function resolveClassGroupIds(): number[] {
+    if (form.scope !== 'CLASS_GROUP' || selGrades.length === 0) return [];
+    if (selSections.length > 0) return selSections;
+    // No specific sections selected → all sections of the selected grade levels
+    return classGroups
+      .filter((cg) => cg.gradeLevel != null && selGrades.includes(String(cg.gradeLevel)))
+      .map((cg) => cg.id);
+  }
+
+  function buildSubmitForm(): FormState {
+    return { ...form, classGroupIds: resolveClassGroupIds() };
+  }
+
+  const submitForm = buildSubmitForm();
+  const draftIssues = validateForm(submitForm, false);
+  const publishIssues = validateForm(submitForm, true);
+
+  // Unique sorted grade level options
   const gradeLevelOptions = useMemo(() => {
     const seen = new Set<number>();
     return classGroups
@@ -337,25 +358,32 @@ function SchemeForm({
       .map((cg) => ({ value: String(cg.gradeLevel), label: `Class ${cg.gradeLevel}` }));
   }, [classGroups]);
 
-  // Sections for the selected grade level
-  const sectionOptions = useMemo(() => {
-    if (!selectedGradeLevel) return [];
-    return classGroups
-      .filter((cg) => String(cg.gradeLevel) === selectedGradeLevel)
-      .map((cg) => ({
-        value: String(cg.id),
-        label: cg.section ? `Section ${cg.section}` : (cg.displayName ?? `ID ${cg.id}`),
-      }));
-  }, [classGroups, selectedGradeLevel]);
+  // Sections for all currently selected grade levels (grouped by class for display)
+  const sectionsByGrade = useMemo(() => {
+    return selGrades
+      .sort((a, b) => Number(a) - Number(b))
+      .map((grade) => ({
+        grade,
+        label: `Class ${grade}`,
+        sections: classGroups.filter((cg) => String(cg.gradeLevel) === grade),
+      }))
+      .filter((g) => g.sections.length > 0);
+  }, [classGroups, selGrades]);
 
-  // Currently selected section id
-  const selectedSectionId = useMemo(() => {
-    if (!selectedGradeLevel) return '';
-    const match = classGroups
-      .filter((cg) => String(cg.gradeLevel) === selectedGradeLevel)
-      .find((cg) => form.classGroupIds.includes(cg.id));
-    return match ? String(match.id) : '';
-  }, [classGroups, form.classGroupIds, selectedGradeLevel]);
+  const hasSections = sectionsByGrade.some((g) => g.sections.length > 0);
+
+  // Applied-to summary text
+  const appliedSummary = useMemo(() => {
+    if (selGrades.length === 0) return null;
+    if (selSections.length === 0) {
+      return `Applies to all sections of ${selGrades.sort((a, b) => Number(a) - Number(b)).map((g) => `Class ${g}`).join(', ')}`;
+    }
+    const labels = selSections.map((id) => {
+      const cg = classGroups.find((c) => c.id === id);
+      return cg ? `Class ${cg.gradeLevel}${cg.section ? ` – ${cg.section}` : ''}` : `#${id}`;
+    });
+    return `Applies to: ${labels.join(', ')}`;
+  }, [selGrades, selSections, classGroups]);
 
   return (
     <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
@@ -368,7 +396,8 @@ function SchemeForm({
             onChange={(v) => {
               const scope = (v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP';
               set({ scope, classGroupIds: [] });
-              setSelectedGradeLevel('');
+              setSelGrades([]);
+              setSelSections([]);
             }}
             options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class' }]}
           />
@@ -380,32 +409,78 @@ function SchemeForm({
       </div>
 
       {form.scope === 'CLASS_GROUP' ? (
-        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 10 }}>
-          <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class</span>
-            <SmartSelect
-              value={selectedGradeLevel}
-              onChange={(v) => {
-                setSelectedGradeLevel(v);
-                set({ classGroupIds: [] }); // clear section when class changes
-              }}
-              options={gradeLevelOptions}
-              placeholder="Select class"
-              allowClear
-            />
-          </label>
-          {selectedGradeLevel ? (
-            <label className="stack" style={{ gap: 6 }}>
-              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Section</span>
-              <SmartSelect
-                value={selectedSectionId}
-                onChange={(v) => set({ classGroupIds: v ? [Number(v)] : [] })}
-                options={sectionOptions}
-                placeholder={sectionOptions.length === 0 ? 'No sections found' : 'Select section'}
-                allowClear
-              />
-            </label>
+        <div style={{ marginTop: 12, border: '1px solid rgba(15,23,42,0.08)', borderRadius: 6, padding: 12, background: 'rgba(15,23,42,0.01)' }}>
+          {/* Class multi-select */}
+          <div style={{ marginBottom: 10 }}>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Class <span style={{ fontWeight: 400 }}>(select one or more)</span></div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {gradeLevelOptions.map((opt) => (
+                <label key={opt.value} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '4px 10px', borderRadius: 5, border: `1px solid ${selGrades.includes(opt.value) ? '#3b82f6' : 'rgba(15,23,42,0.15)'}`, background: selGrades.includes(opt.value) ? '#eff6ff' : 'transparent' }}>
+                  <input
+                    type="checkbox"
+                    checked={selGrades.includes(opt.value)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelGrades((prev) => [...prev, opt.value]);
+                      } else {
+                        setSelGrades((prev) => prev.filter((g) => g !== opt.value));
+                        // Remove sections belonging to this grade
+                        const idsForGrade = classGroups.filter((cg) => String(cg.gradeLevel) === opt.value).map((cg) => cg.id);
+                        setSelSections((prev) => prev.filter((id) => !idsForGrade.includes(id)));
+                      }
+                    }}
+                    style={{ accentColor: '#3b82f6' }}
+                  />
+                  <span style={{ fontWeight: selGrades.includes(opt.value) ? 700 : 400 }}>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Section multi-select (optional, only when classes selected and sections exist) */}
+          {selGrades.length > 0 && hasSections ? (
+            <div>
+              <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                Section <span style={{ fontWeight: 400 }}>(optional — leave empty to apply to all sections)</span>
+              </div>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                {sectionsByGrade.map(({ grade, label: gradeLabel, sections }) => (
+                  <div key={grade} style={{ minWidth: 120 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#475569', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{gradeLabel}</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {sections.map((cg) => {
+                        const sectionLabel = cg.section ?? cg.displayName ?? `#${cg.id}`;
+                        const checked = selSections.includes(cg.id);
+                        return (
+                          <label key={cg.id} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '3px 8px', borderRadius: 4, border: `1px solid ${checked ? '#3b82f6' : 'rgba(15,23,42,0.15)'}`, background: checked ? '#eff6ff' : 'transparent' }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => setSelSections((prev) => e.target.checked ? [...prev, cg.id] : prev.filter((id) => id !== cg.id))}
+                              style={{ accentColor: '#3b82f6' }}
+                            />
+                            <span style={{ fontWeight: checked ? 700 : 400 }}>{sectionLabel}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : null}
+
+          {/* Summary */}
+          {appliedSummary ? (
+            <div style={{ marginTop: 8, fontSize: 12, color: '#0369a1', background: '#f0f9ff', borderRadius: 4, padding: '5px 10px', border: '1px solid #bae6fd' }}>
+              ℹ {appliedSummary}
+            </div>
+          ) : null}
+
+          {/* Override hierarchy hint */}
+          <div className="muted" style={{ marginTop: 6, fontSize: 11 }}>
+            Override hierarchy: <strong>Section</strong> overrides <strong>Class</strong>, <strong>Class</strong> overrides <strong>School-wide</strong>
+          </div>
         </div>
       ) : null}
 
@@ -414,8 +489,8 @@ function SchemeForm({
       {submitError ? <div style={{ color: '#b91c1c', marginTop: 8 }}>{formatApiError(submitError)}</div> : null}
       <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
         <button type="button" className="btn secondary" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button type="button" className="btn secondary" onClick={() => onSaveDraft(form)} disabled={saving || draftIssues.length > 0}>{saving ? 'Saving…' : 'Save Draft'}</button>
-        <button type="button" className="btn" onClick={() => onPublish(form)} disabled={saving || publishIssues.length > 0}>{saving ? 'Saving…' : 'Publish'}</button>
+        <button type="button" className="btn secondary" onClick={() => onSaveDraft(buildSubmitForm())} disabled={saving || draftIssues.length > 0}>{saving ? 'Saving…' : 'Save Draft'}</button>
+        <button type="button" className="btn" onClick={() => onPublish(buildSubmitForm())} disabled={saving || publishIssues.length > 0}>{saving ? 'Saving…' : 'Publish'}</button>
       </div>
     </div>
   );
