@@ -834,6 +834,7 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
   const [filterScope, setFilterScope] = useState('');
   const [filterYear, setFilterYear] = useState('');
   const [filterState, setFilterState] = useState('');
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
   const selected = gradingSchemes.find((g) => g.id === selectedId) ?? null;
 
   const save = useMutation({
@@ -848,21 +849,6 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
   const clone = useMutation({ mutationFn: async (id: number) => (await api.post<GradingScheme>(`/api/exams/grading-schemes/${id}/clone`)).data, onSuccess: async () => { toast.success('Grading scheme cloned'); await onChanged(); }, onError: (e) => toast.error('Could not clone grading scheme', formatApiError(e)) });
   const archive = useMutation({ mutationFn: async (id: number) => (await api.post<GradingScheme>(`/api/exams/grading-schemes/${id}/archive`)).data, onSuccess: async () => { toast.success('Grading scheme archived'); setSelectedId(null); await onChanged(); }, onError: (e) => toast.error('Could not archive grading scheme', formatApiError(e)) });
   const setDefault = useMutation({ mutationFn: async (id: number) => (await api.post<GradingScheme>(`/api/exams/grading-schemes/${id}/set-default`)).data, onSuccess: async () => { toast.success('Default grading scheme updated'); await onChanged(); }, onError: (e) => toast.error('Could not set default grading scheme', formatApiError(e)) });
-
-  const filtered = useMemo(() => gradingSchemes.filter((g) => {
-    const q = search.trim().toLowerCase();
-    const state = statusForScheme(g).label;
-    if (q && !g.name.toLowerCase().includes(q) && !appliesToLabel(g, classGroups).toLowerCase().includes(q)) return false;
-    if (filterScope && g.scope !== filterScope) return false;
-    if (filterYear) {
-      const yearId = Number(filterYear);
-      const from = g.effectiveFromAcademicYearId ?? g.academicYearId ?? null;
-      const to = g.effectiveToAcademicYearId ?? g.academicYearId ?? null;
-      if (!((from == null || yearId >= from) && (to == null || yearId <= to))) return false;
-    }
-    if (filterState && state !== filterState) return false;
-    return true;
-  }), [gradingSchemes, search, filterScope, filterYear, filterState]);
 
   if (selected) {
     const state = statusForScheme(selected);
@@ -906,77 +892,185 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
     );
   }
 
+  const activeSchemes = gradingSchemes.filter((g) => g.status !== 'ARCHIVED');
+  const archivedSchemes = gradingSchemes.filter((g) => g.status === 'ARCHIVED');
+
   const activeCount = gradingSchemes.filter((g) => g.status === 'ACTIVE' || g.active).length;
   const draftCount = gradingSchemes.filter((g) => statusForScheme(g).label === 'Draft').length;
-  const conflictCount = gradingSchemes.filter((g) => statusForScheme(g).label === 'Has Conflict').length;
+  const archivedCount = archivedSchemes.length;
+  const conflictCount = activeSchemes.filter((g) => statusForScheme(g).label === 'Has Conflict').length;
+
+  const filteredActive = useMemo(() => activeSchemes.filter((g) => {
+    const q = search.trim().toLowerCase();
+    const state = statusForScheme(g).label;
+    if (q && !g.name.toLowerCase().includes(q) && !appliesToLabel(g, classGroups).toLowerCase().includes(q)) return false;
+    if (filterScope && g.scope !== filterScope) return false;
+    if (filterYear) {
+      const yearId = Number(filterYear);
+      const from = g.effectiveFromAcademicYearId ?? g.academicYearId ?? null;
+      const to = g.effectiveToAcademicYearId ?? g.academicYearId ?? null;
+      if (!((from == null || yearId >= from) && (to == null || yearId <= to))) return false;
+    }
+    if (filterState && state !== filterState) return false;
+    return true;
+  }), [activeSchemes, search, filterScope, filterYear, filterState, classGroups]);
+
+  const filteredArchived = useMemo(() => archivedSchemes.filter((g) => {
+    const q = search.trim().toLowerCase();
+    if (q && !g.name.toLowerCase().includes(q) && !appliesToLabel(g, classGroups).toLowerCase().includes(q)) return false;
+    return true;
+  }), [archivedSchemes, search, classGroups]);
+
+  function renderSchemeRow(g: GradingScheme, isArchived: boolean) {
+    const state = statusForScheme(g);
+    const pp = passingPercent(g);
+    const periodLabel = effectivePeriodLabel(g, academicYears);
+    const periodInvalid = isInvalidPeriod(g);
+    return (
+      <tr key={g.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', cursor: 'pointer', opacity: isArchived ? 0.8 : 1 }} onClick={() => setSelectedId(g.id)}>
+        <td style={{ padding: '9px 8px', fontWeight: 800 }}>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <span>{g.name}</span>
+            {g.status === 'ACTIVE' && g.defaultScheme ? <StatusChip level="info" label="Default" /> : null}
+            {isArchived && g.defaultScheme ? <StatusChip level="idle" label="Was default" /> : null}
+            {g.conflict ? <StatusChip level="error" label="Conflict" /> : null}
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{rowHelper(g)}</div>
+        </td>
+        <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap', fontSize: 12 }}>{scopeLabel(g)}</td>
+        <td style={{ padding: '9px 8px', fontSize: 12 }}>{appliesToLabel(g, classGroups)}</td>
+        <td style={{ padding: '9px 8px', whiteSpace: 'nowrap', fontSize: 12 }}>
+          {periodInvalid
+            ? <span style={{ color: '#b91c1c', fontSize: 12 }}>⚠ Invalid period</span>
+            : periodLabel}
+        </td>
+        <td style={{ padding: '9px 8px', textAlign: 'center', fontSize: 12 }}>{g.bands?.length ?? 0}</td>
+        <td style={{ padding: '9px 8px', textAlign: 'center', fontSize: 12 }}>{pp != null ? `${pp}%` : '—'}</td>
+        <td style={{ padding: '9px 8px' }}><StatusChip level={state.level} label={state.label} /></td>
+        <td style={{ padding: '9px 8px', whiteSpace: 'nowrap', textAlign: 'right' }}>
+          {isArchived ? (
+            /* Archived: View + Clone only */
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
+              <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setSelectedId(g.id)}>View</button>
+              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 10px' }} disabled={clone.isPending} onClick={(e) => { e.stopPropagation(); clone.mutate(g.id); }}>Clone</button>
+            </div>
+          ) : (
+            <RowActions
+              g={g}
+              onView={() => setSelectedId(g.id)}
+              onEdit={() => { setSelectedId(g.id); setEditing(true); }}
+              onPublish={() => publish.mutate(g.id)}
+              onClone={() => clone.mutate(g.id)}
+              onSetDefault={() => setDefault.mutate(g.id)}
+              onArchive={() => archive.mutate(g.id)}
+              publishPending={publish.isPending}
+              clonePending={clone.isPending}
+              setDefaultPending={setDefault.isPending}
+              archivePending={archive.isPending}
+            />
+          )}
+        </td>
+      </tr>
+    );
+  }
+
+  const TABLE_HEADERS = ['Scheme Name', 'Scope', 'Applies To', 'Effective Period', 'Bands', 'Passing %', 'State', 'Actions'];
+
   return (
     <div className="stack" style={{ gap: 12 }}>
-      <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}><div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}><div><div style={{ fontWeight: 950, fontSize: 18 }}>Grading Schemes</div><div className="muted" style={{ marginTop: 5, fontSize: 13 }}>Create and manage grade bands used for result calculation.</div><div className="muted" style={{ marginTop: 4, fontSize: 12 }}>Grading schemes define grade bands used after weighted score calculation.</div></div><button type="button" className="btn" onClick={() => setCreateOpen((v) => !v)} disabled={save.isPending}>{createOpen ? 'Close form' : 'Create Grading Scheme'}</button></div></div>
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>{[{ label: 'Total grading schemes', value: gradingSchemes.length, bg: '#eff6ff', color: '#1d4ed8' }, { label: 'Active schemes', value: activeCount, bg: '#d1fae5', color: '#065f46' }, { label: 'Draft schemes', value: draftCount, bg: '#fef3c7', color: '#92400e' }, { label: 'Conflicts', value: conflictCount, bg: conflictCount > 0 ? '#fee2e2' : '#f1f5f9', color: conflictCount > 0 ? '#991b1b' : '#475569' }].map((card) => <div key={card.label} className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.08)', background: card.bg }}><div style={{ fontSize: 11, fontWeight: 900, color: card.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{card.label}</div><div style={{ fontSize: 26, fontWeight: 950, color: card.color, marginTop: 4 }}>{card.value}</div></div>)}</div>
+      {/* Header */}
+      <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontWeight: 950, fontSize: 18 }}>Grading Schemes</div>
+            <div className="muted" style={{ marginTop: 5, fontSize: 13 }}>Create and manage grade bands used for result calculation.</div>
+          </div>
+          <button type="button" className="btn" onClick={() => setCreateOpen((v) => !v)} disabled={save.isPending}>{createOpen ? 'Close form' : 'Create Grading Scheme'}</button>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
+        {[
+          { label: 'Total', value: gradingSchemes.length, bg: '#eff6ff', color: '#1d4ed8' },
+          { label: 'Active', value: activeCount, bg: '#d1fae5', color: '#065f46' },
+          { label: 'Drafts', value: draftCount, bg: '#fef3c7', color: '#92400e' },
+          { label: 'Archived', value: archivedCount, bg: '#f1f5f9', color: '#475569' },
+          { label: 'Conflicts', value: conflictCount, bg: conflictCount > 0 ? '#fee2e2' : '#f1f5f9', color: conflictCount > 0 ? '#991b1b' : '#475569' },
+        ].map((card) => (
+          <div key={card.label} style={{ background: card.bg, borderRadius: 8, padding: '10px 14px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: card.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{card.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: card.color, marginTop: 2 }}>{card.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Create form */}
       {createOpen ? <SchemeForm initial={formFromScheme(null)} academicYears={academicYears} classGroups={classGroups} saving={save.isPending} submitError={save.error} onCancel={() => setCreateOpen(false)} onSaveDraft={(form) => save.mutate({ form, status: 'DRAFT' })} onPublish={(form) => save.mutate({ form, status: 'ACTIVE' })} /> : null}
+
+      {/* Main (non-archived) table */}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 12 }}><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search grading scheme..." style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', gridColumn: 'span 2' }} /><SmartSelect value={filterScope} onChange={setFilterScope} options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]} placeholder="All scopes" allowClear /><SmartSelect value={filterYear} onChange={setFilterYear} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="All academic years" allowClear /><SmartSelect value={filterState} onChange={setFilterState} options={['Active', 'Draft', 'Archived', 'Needs Setup', 'Has Conflict'].map((s) => ({ value: s, label: s }))} placeholder="All states" allowClear /></div>
-        <div style={{ overflowX: 'auto' }} >
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 12 }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search grading scheme..." style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', gridColumn: 'span 2' }} />
+          <SmartSelect value={filterScope} onChange={setFilterScope} options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class / Section' }]} placeholder="All scopes" allowClear />
+          <SmartSelect value={filterYear} onChange={setFilterYear} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="All academic years" allowClear />
+          <SmartSelect value={filterState} onChange={setFilterState} options={['Active', 'Draft', 'Needs Setup', 'Has Conflict'].map((s) => ({ value: s, label: s }))} placeholder="All states" allowClear />
+        </div>
+        <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
-                {['Scheme Name', 'Scope', 'Applies To', 'Effective Period', 'Bands', 'Passing %', 'State'].map((h) => (
-                  <th key={h} style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
+                {TABLE_HEADERS.map((h, i) => (
+                  <th key={h} style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap', textAlign: i === TABLE_HEADERS.length - 1 ? 'right' : 'left' }}>{h}</th>
                 ))}
-                <th style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap', textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={8} className="muted" style={{ padding: 16 }}>No grading schemes match the current filters.</td></tr>
-              ) : filtered.map((g) => {
-                const state = statusForScheme(g);
-                const pp = passingPercent(g);
-                const periodLabel = effectivePeriodLabel(g, academicYears);
-                const periodInvalid = isInvalidPeriod(g);
-                return (
-                  <tr key={g.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', cursor: 'pointer' }} onClick={() => setSelectedId(g.id)}>
-                    <td style={{ padding: '9px 8px', fontWeight: 800 }}>
-                      <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-                        <span>{g.name}</span>
-                        {g.status === 'ACTIVE' && g.defaultScheme ? <StatusChip level="info" label="Default" /> : null}
-                        {g.status === 'ARCHIVED' && g.defaultScheme ? <StatusChip level="idle" label="Was default" /> : null}
-                        {g.conflict ? <StatusChip level="error" label="Conflict" /> : null}
-                      </div>
-                      <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{rowHelper(g)}</div>
-                    </td>
-                    <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>{scopeLabel(g)}</td>
-                    <td style={{ padding: '9px 8px' }}>{appliesToLabel(g, classGroups)}</td>
-                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>
-                      {periodInvalid
-                        ? <span style={{ color: '#b91c1c', fontSize: 12 }}>⚠ Invalid period</span>
-                        : periodLabel}
-                    </td>
-                    <td style={{ padding: '9px 8px', textAlign: 'center' }}>{g.bands?.length ?? 0}</td>
-                    <td style={{ padding: '9px 8px', textAlign: 'center' }}>{pp != null ? `${pp}%` : '—'}</td>
-                    <td style={{ padding: '9px 8px' }}><StatusChip level={state.level} label={state.label} /></td>
-                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap', textAlign: 'right' }}>
-                      <RowActions
-                        g={g}
-                        onView={() => setSelectedId(g.id)}
-                        onEdit={() => { setSelectedId(g.id); setEditing(true); }}
-                        onPublish={() => publish.mutate(g.id)}
-                        onClone={() => clone.mutate(g.id)}
-                        onSetDefault={() => setDefault.mutate(g.id)}
-                        onArchive={() => archive.mutate(g.id)}
-                        publishPending={publish.isPending}
-                        clonePending={clone.isPending}
-                        setDefaultPending={setDefault.isPending}
-                        archivePending={archive.isPending}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
+              {filteredActive.length === 0 ? (
+                <tr><td colSpan={8} className="muted" style={{ padding: 16 }}>
+                  {activeSchemes.length === 0 ? 'No grading schemes yet. Create your first scheme above.' : 'No schemes match the current filters.'}
+                </td></tr>
+              ) : filteredActive.map((g) => renderSchemeRow(g, false))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Archived (collapsible) */}
+      {archivedSchemes.length > 0 && (
+        <div className="card" style={{ padding: 0, border: '1px solid rgba(15,23,42,0.1)', overflow: 'hidden' }}>
+          <button
+            type="button"
+            style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'rgba(15,23,42,0.03)', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+            onClick={() => setArchivedExpanded((v) => !v)}
+          >
+            <span style={{ fontWeight: 700, fontSize: 13, color: '#64748b' }}>
+              Archived Grading Schemes ({archivedSchemes.length})
+            </span>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>{archivedExpanded ? '▲ Collapse' : '▼ Expand'}</span>
+          </button>
+          {archivedExpanded && (
+            <div style={{ overflowX: 'auto', padding: '0 0 8px' }}>
+              {filteredArchived.length === 0 && search ? (
+                <div className="muted" style={{ padding: '12px 14px', fontSize: 12 }}>No archived schemes match the search.</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
+                      {TABLE_HEADERS.map((h, i) => (
+                        <th key={h} style={{ padding: '7px 8px', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap', textAlign: i === TABLE_HEADERS.length - 1 ? 'right' : 'left' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredArchived.map((g) => renderSchemeRow(g, true))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
