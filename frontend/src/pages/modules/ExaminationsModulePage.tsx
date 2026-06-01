@@ -2286,7 +2286,7 @@ function GradingPanel({
               <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scope</span>
               <SmartSelect
                 value={gradingScope}
-                onChange={(v) => { setGradingScope((v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP'; if (v !== 'CLASS_GROUP') setClassGroupId(''); }}
+                onChange={(v) => { setGradingScope((v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP'); if (v !== 'CLASS_GROUP') setClassGroupId(''); }}
                 options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]}
                 placeholder="Select scope"
               />
