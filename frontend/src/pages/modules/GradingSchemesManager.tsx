@@ -592,36 +592,23 @@ function SchemeForm({
             />
           </div>
 
-          {/* Section multi-select (optional, only when classes selected and sections exist) */}
+          {/* Section multi-select dropdown (optional, only when classes selected and sections exist) */}
           {selGrades.length > 0 && hasSections ? (
-            <div>
+            <div style={{ marginBottom: 10 }}>
               <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
                 Section <span style={{ fontWeight: 400 }}>(optional — leave empty to apply to all sections)</span>
               </div>
-              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                {sectionsByGrade.map(({ grade, label: gradeLabel, sections }) => (
-                  <div key={grade} style={{ minWidth: 120 }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: '#475569', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{gradeLabel}</div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {sections.map((cg) => {
-                        const sectionLabel = cg.section ?? cg.displayName ?? `#${cg.id}`;
-                        const checked = selSections.includes(cg.id);
-                        return (
-                          <label key={cg.id} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '3px 8px', borderRadius: 4, border: `1px solid ${checked ? '#3b82f6' : 'rgba(15,23,42,0.15)'}`, background: checked ? '#eff6ff' : 'transparent' }}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => setSelSections((prev) => e.target.checked ? [...prev, cg.id] : prev.filter((id) => id !== cg.id))}
-                              style={{ accentColor: '#3b82f6' }}
-                            />
-                            <span style={{ fontWeight: checked ? 700 : 400 }}>{sectionLabel}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <MultiSelectDropdown
+                values={selSections.map(String)}
+                onChange={(vals) => setSelSections(vals.map(Number))}
+                options={sectionsByGrade.flatMap(({ grade, label: gradeLabel, sections }) =>
+                  sections.map((cg) => ({
+                    value: String(cg.id),
+                    label: `${gradeLabel} – ${cg.section ?? cg.displayName ?? `#${cg.id}`}`,
+                  }))
+                )}
+                placeholder="All sections (leave empty to apply to all)"
+              />
             </div>
           ) : null}
 
