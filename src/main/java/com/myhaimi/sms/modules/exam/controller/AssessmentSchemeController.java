@@ -248,4 +248,21 @@ public class AssessmentSchemeController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(assessmentScheduleService.generateAssessmentsForClassScheme(schemeId, dto));
     }
+
+    // ─────────────────── Smart Schedule Generation ───────────────────────────
+
+    @PostMapping("/schedule/generate-candidates")
+    public ResponseEntity<List<ScheduleCandidateDTO>> generateScheduleCandidates(
+            @Valid @RequestBody ScheduleGenerateCandidatesRequestDTO dto
+    ) {
+        return ResponseEntity.ok(assessmentScheduleService.generateScheduleCandidates(dto));
+    }
+
+    @PostMapping("/schedule/bulk-save-drafts")
+    public ResponseEntity<List<AssessmentInstanceDTO>> bulkSaveDrafts(
+            @Valid @RequestBody BulkSaveDraftsRequestDTO dto
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(assessmentScheduleService.bulkSaveDrafts(dto));
+    }
 }

@@ -9,6 +9,9 @@ import com.myhaimi.sms.modules.exam.dto.AssessmentGenerateRequestDTO;
 import com.myhaimi.sms.modules.exam.dto.AssessmentInstanceCreateDTO;
 import com.myhaimi.sms.modules.exam.dto.AssessmentInstanceDTO;
 import com.myhaimi.sms.modules.exam.dto.AssessmentInstanceUpdateDTO;
+import com.myhaimi.sms.modules.exam.dto.BulkSaveDraftsRequestDTO;
+import com.myhaimi.sms.modules.exam.dto.ScheduleCandidateDTO;
+import com.myhaimi.sms.modules.exam.dto.ScheduleGenerateCandidatesRequestDTO;
 import com.myhaimi.sms.modules.exam.entity.AssessmentComponent;
 import com.myhaimi.sms.modules.exam.entity.AssessmentInstance;
 import com.myhaimi.sms.modules.exam.entity.AssessmentScheme;
@@ -16,13 +19,17 @@ import com.myhaimi.sms.modules.exam.entity.AssessmentSchemeAssignment;
 import com.myhaimi.sms.modules.exam.entity.enums.AssessmentInstanceStatus;
 import com.myhaimi.sms.modules.exam.entity.enums.AssessmentSchemeStatus;
 import com.myhaimi.sms.modules.exam.entity.enums.CalculationRule;
+import com.myhaimi.sms.modules.exam.entity.enums.ComponentType;
+import com.myhaimi.sms.modules.exam.entity.enums.ExamApplicableScopeType;
 import com.myhaimi.sms.modules.exam.repository.AssessmentComponentRepository;
 import com.myhaimi.sms.modules.exam.repository.AssessmentInstanceRepository;
 import com.myhaimi.sms.modules.exam.repository.AssessmentSchemeAssignmentRepository;
 import com.myhaimi.sms.modules.exam.repository.AssessmentSchemeRepository;
+import com.myhaimi.sms.repository.AcademicYearRepo;
 import com.myhaimi.sms.repository.ClassGroupRepo;
 import com.myhaimi.sms.repository.RoomRepo;
 import com.myhaimi.sms.repository.SchoolRepo;
+import com.myhaimi.sms.repository.SubjectClassGroupRepo;
 import com.myhaimi.sms.repository.SubjectRepo;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +41,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -52,6 +60,8 @@ public class AssessmentScheduleService {
     private final SubjectRepo subjectRepo;
     private final ClassGroupRepo classGroupRepo;
     private final RoomRepo roomRepo;
+    private final AcademicYearRepo academicYearRepo;
+    private final SubjectClassGroupRepo subjectClassGroupRepo;
 
     @Transactional
     public AssessmentInstanceDTO createAssessment(AssessmentInstanceCreateDTO dto) {
@@ -301,6 +311,261 @@ public class AssessmentScheduleService {
         }
 
         return created.stream().map(this::toDTO).toList();
+    }
+
+    // ─────────────────────── Smart Schedule Candidate Generator ─────────────────
+
+    /**
+     * Generates schedule candidates without persisting them.
+     * The caller reviews and edits candidates in the UI, then calls {@link #bulkSaveDrafts}.
+     */
+    public List<ScheduleCandidateDTO> generateScheduleCandidates(ScheduleGenerateCandidatesRequestDTO dto) {
+        Integer schoolId = requireSchoolId();
+
+        // Validate and parse componentType
+        ComponentType targetType;
+        try {
+            targetType = ComponentType.valueOf(dto.componentType());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unknown component type: " + dto.componentType());
+        }
+
+        // Resolve target class groups
+        List<ClassGroup> targetClassGroups;
+        if ("SELECTED".equals(dto.coverageMode())) {
+            List<Integer> ids = dto.selectedClassSectionIds() == null ? List.of() : dto.selectedClassSectionIds();
+            if (ids.isEmpty()) throw new IllegalArgumentException("selectedClassSectionIds is required when coverageMode=SELECTED");
+            targetClassGroups = ids.stream().map(id -> requireClassGroup(id, schoolId)).toList();
+        } else {
+            // ALL_APPLICABLE: all non-deleted class groups
+            targetClassGroups = classGroupRepo.findAllBySchool_IdAndIsDeletedFalseOrderByGradeLevelAscCodeAsc(schoolId);
+        }
+
+        // Load all published assignments for the academic year (any scheme)
+        List<AssessmentSchemeAssignment> allAssignments = assignmentRepo.findActiveForGeneration(schoolId, dto.academicYearId(), null)
+                .stream()
+                .filter(a -> a.getScheme().getStatus() == AssessmentSchemeStatus.PUBLISHED)
+                .toList();
+
+        // Build candidates
+        List<ScheduleCandidateDTO> candidates = new ArrayList<>();
+        // For date distribution
+        List<String> datePool = buildDatePool(dto);
+        Map<Integer, LocalDate> subjectDateMap = new LinkedHashMap<>(); // for SAME_SUBJECT_DATE
+        int[] datePoolIndex = {0};
+
+        for (ClassGroup classGroup : targetClassGroups) {
+            List<Integer> subjectIds;
+            if ("SELECTED".equals(dto.subjectMode())) {
+                subjectIds = dto.selectedSubjectIds() == null ? List.of() : dto.selectedSubjectIds();
+            } else {
+                // ALL_MAPPED: subjects from Academic Structure
+                subjectIds = subjectClassGroupRepo.findSubjectIdsByClassGroup_Id(classGroup.getId());
+            }
+
+            for (Integer subjectId : subjectIds) {
+                Subject subject;
+                try {
+                    subject = requireSubject(subjectId, schoolId);
+                } catch (Exception e) {
+                    continue; // skip invalid subjects
+                }
+
+                // Resolve best applicable scheme
+                AssessmentScheme resolvedScheme = resolveScheme(allAssignments, classGroup, subject);
+                if (resolvedScheme == null) {
+                    candidates.add(new ScheduleCandidateDTO(
+                            classGroup.getId(), classGroupLabel(classGroup),
+                            subjectId, subject.getName(),
+                            null, null, null, null, null,
+                            null, dto.defaultStartTime(), dto.defaultEndTime(),
+                            null, "NO_SCHEME", "No published assessment scheme applies to this class/subject.", 1));
+                    continue;
+                }
+
+                // Find matching component by type
+                AssessmentComponent component = resolvedScheme.getComponents().stream()
+                        .filter(c -> c.getComponentType() == targetType
+                                && c.getCalculationRule() != CalculationRule.ATTENDANCE_PERCENTAGE)
+                        .min(Comparator.comparing(AssessmentComponent::getSequence))
+                        .orElse(null);
+
+                if (component == null) {
+                    candidates.add(new ScheduleCandidateDTO(
+                            classGroup.getId(), classGroupLabel(classGroup),
+                            subjectId, subject.getName(),
+                            resolvedScheme.getId(), resolvedScheme.getName(),
+                            null, null, dto.componentType(),
+                            null, dto.defaultStartTime(), dto.defaultEndTime(),
+                            null, "NO_COMPONENT",
+                            "Scheme '" + resolvedScheme.getName() + "' has no component of type " + dto.componentType() + ".", 1));
+                    continue;
+                }
+
+                // Resolve max marks
+                BigDecimal maxMarks;
+                if ("MANUAL".equals(dto.maxMarksStrategy())) {
+                    maxMarks = dto.manualMaxMarks();
+                } else {
+                    maxMarks = component.getMaxMarks();
+                }
+                String validationStatus = "OK";
+                String validationMessage = null;
+                if (maxMarks == null || maxMarks.compareTo(BigDecimal.ZERO) <= 0) {
+                    validationStatus = "MISSING_MAX_MARKS";
+                    validationMessage = "Max marks is not set. Please enter max marks before saving.";
+                    maxMarks = null;
+                }
+
+                // Resolve date
+                LocalDate date = resolveDate(dto, datePool, datePoolIndex, subjectDateMap, subjectId);
+
+                int totalInstances = resolveInstancesToGenerate(component);
+                for (int seq = 1; seq <= totalInstances; seq++) {
+                    candidates.add(new ScheduleCandidateDTO(
+                            classGroup.getId(), classGroupLabel(classGroup),
+                            subjectId, subject.getName(),
+                            resolvedScheme.getId(), resolvedScheme.getName(),
+                            component.getId(), component.getName(), component.getComponentType().name(),
+                            date, dto.defaultStartTime(), dto.defaultEndTime(),
+                            maxMarks, validationStatus, validationMessage, seq));
+                }
+            }
+        }
+
+        return candidates;
+    }
+
+    /**
+     * Persists a batch of schedule candidates as DRAFT assessment instances.
+     * Each item must reference a valid published scheme + component.
+     * Max marks may be null/0 for drafts (must be set > 0 before publishing).
+     */
+    @Transactional
+    public List<AssessmentInstanceDTO> bulkSaveDrafts(BulkSaveDraftsRequestDTO dto) {
+        Integer schoolId = requireSchoolId();
+        List<AssessmentInstance> created = new ArrayList<>();
+
+        for (BulkSaveDraftsRequestDTO.BulkSaveDraftItemDTO item : dto.candidates()) {
+            AssessmentScheme scheme = requirePublishedScheme(item.schemeId(), schoolId);
+            AssessmentComponent component = requireComponentOfScheme(item.componentId(), scheme.getId());
+            validateComponentAllowsInstance(component);
+
+            // Validate time window if both times given
+            if (item.startTime() != null && item.endTime() != null
+                    && !item.endTime().isAfter(item.startTime())) {
+                throw new IllegalArgumentException("endTime must be after startTime for: " + item.name());
+            }
+
+            // Validate max marks only if non-null and non-zero
+            if (item.maxMarks() != null && item.maxMarks().compareTo(BigDecimal.ZERO) < 0) {
+                throw new IllegalArgumentException("maxMarks cannot be negative for: " + item.name());
+            }
+
+            AssessmentInstance instance = new AssessmentInstance();
+            instance.setSchool(requireSchool(schoolId));
+            instance.setAcademicYear(scheme.getAcademicYear());
+            instance.setScheme(scheme);
+            instance.setComponent(component);
+            instance.setName(item.name().trim());
+            instance.setSubject(requireSubject(item.subjectId(), schoolId));
+            instance.setClassGroup(requireClassGroup(item.classGroupId(), schoolId));
+            instance.setAssessmentDate(item.assessmentDate());
+            instance.setStartTime(item.startTime());
+            instance.setEndTime(item.endTime());
+            instance.setRoom(item.roomId() != null ? requireRoom(item.roomId(), schoolId) : null);
+            // Use ZERO as placeholder; publish validates > 0
+            instance.setMaxMarks(item.maxMarks() != null && item.maxMarks().compareTo(BigDecimal.ZERO) > 0
+                    ? item.maxMarks() : BigDecimal.ZERO);
+            instance.setSequence(item.sequence() != null ? item.sequence() : 1);
+            instance.setStatus(AssessmentInstanceStatus.DRAFT);
+
+            created.add(instanceRepo.save(instance));
+        }
+
+        return created.stream().map(this::toDTO).toList();
+    }
+
+    // ─────────────────────── Scheme Override Resolver ────────────────────────
+
+    /**
+     * Returns the most specific published assessment scheme for the given class group and subject,
+     * using the override hierarchy:
+     * SECTION_SUBJECT (6) > CLASS_SUBJECT (5) > SUBJECT (4) > SECTION (3) > CLASS (2) > SCHOOL (1).
+     */
+    private AssessmentScheme resolveScheme(
+            List<AssessmentSchemeAssignment> assignments,
+            ClassGroup classGroup,
+            Subject subject) {
+        AssessmentSchemeAssignment best = null;
+        int bestScore = 0;
+        for (AssessmentSchemeAssignment a : assignments) {
+            int score = scoreScopeMatch(a, classGroup, subject);
+            if (score > bestScore) {
+                bestScore = score;
+                best = a;
+            }
+        }
+        return best != null ? best.getScheme() : null;
+    }
+
+    private int scoreScopeMatch(AssessmentSchemeAssignment a, ClassGroup classGroup, Subject subject) {
+        return switch (a.getScopeType()) {
+            case SCHOOL -> 1;
+            case CLASS -> (a.getClassGroup() != null
+                    && Objects.equals(a.getClassGroup().getGradeLevel(), classGroup.getGradeLevel())) ? 2 : 0;
+            case SECTION -> (a.getClassGroup() != null
+                    && Objects.equals(a.getClassGroup().getId(), classGroup.getId())) ? 3 : 0;
+            case SUBJECT -> (a.getSubject() != null
+                    && Objects.equals(a.getSubject().getId(), subject.getId())) ? 4 : 0;
+            case CLASS_SUBJECT -> (a.getClassGroup() != null && a.getSubject() != null
+                    && Objects.equals(a.getClassGroup().getGradeLevel(), classGroup.getGradeLevel())
+                    && Objects.equals(a.getSubject().getId(), subject.getId())) ? 5 : 0;
+            case SECTION_SUBJECT -> (a.getClassGroup() != null && a.getSubject() != null
+                    && Objects.equals(a.getClassGroup().getId(), classGroup.getId())
+                    && Objects.equals(a.getSubject().getId(), subject.getId())) ? 6 : 0;
+        };
+    }
+
+    // ─────────────────────────── Date Distribution ───────────────────────────
+
+    private List<String> buildDatePool(ScheduleGenerateCandidatesRequestDTO dto) {
+        if (dto.dateWindowFrom() == null || dto.dateWindowTo() == null) return List.of();
+        List<String> pool = new ArrayList<>();
+        LocalDate d = dto.dateWindowFrom();
+        while (!d.isAfter(dto.dateWindowTo())) {
+            pool.add(d.toString());
+            d = d.plusDays(1);
+        }
+        return pool;
+    }
+
+    private LocalDate resolveDate(
+            ScheduleGenerateCandidatesRequestDTO dto,
+            List<String> datePool,
+            int[] datePoolIndex,
+            Map<Integer, LocalDate> subjectDateMap,
+            Integer subjectId) {
+        String mode = dto.dateDistributionMode() == null ? "LEAVE_BLANK" : dto.dateDistributionMode();
+        if ("LEAVE_BLANK".equals(mode) || datePool.isEmpty()) return null;
+        if ("SAME_SUBJECT_DATE".equals(mode)) {
+            return subjectDateMap.computeIfAbsent(subjectId, k -> {
+                if (datePoolIndex[0] >= datePool.size()) datePoolIndex[0] = 0;
+                LocalDate date = LocalDate.parse(datePool.get(datePoolIndex[0]));
+                datePoolIndex[0]++;
+                return date;
+            });
+        }
+        // AUTO_DISTRIBUTE
+        if (datePoolIndex[0] >= datePool.size()) datePoolIndex[0] = 0;
+        LocalDate date = LocalDate.parse(datePool.get(datePoolIndex[0]));
+        datePoolIndex[0]++;
+        return date;
+    }
+
+    private String classGroupLabel(ClassGroup cg) {
+        if (cg.getDisplayName() != null && !cg.getDisplayName().isBlank()) return cg.getDisplayName();
+        return cg.getCode();
     }
 
     private int resolveInstancesToGenerate(AssessmentComponent component) {

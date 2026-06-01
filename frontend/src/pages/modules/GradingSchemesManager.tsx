@@ -652,7 +652,7 @@ function SchemeForm({
               <MultiSelectDropdown
                 values={selSections.map(String)}
                 onChange={(vals) => setSelSections(vals.map(Number))}
-                options={sectionsByGrade.flatMap(({ grade, label: gradeLabel, sections }) =>
+                options={sectionsByGrade.flatMap(({ label: gradeLabel, sections }) =>
                   sections.map((cg) => ({
                     value: String(cg.id),
                     label: `${gradeLabel} – ${cg.section ?? cg.displayName ?? `#${cg.id}`}`,
@@ -760,7 +760,6 @@ function PortalMenu({ triggerRect, onClose, actions }: {
           className={action.danger ? '' : ''}
           style={{
             display: 'block',
-            width: '100%',
             textAlign: 'left',
             padding: '8px 14px',
             fontSize: 13,

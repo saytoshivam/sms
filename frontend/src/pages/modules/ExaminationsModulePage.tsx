@@ -8,8 +8,8 @@ import { SelectKeeper } from '../../components/SelectKeeper';
 import { MultiSelectKeeper } from '../../components/MultiSelectKeeper';
 import { DateKeeper } from '../../components/DateKeeper';
 import { TimeKeeper } from '../../components/TimeKeeper';
-import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { GradingSchemesManager } from './GradingSchemesManager';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { api } from '../../lib/api';
 import { pageContent, type SpringPage } from '../../lib/springPageContent';
 import { formatApiError } from '../../lib/errors';
@@ -403,20 +403,7 @@ const PRESETS: ComponentPreset[] = [
   },
 ];
 
-const DEFAULT_GRADING_BANDS = [
-  { grade: 'A1', minPercent: 91, maxPercent: 100, sequence: 1 },
-  { grade: 'A2', minPercent: 81, maxPercent: 90, sequence: 2 },
-  { grade: 'B1', minPercent: 71, maxPercent: 80, sequence: 3 },
-  { grade: 'B2', minPercent: 61, maxPercent: 70, sequence: 4 },
-  { grade: 'C1', minPercent: 51, maxPercent: 60, sequence: 5 },
-  { grade: 'C2', minPercent: 41, maxPercent: 50, sequence: 6 },
-  { grade: 'D', minPercent: 33, maxPercent: 40, sequence: 7 },
-  { grade: 'E', minPercent: 0, maxPercent: 32, sequence: 8 },
-];
 
-function scopeLabel(s: AssessmentScheme): string {
-  return s.assignmentLabel || 'Not assigned';
-}
 
 function computeScopeLabel(s: AssessmentScheme): string {
   const active = (s.assignments ?? []).filter((a) => a.active);
@@ -522,15 +509,6 @@ function validateComponentRules(c: AssessmentComponent): string[] {
   return issues;
 }
 
-function readiness(components: AssessmentComponent[]): { ready: boolean; label: string } {
-  const t = totalWeightage(components);
-  const hasRuleIssue = components.some((c) => validateComponentRules(c).length > 0);
-  if (components.length === 0) return { ready: false, label: 'Needs components' };
-  if (t !== 100) return { ready: false, label: `Cannot publish: total weightage is ${t}% (must be 100%)` };
-  if (hasRuleIssue) return { ready: false, label: 'Cannot publish: one or more component rules are invalid' };
-  return { ready: true, label: 'Ready to publish' };
-}
-
 function schemeReadiness(s: AssessmentScheme): { ready: boolean; label: string; level: StatusLevel } {
   if (s.status === 'ARCHIVED') return { ready: false, label: 'Archived / Read-only', level: 'idle' };
   if (s.status === 'PUBLISHED') return { ready: true, label: 'Published', level: 'ok' };
@@ -558,28 +536,6 @@ function gradeSelectionLabel(grades: number[]): string {
   if (clean.length === 1) return `Grade ${clean[0]}`;
   const contiguous = clean.every((grade, index) => index === 0 || grade === clean[index - 1] + 1);
   return contiguous ? `Grades ${clean[0]}–${clean[clean.length - 1]}` : `Grades ${clean.join(', ')}`;
-}
-
-function calculationRuleLabel(c: AssessmentComponent): string {
-  if (c.calculationRule === 'BEST_N_OF_M' && c.bestOfCount && c.totalAssessments) return `Best ${c.bestOfCount} of ${c.totalAssessments}`;
-  if (c.calculationRule === 'SINGLE_ASSESSMENT') return 'Single Assessment';
-  if (c.calculationRule === 'ATTENDANCE_PERCENTAGE') return 'Attendance Percentage';
-  return toDisplayLabel(c.calculationRule);
-}
-
-function componentMaxMarksLabel(c: AssessmentComponent): string {
-  if (c.maxMarks == null) return '—';
-  const marks = `${c.maxMarks} marks`;
-  return c.calculationRule === 'BEST_N_OF_M' || c.calculationRule === 'SUM' || c.calculationRule === 'AVERAGE'
-    ? `${marks} each`
-    : marks;
-}
-
-function componentStatusLabel(c: AssessmentComponent): string {
-  if (Number(c.weightagePercent) <= 0) return 'Missing weightage';
-  const issues = validateComponentRules(c);
-  if (issues.length > 0) return 'Invalid rule';
-  return 'Ready';
 }
 
 function createEmptyComponent(sequence: number): ComponentForm {
@@ -634,7 +590,7 @@ export function ExaminationsModulePage() {
 
   const gradingQ = useQuery({
     queryKey: ['grading-schemes'],
-    queryFn: async () => (await api.get<GradingScheme[]>('/api/exams/grading-schemes')).data,
+    queryFn: async () => (await api.get<GradingScheme[]>('/api/grading-schemes')).data,
   });
 
   const classGroups = pageContent(classGroupsQ.data ?? null);
@@ -692,7 +648,6 @@ export function ExaminationsModulePage() {
         <AssessmentSchemesPanel
           schemes={schemes}
           selectedScheme={selectedScheme}
-          selectedSchemeLoading={selectedSchemeQ.isLoading}
           classGroups={classGroups}
           gradeOptions={gradeOptions}
           subjects={subjects}
@@ -965,7 +920,6 @@ function OverviewPanel({ schemes, gradingCount }: { schemes: AssessmentScheme[];
 function AssessmentSchemesPanel({
   schemes,
   selectedScheme,
-  selectedSchemeLoading,
   classGroups,
   gradeOptions,
   subjects,
@@ -976,7 +930,6 @@ function AssessmentSchemesPanel({
 }: {
   schemes: AssessmentScheme[];
   selectedScheme: AssessmentScheme | null;
-  selectedSchemeLoading: boolean;
   classGroups: ClassGroup[];
   gradeOptions: number[];
   subjects: SubjectLite[];
@@ -1103,7 +1056,7 @@ function AssessmentSchemesPanel({
 
   function renderSchemeRows(rows: AssessmentScheme[], isArchived: boolean) {
     return rows.map((s) => {
-      const { state, level } = computeSchemeState(s);
+      const { state } = computeSchemeState(s);
       const total = totalWeightage(s.components ?? []);
       const overrideBadge = getOverrideBadge(s);
       const scopeCategory = getScopeCategory(s);
@@ -1634,7 +1587,6 @@ function AssessmentSchemesPanel({
       ) : (
         <SchemeDetailCard
           scheme={selectedScheme}
-          loading={selectedSchemeLoading}
           onClose={onCloseScheme}
           onRefresh={onRefresh}
         />
@@ -1645,17 +1597,16 @@ function AssessmentSchemesPanel({
 
 function SchemeDetailCard({
   scheme,
-  loading,
   onClose,
   onRefresh,
 }: {
   scheme: AssessmentScheme;
-  loading: boolean;
   onClose: () => void;
   onRefresh: () => Promise<void>;
 }) {
   const total = totalWeightage(scheme.components ?? []);
   const ready = schemeReadiness(scheme);
+  const { state: schemeState, level: schemeLevel } = computeSchemeState(scheme);
 
   const [editingComponentId, setEditingComponentId] = useState<number | null>(null);
   const [componentForm, setComponentForm] = useState<ComponentForm>(() =>
@@ -1684,17 +1635,6 @@ function SchemeDetailCard({
     onError: (e) => toast.error('Could not save component', formatApiError(e)),
   });
 
-  const removeComponent = useMutation({
-    mutationFn: async (componentId: number) => {
-      await api.delete(`/api/exams/schemes/${scheme.id}/components/${componentId}`);
-    },
-    onSuccess: async () => {
-      toast.success('Component removed');
-      await onRefresh();
-    },
-    onError: (e) => toast.error('Could not remove component', formatApiError(e)),
-  });
-
   const publishScheme = useMutation({
     mutationFn: async () => (await api.post<AssessmentScheme>(`/api/exams/schemes/${scheme.id}/publish`)).data,
     onSuccess: async () => {
@@ -1706,8 +1646,7 @@ function SchemeDetailCard({
 
   const cloneForRevise = useMutation({
     mutationFn: async () => (await api.post<AssessmentScheme>(`/api/exams/schemes/${scheme.id}/clone`)).data,
-    onSuccess: async (created) => {
-      toast.success('Scheme cloned', 'A draft copy has been created — you can now edit it.');
+    onSuccess: async (_created) => {
       await onRefresh();
       onClose();
     },
@@ -1735,23 +1674,7 @@ function SchemeDetailCard({
     onError: (e) => toast.error('Could not apply preset', formatApiError(e)),
   });
 
-  const onEditRow = (c: AssessmentComponent) => {
-    setEditingComponentId(c.id);
-    setComponentForm({
-      name: c.name,
-      componentType: c.componentType,
-      weightagePercent: String(c.weightagePercent),
-      maxMarks: c.maxMarks == null ? '' : String(c.maxMarks),
-      calculationRule: c.calculationRule,
-      totalAssessments: c.totalAssessments == null ? '' : String(c.totalAssessments),
-      bestOfCount: c.bestOfCount == null ? '' : String(c.bestOfCount),
-      mandatory: c.mandatory,
-      sequence: String(c.sequence),
-    });
-  };
-
   const isReadOnly = scheme.status === 'PUBLISHED' || scheme.status === 'ARCHIVED';
-  const statusLabel = scheme.status === 'DRAFT' ? 'Draft' : scheme.status === 'PUBLISHED' ? 'Published' : 'Archived';
 
   return (
     <div className="stack" style={{ gap: 12 }}>
@@ -1763,42 +1686,7 @@ function SchemeDetailCard({
               {scheme.academicYearLabel ?? `Year ${scheme.academicYearId}`} · {computeScopeLabel(scheme)} · Total weightage: {total}%
             </div>
             <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-              {(() => {
-                const { state } = computeSchemeState(scheme);
-                const stateColors: Record<SchemeState, { bg: string; color: string }> = {
-                  'Needs Setup':     { bg: '#fef3c7', color: '#92400e' },
-                  'Draft':           { bg: '#f1f5f9', color: '#475569' },
-                  'Ready to Publish':{ bg: '#dbeafe', color: '#1d4ed8' },
-                  'Published':       { bg: '#d1fae5', color: '#065f46' },
-                  'Archived':        { bg: '#f1f5f9', color: '#64748b' },
-                  'Has Conflicts':   { bg: '#fee2e2', color: '#991b1b' },
-                };
-                const sc = stateColors[state];
-                return (
-                  <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 8px', borderRadius: 4, background: sc.bg, color: sc.color }}>
-                    {state}
-                  </span>
-                );
-              })()}
-              {(() => {
-                const badge = getOverrideBadge(scheme);
-                return badge ? (
-                  <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4, background: '#ede9fe', color: '#5b21b6' }}>
-                    ↑ {badge}
-                  </span>
-                ) : null;
-              })()}
-              {isReadOnly && (
-                <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>
-                  Read-only · Clone to revise
-                </span>
-              )}
-              {scheme.status === 'DRAFT' && (
-                <StatusChip
-                  level={(scheme.assignments ?? []).some((a) => a.active) ? 'ok' : 'error'}
-                  label={(scheme.assignments ?? []).some((a) => a.active) ? computeScopeLabel(scheme) : 'Needs assignment'}
-                />
-              )}
+              <StatusChip level={schemeLevel} label={schemeState} />
             </div>
           </div>
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
@@ -2089,467 +1977,6 @@ function ComponentFormPanel({
   );
 }
 
-function academicYearDisplay(academicYears: AcademicYear[], academicYearId: number | null): string {
-  if (academicYearId == null) return 'Effective Period: Always';
-  const label = academicYears.find((y) => y.id === academicYearId)?.label;
-  return label ? formatAcademicYear(label) : `Year ${academicYearId}`;
-}
-
-function gradingEffectivePeriodLabel(g: GradingScheme, academicYears: AcademicYear[]): string {
-  const fromId = g.effectiveFromAcademicYearId ?? g.academicYearId ?? null;
-  const toId = g.effectiveToAcademicYearId ?? g.academicYearId ?? null;
-  if (fromId == null && toId == null) return 'Always';
-  const from = fromId == null ? 'Beginning' : academicYearDisplay(academicYears, fromId);
-  const to = toId == null ? 'No end' : academicYearDisplay(academicYears, toId);
-  return fromId === toId ? from : `${from} → ${to}`;
-}
-
-function gradingScopeLabel(g: GradingScheme): string {
-  return g.scope === 'CLASS_GROUP' ? 'Class Group' : 'School-wide';
-}
-
-function gradingAppliesToLabel(g: GradingScheme): string {
-  return g.scope === 'CLASS_GROUP' ? (g.classGroupLabel ?? 'Selected class') : 'All classes';
-}
-function gradingBandLabel(grade: string): string {
-  const labels: Record<string, string> = {
-    A1: 'Outstanding',
-    A2: 'Excellent',
-    B1: 'Very Good',
-    B2: 'Good',
-    C1: 'Average',
-    C2: 'Below Average',
-    D: 'Pass',
-    E: 'Fail',
-    F: 'Fail',
-  };
-  return labels[grade.toUpperCase()] ?? toDisplayLabel(grade);
-}
-function gradingPassingPercent(g: GradingScheme): number | null {
-  if (g.passingPercent != null && Number.isFinite(Number(g.passingPercent))) return Number(g.passingPercent);
-  const bands = (g.bands ?? []).filter((b) => Number.isFinite(Number(b.minPercent)) && Number.isFinite(Number(b.maxPercent)));
-  const explicitPass = bands.find((b) => b.grade.toUpperCase() === 'D');
-  if (explicitPass) return Number(explicitPass.minPercent);
-  const passBands = bands.filter((b) => !['E', 'F', 'FAIL'].includes(b.grade.toUpperCase()));
-  if (passBands.length === 0) return null;
-  return Math.min(...passBands.map((b) => Number(b.minPercent)));
-}
-function validateGradingScheme(g: GradingScheme): string[] {
-  const issues: string[] = [];
-  const bands = (g.bands ?? []).slice().sort((a, b) => Number(a.minPercent) - Number(b.minPercent));
-  if (bands.length === 0) issues.push('At least one grade band is required.');
-  const labels = new Set<string>();
-  for (const band of bands) {
-    if (labels.has(band.grade.toUpperCase())) issues.push(`Duplicate grade label: ${band.grade}`);
-    labels.add(band.grade.toUpperCase());
-    if (Number(band.minPercent) > Number(band.maxPercent)) issues.push(`${band.grade}: min percentage must be less than or equal to max percentage.`);
-  }
-  for (let i = 1; i < bands.length; i += 1) {
-    const prev = bands[i - 1];
-    const cur = bands[i];
-    if (Number(cur.minPercent) <= Number(prev.maxPercent)) issues.push(`${prev.grade}/${cur.grade}: overlapping percentage ranges.`);
-    if (Number(cur.minPercent) > Number(prev.maxPercent) + 1) issues.push(`${prev.grade}/${cur.grade}: missing percentage gap.`);
-  }
-  if (bands.length > 0) {
-    if (Number(bands[0].minPercent) > 0) issues.push('Ranges must cover 0%.');
-    if (Number(bands[bands.length - 1].maxPercent) < 100) issues.push('Ranges must cover 100%.');
-  }
-  if (gradingPassingPercent(g) == null) issues.push('Passing threshold is not configured.');
-  return Array.from(new Set(issues));
-}
-function gradingState(g: GradingScheme): { label: 'Active' | 'Draft' | 'Has Conflicts'; level: StatusLevel } {
-  if (validateGradingScheme(g).length > 0) return { label: 'Has Conflicts', level: 'error' };
-  return g.active ? { label: 'Active', level: 'ok' } : { label: 'Draft', level: 'warn' };
-}
-function GradingPanel({
-  gradingSchemes,
-  academicYears,
-  classGroups,
-  onCreated,
-}: {
-  gradingSchemes: GradingScheme[];
-  academicYears: AcademicYear[];
-  classGroups: ClassGroup[];
-  onCreated: () => Promise<void>;
-}) {
-  const [createOpen, setCreateOpen] = useState(false);
-  const [selectedGradingId, setSelectedGradingId] = useState<number | null>(null);
-  const [gradingName, setGradingName] = useState('Default Grading Scheme');
-  const [gradingScope, setGradingScope] = useState<'SCHOOL' | 'CLASS_GROUP'>('SCHOOL');
-  const [classGroupId, setClassGroupId] = useState('');
-  const [passingPercent, setPassingPercent] = useState('33');
-  const [defaultScheme, setDefaultScheme] = useState(true);
-  const [effectiveFromAcademicYearId, setEffectiveFromAcademicYearId] = useState('');
-  const [effectiveToAcademicYearId, setEffectiveToAcademicYearId] = useState('');
-  const [draftBands, setDraftBands] = useState(() => DEFAULT_GRADING_BANDS.map((b, i) => ({ ...b, gradePoint: null as number | null, sequence: i + 1 })));
-  const [gradingSearch, setGradingSearch] = useState('');
-  const [filterScope, setFilterScope] = useState('');
-  const [filterAcademicYearId, setFilterAcademicYearId] = useState('');
-  const [filterState, setFilterState] = useState('');
-  const [activeMenuId, setActiveMenuId] = useState<number | null>(null);
-  const createBasicGrading = useMutation({
-    mutationFn: async () => {
-      const payload = {
-        name: gradingName.trim() || 'Default Grading Scheme',
-        scope: gradingScope,
-        classGroupId: gradingScope === 'CLASS_GROUP' && classGroupId ? Number(classGroupId) : null,
-        defaultScheme,
-        passingPercent: Number(passingPercent) || 33,
-        effectiveFromAcademicYearId: effectiveFromAcademicYearId ? Number(effectiveFromAcademicYearId) : null,
-        effectiveToAcademicYearId: effectiveToAcademicYearId ? Number(effectiveToAcademicYearId) : null,
-        active: true,
-        bands: draftBands.map((b, i) => ({ ...b, sequence: b.sequence ?? i + 1 })),
-      };
-      return (await api.post<GradingScheme>('/api/exams/grading-schemes', payload)).data;
-    },
-    onSuccess: async () => {
-      toast.success('Grading scheme created');
-      setCreateOpen(false);
-      setGradingName('Default Grading Scheme');
-      setGradingScope('SCHOOL');
-      setClassGroupId('');
-      setPassingPercent('33');
-      setDefaultScheme(true);
-      setEffectiveFromAcademicYearId('');
-      setEffectiveToAcademicYearId('');
-      setDraftBands(DEFAULT_GRADING_BANDS.map((b, i) => ({ ...b, gradePoint: null as number | null, sequence: i + 1 })));
-      await onCreated();
-    },
-    onError: (e) => toast.error('Could not create grading scheme', formatApiError(e)),
-  });
-  const selectedGrading = gradingSchemes.find((g) => g.id === selectedGradingId) ?? null;
-  if (selectedGrading) {
-    return <GradingDetailCard scheme={selectedGrading} academicYears={academicYears} onBack={() => setSelectedGradingId(null)} />;
-  }
-  const total = gradingSchemes.length;
-  const active = gradingSchemes.filter((g) => g.active).length;
-  const drafts = gradingSchemes.filter((g) => !g.active).length;
-  const conflicts = gradingSchemes.filter((g) => validateGradingScheme(g).length > 0).length;
-  const filtered = gradingSchemes.filter((g) => {
-    const q = gradingSearch.trim().toLowerCase();
-    const state = gradingState(g).label;
-    if (q && !g.name.toLowerCase().includes(q) && !gradingAppliesToLabel(g).toLowerCase().includes(q)) return false;
-    if (filterScope && g.scope !== filterScope) return false;
-    if (filterAcademicYearId) {
-      const yearId = Number(filterAcademicYearId);
-      const from = g.effectiveFromAcademicYearId ?? g.academicYearId ?? null;
-      const to = g.effectiveToAcademicYearId ?? g.academicYearId ?? null;
-      if (!((from == null || yearId >= from) && (to == null || yearId <= to))) return false;
-    }
-    if (filterState && state !== filterState) return false;
-    return true;
-  });
-  const summaryCards = [
-    { label: 'Total grading schemes', value: total, bg: '#eff6ff', color: '#1d4ed8' },
-    { label: 'Active schemes', value: active, bg: '#d1fae5', color: '#065f46' },
-    { label: 'Draft schemes', value: drafts, bg: '#fef3c7', color: '#92400e' },
-    { label: 'Conflicts', value: conflicts, bg: conflicts > 0 ? '#fee2e2' : '#f1f5f9', color: conflicts > 0 ? '#991b1b' : '#475569' },
-  ];
-  return (
-    <div className="stack" style={{ gap: 12 }}>
-      <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontWeight: 950, fontSize: 18 }}>Grading Schemes</div>
-            <div className="muted" style={{ marginTop: 5, fontSize: 13 }}>
-              Create and manage grade bands used for result calculation.
-            </div>
-            <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-              Grading schemes define grade bands used after weighted score calculation.
-            </div>
-          </div>
-          <button type="button" className="btn" onClick={() => setCreateOpen((v) => !v)} disabled={createBasicGrading.isPending}>
-            {createOpen ? 'Close form' : 'Create Grading Scheme'}
-          </button>
-        </div>
-      </div>
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
-        {summaryCards.map((card) => (
-          <div key={card.label} className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.08)', background: card.bg }}>
-            <div style={{ fontSize: 11, fontWeight: 900, color: card.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{card.label}</div>
-            <div style={{ fontSize: 26, fontWeight: 950, color: card.color, marginTop: 4 }}>{card.value}</div>
-          </div>
-        ))}
-      </div>
-      {createOpen ? (
-        <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-          <div style={{ fontWeight: 900 }}>Create Grading Scheme</div>
-          <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-            Define reusable grade bands. Leave the effective period empty to apply across academic years.
-          </div>
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 10 }}>
-            <label className="stack" style={{ gap: 6 }}>
-              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme name</span>
-              <input value={gradingName} onChange={(e) => setGradingName(e.target.value)} />
-            </label>
-            <label className="stack" style={{ gap: 6 }}>
-              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scope</span>
-              <SmartSelect
-                value={gradingScope}
-                onChange={(v) => { setGradingScope((v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP'); if (v !== 'CLASS_GROUP') setClassGroupId(''); }}
-                options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]}
-                placeholder="Select scope"
-              />
-            </label>
-            {gradingScope === 'CLASS_GROUP' ? (
-              <label className="stack" style={{ gap: 6 }}>
-                <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Applies to class</span>
-                <SmartSelect
-                  value={classGroupId}
-                  onChange={setClassGroupId}
-                  options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Grade ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
-                  placeholder="Select class"
-                  searchable
-                />
-              </label>
-            ) : null}
-            <label className="stack" style={{ gap: 6 }}>
-              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Passing percentage</span>
-              <input type="number" min={0} max={100} step="0.01" value={passingPercent} onChange={(e) => setPassingPercent(e.target.value)} />
-            </label>
-            <label className="stack" style={{ gap: 6 }}>
-              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Effective From (optional)</span>
-              <SmartSelect value={effectiveFromAcademicYearId} onChange={setEffectiveFromAcademicYearId} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="Always" allowClear />
-            </label>
-            <label className="stack" style={{ gap: 6 }}>
-              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Effective To (optional)</span>
-              <SmartSelect value={effectiveToAcademicYearId} onChange={setEffectiveToAcademicYearId} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="Always" allowClear />
-            </label>
-            <label className="row" style={{ gap: 8, alignItems: 'center', marginTop: 22 }}>
-              <input type="checkbox" checked={defaultScheme} onChange={(e) => setDefaultScheme(e.target.checked)} />
-              <span style={{ fontSize: 13 }}>Default scheme</span>
-            </label>
-          </div>
-          <div style={{ overflowX: 'auto', marginTop: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Grade bands</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr>{['Grade', 'Min %', 'Max %', 'Grade Point'].map((h) => <th key={h} style={{ textAlign: 'left', padding: 6 }}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {draftBands.map((b, idx) => (
-                  <tr key={idx}>
-                    <td style={{ padding: '4px 6px' }}>
-                      <input value={b.grade} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} style={{ width: 70 }} />
-                    </td>
-                    <td style={{ padding: '4px 6px' }}>
-                      <input type="number" value={b.minPercent} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, minPercent: Number(e.target.value) } : r))} style={{ width: 80 }} />
-                    </td>
-                    <td style={{ padding: '4px 6px' }}>
-                      <input type="number" value={b.maxPercent} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, maxPercent: Number(e.target.value) } : r))} style={{ width: 80 }} />
-                    </td>
-                    <td style={{ padding: '4px 6px' }}>
-                      <input type="number" value={b.gradePoint ?? ''} onChange={(e) => setDraftBands((rows) => rows.map((r, i) => i === idx ? { ...r, gradePoint: e.target.value === '' ? null : Number(e.target.value) } : r))} style={{ width: 90 }} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
-            <button type="button" className="btn secondary" onClick={() => setCreateOpen(false)}>Cancel</button>
-            <button type="button" className="btn" onClick={() => createBasicGrading.mutate()} disabled={createBasicGrading.isPending}>
-              {createBasicGrading.isPending ? 'Creating…' : 'Create Grading Scheme'}
-            </button>
-          </div>
-        </div>
-      ) : null}
-      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 12 }}>
-          <input
-            value={gradingSearch}
-            onChange={(e) => setGradingSearch(e.target.value)}
-            placeholder="Search grading scheme..."
-            style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', gridColumn: 'span 2' }}
-          />
-          <SmartSelect
-            value={filterScope}
-            onChange={setFilterScope}
-            options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]}
-            placeholder="All scopes"
-            allowClear
-          />
-          <SmartSelect
-            value={filterAcademicYearId}
-            onChange={setFilterAcademicYearId}
-            options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
-            placeholder="All academic years"
-            allowClear
-          />
-          <SmartSelect
-            value={filterState}
-            onChange={setFilterState}
-            options={['Active', 'Draft', 'Has Conflicts'].map((s) => ({ value: s, label: s }))}
-            placeholder="All states"
-            allowClear
-          />
-        </div>
-        <div style={{ overflowX: 'auto' }} onClick={() => activeMenuId !== null && setActiveMenuId(null)}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
-                {['Scheme Name', 'Scope', 'Applies To', 'Effective Period', 'Bands', 'Passing %', 'State', 'Actions'].map((h) => (
-                  <th key={h} style={{ padding: '8px 8px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
-                ))}
-              </tr>
-              <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.03)' }}>
-                <th style={{ padding: '8px 6px', fontWeight: 700 }}>Component name</th>
-                <th style={{ padding: '8px 6px' }}>Type</th>
-                <th style={{ padding: '8px 6px' }}>Weightage %</th>
-                <th style={{ padding: '8px 6px' }}>Max Marks</th>
-                <th style={{ padding: '8px 6px' }}>Calculation Rule</th>
-                <th style={{ padding: '8px 6px' }}>Assessments Rule</th>
-                <th style={{ padding: '8px 6px' }}>Seq</th>
-                <th style={{ padding: '8px 6px' }}>Validity</th>
-                {!isReadOnly && <th style={{ padding: '8px 6px' }}>Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={8} className="muted" style={{ padding: 16 }}>No grading schemes match the current filters.</td></tr>
-              ) : filtered.map((g) => {
-                const state = gradingState(g);
-                const passing = gradingPassingPercent(g);
-                const isMenuOpen = activeMenuId === g.id;
-                return (
-                  <tr key={g.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', cursor: 'pointer' }} onClick={() => setSelectedGradingId(g.id)}>
-                    <td style={{ padding: '9px 8px', fontWeight: 800 }}>{g.name}</td>
-                    <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>{gradingScopeLabel(g)}</td>
-                    <td style={{ padding: '9px 8px' }}>{gradingAppliesToLabel(g)}</td>
-                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>{gradingEffectivePeriodLabel(g, academicYears)}</td>
-                    <td style={{ padding: '9px 8px', textAlign: 'center' }}>{g.bands?.length ?? 0}</td>
-                    <td style={{ padding: '9px 8px', textAlign: 'center' }}>{passing != null ? `${passing}%` : '—'}</td>
-                    <td style={{ padding: '9px 8px' }}><StatusChip level={state.level} label={state.label} /></td>
-                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                        <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }} onClick={() => setSelectedGradingId(g.id)}>View</button>
-                        <div style={{ position: 'relative' }}>
-                          <button
-                            type="button"
-                            title="More actions"
-                            style={{ background: 'none', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 14, lineHeight: 1, color: '#64748b' }}
-                            onClick={(e) => { e.stopPropagation(); setActiveMenuId(isMenuOpen ? null : g.id); }}
-                          >
-                            ⋯
-                          </button>
-                          {isMenuOpen ? (
-                            <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 50, background: '#fff', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 6, boxShadow: '0 4px 12px rgba(15,23,42,0.12)', minWidth: 160, padding: '4px 0' }}>
-                              {['Edit', 'Clone', 'Archive', 'Set as Default'].map((action) => (
-                                <button
-                                  key={action}
-                                  type="button"
-                                  disabled
-                                  title="Open the grading detail page to manage this scheme"
-                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', color: '#94a3b8', cursor: 'not-allowed' }}
-                                >
-                                  {action}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingScheme; academicYears: AcademicYear[]; onBack: () => void }) {
-  const sortedBands = (scheme.bands ?? []).slice().sort((a, b) => b.maxPercent - a.maxPercent);
-  const issues = validateGradingScheme(scheme);
-  const passing = gradingPassingPercent(scheme);
-  const state = gradingState(scheme);
-  const effectivePeriod = gradingEffectivePeriodLabel(scheme, academicYears);
-  const validationRows = [
-    { label: 'No overlapping ranges', ok: !issues.some((i) => i.includes('overlapping')) },
-    { label: 'No missing percentage gaps', ok: !issues.some((i) => i.includes('missing percentage gap')) },
-    { label: 'Covers 0–100', ok: !issues.some((i) => i.includes('cover')) },
-    { label: 'Passing threshold configured', ok: passing != null },
-    { label: 'Grade labels are unique', ok: !issues.some((i) => i.includes('Duplicate grade label')) },
-    { label: 'Min percentage is less than or equal to max percentage', ok: !issues.some((i) => i.includes('min percentage')) },
-  ];
-  return (
-    <div className="stack" style={{ gap: 12 }}>
-      <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <button type="button" className="btn secondary" onClick={onBack} style={{ marginBottom: 10 }}>← Back to grading schemes</button>
-            <h2 style={{ margin: 0, fontSize: 18 }}>{scheme.name}</h2>
-            <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-              Effective Period: {effectivePeriod === 'Always' ? 'Always' : effectivePeriod}
-              {' · '}Scope: {gradingScopeLabel(scheme)} · Applies To: {gradingAppliesToLabel(scheme)}
-            </div>
-            {effectivePeriod === 'Always' ? (
-              <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>Applies across academic years.</div>
-            ) : null}
-            <div className="muted" style={{ marginTop: 5, fontSize: 12 }}>
-              Used in result calculation after weighted scores are computed. The final percentage is mapped to these grade bands.
-            </div>
-            <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-              <StatusChip level={state.level} label={state.label} />
-              <StatusChip level={passing != null ? 'ok' : 'warn'} label={passing != null ? `Passing rule: ${passing}% and above` : 'Passing rule missing'} />
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="card" style={{ padding: 12, border: `1px solid ${issues.length ? 'rgba(220,38,38,0.2)' : 'rgba(22,163,74,0.2)'}` }}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Grade Bands</div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
-                {['Grade', 'Min %', 'Max %', 'Label', 'Result'].map((h) => (
-                  <th key={h} style={{ padding: '8px 6px' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-                {sortedBands.map((b) => {
-                  const isPass = passing != null && b.maxPercent >= passing;
-                  return (
-                    <tr key={b.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
-                      <td style={{ padding: '8px 6px', fontWeight: 800 }}>{b.grade}</td>
-                      <td style={{ padding: '8px 6px' }}>{b.minPercent}</td>
-                      <td style={{ padding: '8px 6px' }}>{b.maxPercent}</td>
-                      <td style={{ padding: '8px 6px' }}>{gradingBandLabel(b.grade)}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        <StatusChip level={isPass ? 'ok' : 'error'} label={isPass ? 'Pass' : 'Fail'} />
-                      </td>
-                    </tr>
-                  );
-                })}
-                {sortedBands.length === 0 ? (
-                  <tr><td colSpan={5} className="muted" style={{ padding: 12 }}>No grade bands configured.</td></tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-          {validationRows.map((row) => (
-            <div key={row.label} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-              <span style={{ color: row.ok ? '#16a34a' : '#dc2626', fontWeight: 900 }}>{row.ok ? '✓' : '!'}</span>
-              <span>{row.label}</span>
-            </div>
-          ))}
-        </div>
-        {issues.length > 0 ? (
-          <ul style={{ margin: '10px 0 0', paddingLeft: 18, color: '#991b1b', fontSize: 12 }}>
-            {issues.map((issue) => <li key={issue}>{issue}</li>)}
-          </ul>
-        ) : (
-          <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>All grade band validations passed.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─────────────────────────── Instance status helpers ────────────────────────
 
 function instanceStatusLevel(status: AssessmentInstanceStatus): StatusLevel {
@@ -2574,18 +2001,6 @@ function instanceStatusLabel(status: AssessmentInstanceStatus): string {
     case 'PUBLISHED': return 'Published';
     case 'CANCELLED': return 'Cancelled';
   }
-}
-
-function resolveInstancesToGenerate(component: AssessmentComponent): number {
-  const r = component.calculationRule;
-  if (r === 'SINGLE_ASSESSMENT' || r === 'HIGHEST' || r === 'MANUAL') return 1;
-  if (r === 'BEST_N_OF_M' || r === 'SUM' || r === 'AVERAGE') return component.totalAssessments ?? 1;
-  return 1;
-}
-
-function defaultGeneratedName(component: AssessmentComponent, sequence: number): string {
-  if (sequence <= 1 && component.calculationRule === 'SINGLE_ASSESSMENT') return component.name;
-  return `${component.name} ${sequence}`;
 }
 
 function menuItemStyle(color?: string): React.CSSProperties {
@@ -2614,7 +2029,6 @@ function ExamSchedulePanel({
   const [filterAcademicYearId, setFilterAcademicYearId] = useState('');
   const [filterSchemeStatus, setFilterSchemeStatus] = useState<'' | 'PUBLISHED' | 'ARCHIVED'>('');
   const [filterSchemeId, setFilterSchemeId] = useState('');
-  const [filterGrade, setFilterGrade] = useState('');
   const [filterClassGroupId, setFilterClassGroupId] = useState('');
   const [filterSubjectId, setFilterSubjectId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -2686,19 +2100,6 @@ function ExamSchedulePanel({
   const scheduledCount = allData.filter((a) => a.status === 'SCHEDULED').length;
   const activeCount = allData.filter((a) => ['MARKS_ENTRY_OPEN','MARKS_SUBMITTED','LOCKED','PUBLISHED'].includes(a.status)).length;
   const cancelledCount = allData.filter((a) => a.status === 'CANCELLED').length;
-
-  // Grade options derived from classGroups
-  const gradeOptions = useMemo(() => {
-    const set = new Set<number>();
-    classGroups.forEach((cg) => { if (cg.gradeLevel != null) set.add(cg.gradeLevel); });
-    return [...set].sort((a, b) => a - b);
-  }, [classGroups]);
-
-  // Section options filtered by selected grade
-  const sectionOptions = useMemo(() => {
-    if (!filterGrade) return classGroups;
-    return classGroups.filter((cg) => String(cg.gradeLevel) === filterGrade);
-  }, [classGroups, filterGrade]);
 
   // Scheme options filtered by status toggle
   const filteredSchemeOptions = useMemo(() => {
@@ -2793,21 +2194,31 @@ function ExamSchedulePanel({
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
-            <SmartSelect value={filterClassGroupId} onChange={setFilterClassGroupId}
+            <SmartSelect
+              value={filterClassGroupId}
+              onChange={setFilterClassGroupId}
               options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
               placeholder="All classes" allowClear searchable />
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
-            <SmartSelect value={filterSubjectId} onChange={setFilterSubjectId}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
-              placeholder="All subjects" allowClear searchable />
+            <SmartSelect
+              value={filterSubjectId}
+              onChange={setFilterSubjectId}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} – ${s.name}` : s.name }))}
+              placeholder="All subjects"
+              allowClear
+              searchable
+            />
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Status</span>
-            <SelectKeeper value={filterStatus} onChange={setFilterStatus}
+            <SelectKeeper
+              value={filterStatus}
+              onChange={setFilterStatus}
               emptyValueLabel="All statuses"
-              options={STATUS_OPTIONS.map((s) => ({ value: s, label: instanceStatusLabel(s) }))} />
+              options={STATUS_OPTIONS.map((s) => ({ value: s, label: instanceStatusLabel(s) }))}
+            />
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>From date</span>
@@ -2833,10 +2244,11 @@ function ExamSchedulePanel({
       ) : null}
 
       {panelMode === 'bulk' ? (
-        <BulkGeneratePanel
-          publishedSchemes={publishedSchemes}
+        <SmartGeneratePanel
+          academicYears={academicYears}
           classGroups={classGroups}
           subjects={subjects}
+          rooms={roomsQ.data ?? []}
           onSuccess={async () => { setPanelMode('none'); await onRefresh(); }}
           onCancel={() => setPanelMode('none')}
         />
@@ -2864,7 +2276,7 @@ function ExamSchedulePanel({
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
-                  {['Assessment', 'Scheme', 'Component', 'Class / Section', 'Subject', 'Date & Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
+                  {['Assessment', 'Component', 'Class / Section', 'Subject', 'Date & Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
                     <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontWeight: 800, fontSize: 12 }}>{h}</th>
                   ))}
                 </tr>
@@ -2910,7 +2322,7 @@ function ExamSchedulePanel({
                       <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.componentName}</td>
                       <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.classGroupLabel}</td>
                       <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.subjectName}</td>
-                      <td style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontSize: 12 }}>
+                      <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
                         {a.assessmentDate ? (
                           <div><div>{a.assessmentDate}</div>{timeStr && <div className="muted" style={{ fontSize: 11 }}>{timeStr}</div>}</div>
                         ) : <span className="muted">—</span>}
@@ -2962,7 +2374,7 @@ function ExamSchedulePanel({
   );
 }
 
-// ─────────────────────────────── Create Assessment Form ─────────────────────────────
+// ─────────────────────────────── Create Assessment Form ────────────────────────────
 
 type AssessmentCreateForm = {
   schemeId: string; componentId: string; classGroupId: string; subjectId: string;
@@ -3054,7 +2466,7 @@ function CreateAssessmentForm({
           <label className="stack" style={{ gap: 6 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
             <SmartSelect value={form.subjectId} onChange={(v) => set('subjectId', v)}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} – ${s.name}` : s.name }))}
               placeholder="Select subject…" allowClear searchable />
           </label>
           <label className="stack" style={{ gap: 6 }}>
@@ -3092,7 +2504,9 @@ function CreateAssessmentForm({
         </div>
         <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" className="btn secondary" onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn" disabled={createMutation.isPending} onClick={() => createMutation.mutate()}>
+          <button type="button" className="btn"
+            disabled={createMutation.isPending}
+            onClick={() => createMutation.mutate()}>
             {createMutation.isPending ? 'Creating…' : 'Create Assessment'}
           </button>
         </div>
@@ -3175,7 +2589,7 @@ function EditAssessmentForm({
           <label className="stack" style={{ gap: 6 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
             <SmartSelect value={form.subjectId} onChange={(v) => set('subjectId', v)}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} – ${s.name}` : s.name }))}
               placeholder="Select subject…" searchable />
           </label>
           <label className="stack" style={{ gap: 6 }}>
@@ -3215,137 +2629,476 @@ function EditAssessmentForm({
   );
 }
 
-// ─────────────────────────────── Bulk Generate Panel ────────────────────────────────
+// ─────────────────────────────── Smart Generate Panel Types ──────────────────────
 
-type BulkPreviewRow = { componentName: string; classGroupLabel: string; subjectName: string; names: string[] };
+type SmartGenForm = {
+  academicYearId: string;
+  componentType: string;
+  coverageMode: 'ALL_APPLICABLE' | 'SELECTED';
+  selectedClassSectionIds: string[];
+  subjectMode: 'ALL_MAPPED' | 'SELECTED';
+  selectedSubjectIds: string[];
+  dateWindowFrom: string;
+  dateWindowTo: string;
+  defaultStartTime: string;
+  defaultEndTime: string;
+  roomStrategy: 'LEAVE_BLANK';
+  maxMarksStrategy: 'USE_COMPONENT' | 'MANUAL';
+  manualMaxMarks: string;
+  dateDistributionMode: 'LEAVE_BLANK' | 'AUTO_DISTRIBUTE' | 'SAME_SUBJECT_DATE';
+};
 
-function BulkGeneratePanel({
-  publishedSchemes, classGroups, subjects, onSuccess, onCancel,
+type ScheduleCandidate = {
+  classGroupId: number;
+  classGroupLabel: string;
+  subjectId: number;
+  subjectName: string;
+  schemeId: number | null;
+  schemeName: string | null;
+  componentId: number | null;
+  componentName: string | null;
+  componentType: string | null;
+  assessmentDate: string | null;
+  defaultStartTime: string | null;
+  defaultEndTime: string | null;
+  maxMarks: number | null;
+  validationStatus: 'OK' | 'NO_SCHEME' | 'NO_COMPONENT' | 'MISSING_MAX_MARKS';
+  validationMessage: string | null;
+  sequence: number;
+};
+
+type EditableCandidate = ScheduleCandidate & {
+  _key: string;
+  editDate: string;
+  editStartTime: string;
+  editEndTime: string;
+  editMaxMarks: string;
+  editRoomId: string;
+  editName: string;
+  selected: boolean;
+};
+
+function emptySmartGenForm(): SmartGenForm {
+  return {
+    academicYearId: '',
+    componentType: '',
+    coverageMode: 'ALL_APPLICABLE',
+    selectedClassSectionIds: [],
+    subjectMode: 'ALL_MAPPED',
+    selectedSubjectIds: [],
+    dateWindowFrom: '',
+    dateWindowTo: '',
+    defaultStartTime: '',
+    defaultEndTime: '',
+    roomStrategy: 'LEAVE_BLANK',
+    maxMarksStrategy: 'USE_COMPONENT',
+    manualMaxMarks: '',
+    dateDistributionMode: 'LEAVE_BLANK',
+  };
+}
+
+function candidateToEditable(c: ScheduleCandidate, idx: number): EditableCandidate {
+  return {
+    ...c,
+    _key: `${c.classGroupId}-${c.subjectId}-${c.componentId}-${c.sequence}-${idx}`,
+    editDate: c.assessmentDate ?? '',
+    editStartTime: c.defaultStartTime ?? '',
+    editEndTime: c.defaultEndTime ?? '',
+    editMaxMarks: c.maxMarks != null ? String(c.maxMarks) : '',
+    editRoomId: '',
+    editName: c.componentName
+      ? (c.sequence > 1 ? `${c.componentName} ${c.sequence}` : c.componentName)
+      : '',
+    selected: c.validationStatus === 'OK',
+  };
+}
+
+const COMPONENT_TYPE_LABELS: Record<string, string> = {
+  CONTINUOUS_ASSESSMENT: 'Continuous Assessment (CA)',
+  MID_TERM: 'Mid Term',
+  END_TERM: 'End Term',
+  PRACTICAL: 'Practical',
+  PROJECT: 'Project',
+  ASSIGNMENT: 'Assignment',
+  ATTENDANCE: 'Attendance',
+  NOTEBOOK: 'Notebook',
+  VIVA: 'Viva',
+  OTHER: 'Other',
+};
+
+// ─────────────────────────────── Smart Generate Panel ─────────────────────────
+
+function SmartGeneratePanel({
+  academicYears,
+  classGroups,
+  subjects,
+  rooms,
+  onSuccess,
+  onCancel,
 }: {
-  publishedSchemes: AssessmentScheme[];
+  academicYears: AcademicYear[];
   classGroups: ClassGroup[];
   subjects: SubjectLite[];
+  rooms: RoomLite[];
   onSuccess: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [step, setStep] = useState<'configure' | 'preview'>('configure');
-  const [schemeId, setSchemeId] = useState('');
-  const [selectedClassGroupIds, setSelectedClassGroupIds] = useState<string[]>([]);
-  const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
-  const [preview, setPreview] = useState<BulkPreviewRow[]>([]);
+  const [form, setForm] = useState<SmartGenForm>(emptySmartGenForm);
+  const [candidates, setCandidates] = useState<EditableCandidate[]>([]);
+  const [bulkDate, setBulkDate] = useState('');
+  const [showBulkDatePicker, setShowBulkDatePicker] = useState(false);
+  const setF = <K extends keyof SmartGenForm>(k: K, v: SmartGenForm[K]) => setForm((p) => ({ ...p, [k]: v }));
 
-  const selectedScheme = publishedSchemes.find((s) => String(s.id) === schemeId) ?? null;
-  const nonAttendanceComponents = (selectedScheme?.components ?? []).filter((c) => c.calculationRule !== 'ATTENDANCE_PERCENTAGE');
+  const roomOptions = rooms.map((r) => ({ value: String(r.id), label: `${r.buildingName ?? r.building} / ${r.roomNumber}` }));
 
-  const generateMutation = useMutation({
+  const previewMutation = useMutation({
     mutationFn: async () => {
-      if (!schemeId || selectedClassGroupIds.length === 0 || selectedSubjectIds.length === 0)
-        throw new Error('Fill in scheme, classes, and subjects');
-      return (await api.post<AssessmentInstance[]>(`/api/exams/schemes/${schemeId}/generate-assessments`, {
-        classGroupIds: selectedClassGroupIds.map(Number),
-        subjectIds: selectedSubjectIds.map(Number),
-        assessmentDates: [],
+      if (!form.academicYearId) throw new Error('Select an academic year');
+      if (!form.componentType) throw new Error('Select a component type');
+      if (form.coverageMode === 'SELECTED' && form.selectedClassSectionIds.length === 0)
+        throw new Error('Select at least one class/section');
+      if (form.subjectMode === 'SELECTED' && form.selectedSubjectIds.length === 0)
+        throw new Error('Select at least one subject');
+      if (form.maxMarksStrategy === 'MANUAL' && (!form.manualMaxMarks || Number(form.manualMaxMarks) <= 0))
+        throw new Error('Enter a valid max marks value');
+      return (await api.post<ScheduleCandidate[]>('/api/exams/schedule/generate-candidates', {
+        academicYearId: Number(form.academicYearId),
+        componentType: form.componentType,
+        coverageMode: form.coverageMode,
+        selectedClassSectionIds: form.coverageMode === 'SELECTED' ? form.selectedClassSectionIds.map(Number) : null,
+        subjectMode: form.subjectMode,
+        selectedSubjectIds: form.subjectMode === 'SELECTED' ? form.selectedSubjectIds.map(Number) : null,
+        dateWindowFrom: form.dateWindowFrom || null,
+        dateWindowTo: form.dateWindowTo || null,
+        defaultStartTime: form.defaultStartTime || null,
+        defaultEndTime: form.defaultEndTime || null,
+        roomStrategy: form.roomStrategy,
+        maxMarksStrategy: form.maxMarksStrategy,
+        manualMaxMarks: form.maxMarksStrategy === 'MANUAL' ? Number(form.manualMaxMarks) : null,
+        dateDistributionMode: form.dateDistributionMode,
+      })).data;
+    },
+    onSuccess: (data) => {
+      setCandidates(data.map((c, i) => candidateToEditable(c, i)));
+      setStep('preview');
+    },
+    onError: (e) => toast.error('Preview failed', formatApiError(e)),
+  });
+
+  const saveDraftsMutation = useMutation({
+    mutationFn: async (rows: EditableCandidate[]) => {
+      const valid = rows.filter((r) => r.selected && r.validationStatus === 'OK');
+      if (valid.length === 0) throw new Error('No valid candidates selected');
+      return (await api.post<AssessmentInstance[]>('/api/exams/schedule/bulk-save-drafts', {
+        candidates: valid.map((r) => ({
+          classGroupId: r.classGroupId,
+          subjectId: r.subjectId,
+          schemeId: r.schemeId,
+          componentId: r.componentId,
+          name: r.editName || r.componentName || 'Assessment',
+          assessmentDate: r.editDate || null,
+          startTime: r.editStartTime || null,
+          endTime: r.editEndTime || null,
+          roomId: r.editRoomId ? Number(r.editRoomId) : null,
+          maxMarks: r.editMaxMarks ? Number(r.editMaxMarks) : null,
+          sequence: r.sequence,
+        })),
       })).data;
     },
     onSuccess: async (data) => {
-      toast.success('Generated', `${data.length} assessment${data.length === 1 ? '' : 's'} created.`);
+      toast.success('Saved', `${data.length} draft assessment${data.length === 1 ? '' : 's'} created.`);
       await onSuccess();
     },
-    onError: (e) => toast.error('Could not generate', formatApiError(e)),
+    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
-  function buildPreview() {
-    if (!selectedScheme) return;
-    const cgMap = new Map(classGroups.map((cg) => [String(cg.id), cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}`]));
-    const sMap = new Map(subjects.map((s) => [String(s.id), s.name]));
-    const rows: BulkPreviewRow[] = [];
-    for (const comp of nonAttendanceComponents) {
-      const count = resolveInstancesToGenerate(comp);
-      for (const cgId of selectedClassGroupIds) {
-        for (const sId of selectedSubjectIds) {
-          const names: string[] = [];
-          for (let i = 1; i <= count; i++) names.push(defaultGeneratedName(comp, i));
-          rows.push({ componentName: comp.name, classGroupLabel: cgMap.get(cgId) ?? cgId, subjectName: sMap.get(sId) ?? sId, names });
-        }
-      }
-    }
-    setPreview(rows);
-    setStep('preview');
+  const updateCandidate = (key: string, patch: Partial<EditableCandidate>) => {
+    setCandidates((prev) => prev.map((c) => (c._key === key ? { ...c, ...patch } : c)));
+  };
+
+  const toggleSelectAll = () => {
+    const validKeys = new Set(candidates.filter((c) => c.validationStatus === 'OK').map((c) => c._key));
+    const allSelected = candidates.filter((c) => validKeys.has(c._key)).every((c) => c.selected);
+    setCandidates((prev) => prev.map((c) => validKeys.has(c._key) ? { ...c, selected: !allSelected } : c));
+  };
+
+  const applyBulkDate = () => {
+    if (!bulkDate) return;
+    setCandidates((prev) => prev.map((c) => c.selected && c.validationStatus === 'OK' ? { ...c, editDate: bulkDate } : c));
+    setShowBulkDatePicker(false);
+    setBulkDate('');
+  };
+
+  const selectedCount = candidates.filter((c) => c.selected && c.validationStatus === 'OK').length;
+  const validCount = candidates.filter((c) => c.validationStatus === 'OK').length;
+  const issueCount = candidates.filter((c) => c.validationStatus !== 'OK').length;
+
+  if (step === 'configure') {
+    return (
+      <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.12)' }}>
+        <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 12 }}>Generate Exam Schedule</div>
+        <div className="stack" style={{ gap: 14 }}>
+          {/* Row 1: Academic year + Component type */}
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic Year *</span>
+              <SmartSelect value={form.academicYearId} onChange={(v) => setF('academicYearId', v)}
+                options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+                placeholder="Select academic year…" allowClear />
+            </label>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Component Type *</span>
+              <SmartSelect value={form.componentType} onChange={(v) => setF('componentType', v)}
+                options={Object.entries(COMPONENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+                placeholder="Select component type…" allowClear />
+            </label>
+          </div>
+
+          {/* Coverage */}
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Coverage</span>
+            <div className="row" style={{ gap: 14 }}>
+              {(['ALL_APPLICABLE', 'SELECTED'] as const).map((v) => (
+                <label key={v} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="radio" checked={form.coverageMode === v}
+                    onChange={() => setF('coverageMode', v)} />
+                  {v === 'ALL_APPLICABLE' ? 'All applicable classes/sections' : 'Limit to selected classes/sections'}
+                </label>
+              ))}
+            </div>
+            {form.coverageMode === 'SELECTED' && (
+              <MultiSelectKeeper value={form.selectedClassSectionIds} onChange={(v) => setF('selectedClassSectionIds', v)}
+                options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
+                placeholder="Select classes/sections…" />
+            )}
+          </div>
+
+          {/* Subject mode */}
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subjects</span>
+            <div className="row" style={{ gap: 14 }}>
+              {(['ALL_MAPPED', 'SELECTED'] as const).map((v) => (
+                <label key={v} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="radio" checked={form.subjectMode === v}
+                    onChange={() => setF('subjectMode', v)} />
+                  {v === 'ALL_MAPPED' ? 'All mapped subjects (from Academic Structure)' : 'Limit to selected subjects'}
+                </label>
+              ))}
+            </div>
+            {form.subjectMode === 'SELECTED' && (
+              <MultiSelectKeeper value={form.selectedSubjectIds} onChange={(v) => setF('selectedSubjectIds', v)}
+                options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} ${s.name}` : s.name }))}
+                placeholder="Select subjects…" />
+            )}
+          </div>
+
+          {/* Date window */}
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date window — From</span>
+              <DateKeeper value={form.dateWindowFrom} onChange={(v) => setF('dateWindowFrom', v)} emptyLabel="Not set" clearable />
+            </label>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date window — To</span>
+              <DateKeeper value={form.dateWindowTo} onChange={(v) => setF('dateWindowTo', v)} emptyLabel="Not set" clearable />
+            </label>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Default start time</span>
+              <TimeKeeper value={form.defaultStartTime} onChange={(v) => setF('defaultStartTime', v)} />
+            </label>
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Default end time</span>
+              <TimeKeeper value={form.defaultEndTime} onChange={(v) => setF('defaultEndTime', v)} />
+            </label>
+          </div>
+
+          {/* Max marks strategy */}
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Max Marks</span>
+            <div className="row" style={{ gap: 14 }}>
+              {(['USE_COMPONENT', 'MANUAL'] as const).map((v) => (
+                <label key={v} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="radio" checked={form.maxMarksStrategy === v} onChange={() => setF('maxMarksStrategy', v)} />
+                  {v === 'USE_COMPONENT' ? 'Use component max marks' : 'Enter manually'}
+                </label>
+              ))}
+            </div>
+            {form.maxMarksStrategy === 'MANUAL' && (
+              <input type="number" min={1} step="0.5" value={form.manualMaxMarks}
+                onChange={(e) => setF('manualMaxMarks', e.target.value)}
+                placeholder="e.g. 100" style={{ maxWidth: 160 }} />
+            )}
+          </div>
+
+          {/* Date distribution */}
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date Distribution</span>
+            <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
+              {([
+                ['LEAVE_BLANK', 'Leave dates blank'],
+                ['AUTO_DISTRIBUTE', 'Auto-distribute across date range'],
+                ['SAME_SUBJECT_DATE', 'Same date per subject across sections'],
+              ] as const).map(([v, lbl]) => (
+                <label key={v} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="radio" checked={form.dateDistributionMode === v} onChange={() => setF('dateDistributionMode', v)} />
+                  {lbl}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="muted" style={{ fontSize: 11 }}>
+            The backend will automatically resolve the applicable published assessment scheme for each class/section–subject combination
+            using the override hierarchy (Section+Subject &gt; Class+Subject &gt; Section &gt; Class &gt; School-wide).
+          </div>
+
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn secondary" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn" disabled={previewMutation.isPending}
+              onClick={() => previewMutation.mutate()}>
+              {previewMutation.isPending ? 'Building preview…' : 'Preview Schedule →'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-      <div style={{ fontWeight: 900, marginBottom: 10 }}>Generate Assessments from Scheme</div>
-      {step === 'configure' ? (
-        <div className="stack" style={{ gap: 12 }}>
-          <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Published scheme</span>
-            <SmartSelect value={schemeId} onChange={(v) => setSchemeId(v)}
-              options={publishedSchemes.map((s) => ({ value: String(s.id), label: s.name, meta: s.academicYearLabel ?? undefined }))}
-              placeholder="Select scheme…" allowClear searchable />
-          </label>
-          {selectedScheme && nonAttendanceComponents.length > 0 ? (
-            <div className="muted" style={{ fontSize: 12 }}>
-              Will generate:{' '}
-              <strong>{nonAttendanceComponents.map((c) => `${c.name} ×${resolveInstancesToGenerate(c)}`).join(', ')}</strong>
-            </div>
-          ) : null}
-          <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Sections</span>
-            <MultiSelectKeeper value={selectedClassGroupIds} onChange={setSelectedClassGroupIds}
-              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
-              placeholder="Select classes…" />
-          </label>
-          <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subjects</span>
-            <MultiSelectKeeper value={selectedSubjectIds} onChange={setSelectedSubjectIds}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
-              placeholder="Select subjects…" />
-          </label>
-          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-            <button type="button" className="btn secondary" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn"
-              disabled={!schemeId || selectedClassGroupIds.length === 0 || selectedSubjectIds.length === 0}
-              onClick={buildPreview}>
-              Preview ({selectedClassGroupIds.length} × {selectedSubjectIds.length})
-            </button>
-          </div>
-        </div>
-      ) : (
+    <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.12)' }}>
         <div className="stack" style={{ gap: 10 }}>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>
-            {preview.length} group{preview.length === 1 ? '' : 's'} to be created (existing skipped automatically)
+          {/* Preview header */}
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <div style={{ fontWeight: 900, fontSize: 14 }}>
+                Preview: {validCount} ready, {issueCount} with issues
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Review and edit before saving as drafts. Rows with issues will be skipped.
+              </div>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button type="button" className="btn secondary" style={{ fontSize: 12 }} onClick={toggleSelectAll}>
+                {candidates.filter((c) => c.validationStatus === 'OK').every((c) => c.selected) ? 'Deselect all' : 'Select all'}
+              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  className="btn secondary"
+                  style={{ fontSize: 12 }}
+                  disabled={selectedCount === 0}
+                  onClick={() => setShowBulkDatePicker((v) => !v)}
+                >
+                  Set date for selected ({selectedCount})
+                </button>
+                {showBulkDatePicker && (
+                  <div style={{ position: 'absolute', right: 0, top: '110%', zIndex: 50, background: '#fff', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 8, boxShadow: '0 4px 16px rgba(15,23,42,0.14)', padding: 12, minWidth: 200 }}>
+                    <DateKeeper value={bulkDate} onChange={setBulkDate} emptyLabel="Select date" clearable />
+                    <button type="button" className="btn" style={{ marginTop: 8, width: '100%', fontSize: 12 }} onClick={applyBulkDate} disabled={!bulkDate}>Apply to selected</button>
+                  </div>
+                )}
+              </div>
+              <button type="button" className="btn secondary" onClick={() => setStep('configure')}>← Back</button>
+            </div>
           </div>
-          <div style={{ overflowX: 'auto', maxHeight: 300, overflowY: 'auto', border: '1px solid rgba(15,23,42,0.1)', borderRadius: 6 }}>
+
+          {/* Candidates table */}
+          <div style={{ overflowX: 'auto', border: '1px solid rgba(15,23,42,0.1)', borderRadius: 6 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)', background: 'rgba(15,23,42,0.03)' }}>
-                  {['Component', 'Class', 'Subject', 'Names'].map((h) => (
-                    <th key={h} style={{ padding: '6px 8px' }}>{h}</th>
-                  ))}
+                  <th style={{ padding: '6px 8px' }}>✓</th>
+                  <th style={{ padding: '6px 8px', minWidth: 120 }}>Name</th>
+                  <th style={{ padding: '6px 8px', minWidth: 100 }}>Class / Section</th>
+                  <th style={{ padding: '6px 8px', minWidth: 100 }}>Subject</th>
+                  <th style={{ padding: '6px 8px', minWidth: 100 }}>Scheme → Component</th>
+                  <th style={{ padding: '6px 8px', minWidth: 110 }}>Date</th>
+                  <th style={{ padding: '6px 8px', minWidth: 90 }}>Start–End Time</th>
+                  <th style={{ padding: '6px 8px', minWidth: 120 }}>Room</th>
+                  <th style={{ padding: '6px 8px', minWidth: 80 }}>Max Marks</th>
+                  <th style={{ padding: '6px 8px', minWidth: 80 }}>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {preview.map((row, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
-                    <td style={{ padding: '5px 8px' }}>{row.componentName}</td>
-                    <td style={{ padding: '5px 8px' }}>{row.classGroupLabel}</td>
-                    <td style={{ padding: '5px 8px' }}>{row.subjectName}</td>
-                    <td style={{ padding: '5px 8px', color: '#64748b' }}>{row.names.join(', ')}</td>
-                  </tr>
-                ))}
+                {candidates.map((c) => {
+                  const isOk = c.validationStatus === 'OK';
+                  return (
+                    <tr key={c._key} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', background: isOk ? undefined : 'rgba(220,38,38,0.04)' }}>
+                      <td style={{ padding: '5px 8px' }}>
+                        {isOk ? (
+                          <input type="checkbox" checked={c.selected}
+                            onChange={(e) => updateCandidate(c._key, { selected: e.target.checked })} />
+                        ) : <span style={{ color: '#dc2626', fontSize: 13 }}>✗</span>}
+                      </td>
+                      <td style={{ padding: '5px 4px', minWidth: 120 }}>
+                        {isOk ? (
+                          <input value={c.editName} onChange={(e) => updateCandidate(c._key, { editName: e.target.value })}
+                            style={{ width: '100%', fontSize: 12 }} />
+                        ) : <span className="muted">{c.componentName ?? '—'}</span>}
+                      </td>
+                      <td style={{ padding: '5px 8px', fontSize: 12 }}>{c.classGroupLabel}</td>
+                      <td style={{ padding: '5px 8px', fontSize: 12 }}>{c.subjectName}</td>
+                      <td style={{ padding: '5px 8px', fontSize: 11, color: '#64748b' }}>
+                        {c.schemeName ? (
+                          <span>{c.schemeName}<br /><span style={{ fontWeight: 600, color: '#334155' }}>{c.componentName}</span></span>
+                        ) : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ padding: '5px 4px', minWidth: 110 }}>
+                        {isOk ? (
+                          <DateKeeper value={c.editDate} onChange={(v) => updateCandidate(c._key, { editDate: v })} emptyLabel="No date" clearable />
+                        ) : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ padding: '5px 4px', minWidth: 90, whiteSpace: 'nowrap' }}>
+                        {isOk ? (
+                          <span className="muted" style={{ fontSize: 11 }}>
+                            {c.editStartTime || '—'}{c.editEndTime ? `–${c.editEndTime}` : ''}
+                          </span>
+                        ) : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ padding: '5px 4px', minWidth: 120 }}>
+                        {isOk ? (
+                          <SmartSelect value={c.editRoomId} onChange={(v) => updateCandidate(c._key, { editRoomId: v })}
+                            options={roomOptions} placeholder="No room" allowClear searchable />
+                        ) : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ padding: '5px 4px', minWidth: 80 }}>
+                        {isOk ? (
+                          <input type="number" min={0.01} step="0.5" value={c.editMaxMarks}
+                            onChange={(e) => updateCandidate(c._key, { editMaxMarks: e.target.value })}
+                            style={{ width: 70, fontSize: 12 }} />
+                        ) : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ padding: '5px 8px' }}>
+                        {isOk
+                          ? <StatusChip level="ok" label="Ready" />
+                          : <StatusChip level="error" label={c.validationStatus === 'NO_SCHEME' ? 'No Scheme' : c.validationStatus === 'NO_COMPONENT' ? 'No Component' : 'Missing Marks'} />}
+                        {!isOk && c.validationMessage && (
+                          <div style={{ color: '#dc2626', fontSize: 11, marginTop: 2 }}>{c.validationMessage}</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          <div className="muted" style={{ fontSize: 12 }}>All dates start as blank (DRAFT status).</div>
-          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-            <button type="button" className="btn secondary" onClick={() => setStep('configure')}>Back</button>
-            <button type="button" className="btn" disabled={generateMutation.isPending} onClick={() => generateMutation.mutate()}>
-              {generateMutation.isPending ? 'Generating…' : 'Confirm & Generate'}
+
+          {issueCount > 0 && (
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+              Rows with issues cannot be saved. Resolve them in Assessment Schemes (publish applicable scheme or add the component type) and regenerate.
+            </div>
+          )}
+
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+            <button type="button" className="btn secondary" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn"
+              disabled={saveDraftsMutation.isPending || selectedCount === 0}
+              onClick={() => saveDraftsMutation.mutate(candidates)}>
+              {saveDraftsMutation.isPending ? 'Saving…' : `Save ${selectedCount} as Draft${selectedCount === 1 ? '' : 's'}`}
             </button>
           </div>
         </div>
-      )}
     </div>
   );
 }
@@ -3407,24 +3160,10 @@ function MarksEntryPanel({
     <div className="stack" style={{ gap: 12 }}>
       {/* Header */}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <div>
-            <div style={{ fontWeight: 900 }}>Marks Entry</div>
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              Showing assessments where marks can be entered. Use "Open Marks" on the Schedule tab to enable marks entry for an assessment.
-            </div>
-          </div>
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn secondary"
-              onClick={() => { setPanelMode(panelMode === 'bulk' ? 'none' : 'bulk'); setEditingInstance(null); }}
-            >
-              {panelMode === 'bulk' ? 'Close' : 'Generate from Scheme'}
-            </button>
-            <button type="button" className="btn"
-              onClick={() => { setPanelMode(panelMode === 'create' ? 'none' : 'create'); setEditingInstance(null); }}
-            >
-              {panelMode === 'create' ? 'Close form' : '+ Schedule Assessment'}
-            </button>
+        <div>
+          <div style={{ fontWeight: 900 }}>Marks Entry</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+            Showing assessments where marks can be entered. Use "Open Marks" on the Schedule tab to enable marks entry for an assessment.
           </div>
         </div>
       </div>
@@ -3434,63 +3173,59 @@ function MarksEntryPanel({
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
-            <SmartSelect value={filterClassGroupId} onChange={setFilterClassGroupId}
+            <SmartSelect
+              value={filterClassGroupId}
+              onChange={setFilterClassGroupId}
               options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
               placeholder="All classes" allowClear searchable />
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
-            <SmartSelect value={filterSubjectId} onChange={setFilterSubjectId}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
-              placeholder="All subjects" allowClear searchable />
+            <SmartSelect
+              value={filterSubjectId}
+              onChange={setFilterSubjectId}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} – ${s.name}` : s.name }))}
+              placeholder="All subjects" allowClear searchable
+            />
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme</span>
-            <div className="stack" style={{ gap: 4 }}>
-              <div className="row" style={{ gap: 4 }}>
-                {(['', 'PUBLISHED', 'ARCHIVED'] as const).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => { setFilterSchemeStatus(v); setFilterSchemeId(''); }}
-                    style={{
-                      fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(15,23,42,0.2)', cursor: 'pointer',
-                      background: filterSchemeStatus === v ? '#0f172a' : 'transparent',
-                      color: filterSchemeStatus === v ? '#fff' : 'inherit',
-                      fontWeight: filterSchemeStatus === v ? 700 : 400,
-                    }}
-                  >
-                    {v === '' ? 'All' : v === 'PUBLISHED' ? 'Published' : 'Archived'}
-                  </button>
-                ))}
-              </div>
-              <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
-                options={filteredSchemeOptions.map((s) => ({ value: String(s.id), label: s.name, meta: s.status === 'PUBLISHED' ? 'Published' : s.status === 'ARCHIVED' ? 'Archived' : 'Draft' }))}
-                placeholder="All schemes" allowClear searchable />
-            </div>
+            <SmartSelect
+              value={filterSchemeId}
+              onChange={setFilterSchemeId}
+              options={schemes.map((s) => ({ value: String(s.id), label: s.name }))}
+              placeholder="All schemes" allowClear searchable
+            />
           </label>
           <label className="stack" style={{ gap: 4 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Status</span>
-            <SelectKeeper value={filterStatus} onChange={setFilterStatus}
+            <SelectKeeper
+              value={filterStatus}
+              onChange={setFilterStatus}
               emptyValueLabel="All statuses"
-              options={STATUS_OPTIONS.map((s) => ({ value: s, label: instanceStatusLabel(s) }))} />
+              options={STATUS_OPTIONS.map((s) => ({ value: s, label: instanceStatusLabel(s) }))}
+            />
           </label>
         </div>
       </div>
 
-      {/* Table */}
+      {/* Assessments table */}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
         {assessmentsQ.isLoading ? (
           <div className="muted" style={{ padding: 12 }}>Loading…</div>
         ) : assessmentsQ.isError ? (
           <div style={{ color: '#b91c1c', padding: 12 }}>Failed to load assessments.</div>
+        ) : assessments.length === 0 ? (
+          <div className="muted" style={{ padding: 12 }}>
+            No assessments found with the current filters.
+          </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
-                  {['Assessment', 'Component', 'Class / Section', 'Subject', 'Date', 'Max Marks', 'Status', 'Action'].map((h) => (
-                    <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontWeight: 800, fontSize: 12 }}>{h}</th>
+                  {['Assessment', 'Scheme / Component', 'Class', 'Subject', 'Date', 'Max Marks', 'Status', 'Action'].map((h) => (
+                    <th key={h} style={{ padding: '8px 6px', fontWeight: 800, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -3498,40 +3233,28 @@ function MarksEntryPanel({
                 {assessments.map((a) => (
                   <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
                     <td style={{ padding: '8px 6px', fontWeight: 700 }}>{a.name}</td>
-                    <td style={{ padding: '8px 6px' }}>{a.componentName}</td>
-                    <td style={{ padding: '8px 6px' }}>{a.classGroupLabel}</td>
-                    <td style={{ padding: '8px 6px' }}>{a.subjectName}</td>
-                    <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>{a.assessmentDate ?? '—'}</td>
-                    <td style={{ padding: '8px 6px', textAlign: 'right', fontSize: 12 }}>{a.maxMarks}</td>
+                    <td style={{ padding: '8px 6px', fontSize: 12, color: '#475569' }}>
+                      {a.schemeName}<br /><span style={{ fontWeight: 600, color: '#334155' }}>{a.componentName}</span>
+                    </td>
+                    <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.classGroupLabel}</td>
+                    <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.subjectName}</td>
+                    <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.assessmentDate ?? <span className="muted">—</span>}</td>
+                    <td style={{ padding: '8px 6px', fontSize: 12, textAlign: 'right' }}>{a.maxMarks}</td>
                     <td style={{ padding: '8px 6px' }}>
                       <StatusChip level={instanceStatusLevel(a.status)} label={instanceStatusLabel(a.status)} />
                     </td>
-                    <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
-                      {a.status === 'MARKS_ENTRY_OPEN' ? (
-                        <button type="button" className="btn"
-                          onClick={() => setEnteringInstanceId(a.id)}>
-                          Enter Marks
-                        </button>
-                      ) : (a.status === 'MARKS_SUBMITTED' || a.status === 'LOCKED') ? (
-                        <button type="button" className="btn secondary"
-                          onClick={() => setEnteringInstanceId(a.id)}>
-                          View Marks
-                        </button>
-                      ) : (
-                        <span className="muted" style={{ fontSize: 12 }}>Open marks entry first</span>
-                      )}
+                    <td style={{ padding: '8px 6px' }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ fontSize: 11, padding: '3px 10px' }}
+                        onClick={() => setEnteringInstanceId(a.id)}
+                      >
+                        Enter Marks
+                      </button>
                     </td>
                   </tr>
                 ))}
-                {assessments.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} style={{ padding: 14, textAlign: 'center' }}>
-                      {filterStatus === 'MARKS_ENTRY_OPEN'
-                        ? 'No assessments with marks entry open. Open marks entry from the Exam Schedule tab.'
-                        : 'No assessments found for the selected filters.'}
-                    </td>
-                  </tr>
-                ) : null}
               </tbody>
             </table>
           </div>
@@ -3543,274 +3266,137 @@ function MarksEntryPanel({
 
 // ─────────────────────────────── Marks Entry Sheet ──────────────────────────────
 
-type MarkRow = {
-  studentId: number;
-  admissionNo: string;
-  fullName: string;
-  markId: number | null;
-  marksObtained: string;
-  absent: boolean;
-  absentReason: string;
-  remarks: string;
-  status: MarkStatus | null;
-};
-
 function MarksEntrySheet({ instanceId, onClose }: { instanceId: number; onClose: () => void }) {
   const qc = useQueryClient();
-  const [rows, setRows] = useState<MarkRow[]>([]);
-  const [synced, setSynced] = useState(false);
+  const [localRows, setLocalRows] = useState<MarksEntryRowDTO[] | null>(null);
 
   const sheetQ = useQuery({
     queryKey: ['marks-sheet', instanceId],
-    queryFn: async () => (await api.get<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks-sheet`)).data,
+    queryFn: async () => (await api.get<MarksEntrySheetDTO>(`/api/exams/marks/${instanceId}/sheet`)).data,
   });
 
-  // Sync sheet data into local editable rows once loaded
-  useMemo(() => {
-    if (!sheetQ.data || synced) return;
-    setRows(
-      sheetQ.data.rows.map((r) => ({
-        studentId: r.studentId,
-        admissionNo: r.admissionNo,
-        fullName: r.fullName,
-        markId: r.markId,
-        marksObtained: r.marksObtained != null ? String(r.marksObtained) : '',
-        absent: r.absent,
-        absentReason: r.absentReason ?? '',
-        remarks: r.remarks ?? '',
-        status: r.status,
-      })),
-    );
-    setSynced(true);
-  }, [sheetQ.data, synced]);
+  const rows = localRows ?? sheetQ.data?.rows ?? [];
+  const sheet = sheetQ.data;
 
-  const setRow = (studentId: number, patch: Partial<MarkRow>) =>
-    setRows((prev) => prev.map((r) => (r.studentId === studentId ? { ...r, ...patch } : r)));
+  const updateRow = (studentId: number, patch: Partial<MarksEntryRowDTO>) => {
+    setLocalRows((prev) => (prev ?? sheetQ.data?.rows ?? []).map((r) => r.studentId === studentId ? { ...r, ...patch } : r));
+  };
 
-  const buildPayload = () => ({
-    rows: rows.map((r) => ({
-      studentId: r.studentId,
-      marksObtained: r.absent ? null : r.marksObtained.trim() === '' ? null : Number(r.marksObtained),
-      absent: r.absent,
-      absentReason: r.absentReason.trim() || null,
-      remarks: r.remarks.trim() || null,
-    })),
-  });
-
-  const draftMutation = useMutation({
-    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks/draft`, buildPayload())).data,
-    onSuccess: async (data) => {
-      toast.success('Draft saved');
-      setRows(data.rows.map((r) => ({
-        studentId: r.studentId, admissionNo: r.admissionNo, fullName: r.fullName,
-        markId: r.markId, marksObtained: r.marksObtained != null ? String(r.marksObtained) : '',
-        absent: r.absent, absentReason: r.absentReason ?? '', remarks: r.remarks ?? '', status: r.status,
-      })));
-      await qc.invalidateQueries({ queryKey: ['exam-assessments-marks'] });
-    },
-    onError: (e) => toast.error('Could not save draft', formatApiError(e)),
+  const saveDraftMutation = useMutation({
+    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/marks/${instanceId}/save-draft`, { rows })).data,
+    onSuccess: async (data) => { setLocalRows(data.rows); toast.success('Draft saved'); await qc.invalidateQueries({ queryKey: ['marks-sheet', instanceId] }); },
+    onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   const submitMutation = useMutation({
-    mutationFn: async () => {
-      // Validate before submitting
-      for (const r of rows) {
-        if (!r.absent && r.marksObtained.trim() === '') {
-          throw new Error(`Marks required for ${r.fullName} (or mark as absent)`);
-        }
-        const maxM = sheetQ.data?.maxMarks ?? 0;
-        const val = Number(r.marksObtained);
-        if (!r.absent && r.marksObtained.trim() !== '' && val > maxM) {
-          throw new Error(`Marks for ${r.fullName} exceed max (${maxM})`);
-        }
-      }
-      return (await api.post<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks/submit`, buildPayload())).data;
-    },
-    onSuccess: async (data) => {
-      toast.success('Marks submitted', 'Assessment marked as submitted.');
-      setRows(data.rows.map((r) => ({
-        studentId: r.studentId, admissionNo: r.admissionNo, fullName: r.fullName,
-        markId: r.markId, marksObtained: r.marksObtained != null ? String(r.marksObtained) : '',
-        absent: r.absent, absentReason: r.absentReason ?? '', remarks: r.remarks ?? '', status: r.status,
-      })));
-      await qc.invalidateQueries({ queryKey: ['exam-assessments-marks'] });
-      await qc.invalidateQueries({ queryKey: ['exam-assessments'] });
-    },
-    onError: (e) => toast.error('Could not submit', formatApiError(e)),
+    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/marks/${instanceId}/submit`, { rows })).data,
+    onSuccess: async (data) => { setLocalRows(data.rows); toast.success('Marks submitted'); await qc.invalidateQueries({ queryKey: ['marks-sheet', instanceId] }); },
+    onError: (e) => toast.error('Submit failed', formatApiError(e)),
   });
 
-  const sheet = sheetQ.data;
-  const isLocked = sheet?.assessmentStatus === 'LOCKED' || sheet?.assessmentStatus === 'PUBLISHED';
-  const isSubmitted = sheet?.assessmentStatus === 'MARKS_SUBMITTED';
-  const maxMarks = sheet?.maxMarks ?? 100;
+  const lockMutation = useMutation({
+    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/marks/${instanceId}/lock`)).data,
+    onSuccess: async (data) => { setLocalRows(data.rows); toast.success('Marks locked'); await qc.invalidateQueries({ queryKey: ['marks-sheet', instanceId] }); },
+    onError: (e) => toast.error('Lock failed', formatApiError(e)),
+  });
 
-  const submittedCount = rows.filter((r) => r.status === 'SUBMITTED' || r.status === 'LOCKED').length;
+  const isLocked = sheet?.assessmentStatus === 'LOCKED' || sheet?.assessmentStatus === 'PUBLISHED';
+  const canSubmit = sheet?.assessmentStatus === 'MARKS_ENTRY_OPEN';
+  const canLock = sheet?.assessmentStatus === 'MARKS_SUBMITTED';
 
   return (
     <div className="stack" style={{ gap: 12 }}>
-      {/* Back + header */}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <div>
-            <button type="button" className="btn secondary" onClick={onClose} style={{ marginBottom: 8 }}>
-              ← Back to list
-            </button>
-            {sheet ? (
-              <>
-                <h2 style={{ margin: 0, fontSize: 18 }}>{sheet.assessmentName}</h2>
-                <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-                  {sheet.schemeName} · {sheet.componentName} · {sheet.classGroupLabel} · {sheet.subjectName}
-                  {sheet.assessmentDate ? ` · ${sheet.assessmentDate}` : ''}
-                  {' · '}Max: <strong>{sheet.maxMarks}</strong> marks
-                </div>
-                <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                  <StatusChip level={instanceStatusLevel(sheet.assessmentStatus)} label={instanceStatusLabel(sheet.assessmentStatus)} />
-                  <StatusChip level="idle" label={`${submittedCount} / ${rows.length} submitted`} />
-                </div>
-              </>
-            ) : sheetQ.isLoading ? (
-              <div className="muted">Loading sheet…</div>
-            ) : (
-              <div style={{ color: '#b91c1c' }}>Could not load sheet.</div>
-            )}
+            <button type="button" className="btn secondary" onClick={onClose} style={{ marginBottom: 8 }}>← Back</button>
+            <div style={{ fontWeight: 900 }}>{sheet?.assessmentName ?? 'Marks Entry'}</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>
+              {sheet?.schemeName} · {sheet?.componentName} · {sheet?.classGroupLabel} · {sheet?.subjectName} · Max: {sheet?.maxMarks}
+            </div>
           </div>
-          {!isLocked && !isSubmitted && sheet ? (
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" className="btn secondary"
-                disabled={draftMutation.isPending || submitMutation.isPending}
-                onClick={() => draftMutation.mutate()}>
-                {draftMutation.isPending ? 'Saving…' : 'Save Draft'}
-              </button>
-              <button type="button" className="btn"
-                disabled={draftMutation.isPending || submitMutation.isPending}
-                onClick={() => submitMutation.mutate()}>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn secondary" disabled={isLocked || saveDraftMutation.isPending} onClick={() => saveDraftMutation.mutate()}>
+              {saveDraftMutation.isPending ? 'Saving…' : 'Save Draft'}
+            </button>
+            {canSubmit && (
+              <button type="button" className="btn secondary" disabled={submitMutation.isPending} onClick={() => submitMutation.mutate()}>
                 {submitMutation.isPending ? 'Submitting…' : 'Submit Marks'}
               </button>
-            </div>
-          ) : null}
+            )}
+            {canLock && (
+              <button type="button" className="btn" disabled={lockMutation.isPending} onClick={() => lockMutation.mutate()}>
+                {lockMutation.isPending ? 'Locking…' : 'Lock Marks'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Marks table */}
-      {rows.length > 0 ? (
-        <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(15,23,42,0.12)' }}>
-                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>#</th>
-                  <th style={{ padding: '8px 6px' }}>Adm. No</th>
-                  <th style={{ padding: '8px 6px' }}>Student Name</th>
-                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Marks / {maxMarks}</th>
-                  <th style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>Absent</th>
-                  <th style={{ padding: '8px 6px' }}>Remarks</th>
-                  <th style={{ padding: '8px 6px' }}>Status</th>
+      {sheetQ.isLoading ? (
+        <div className="muted" style={{ padding: 16 }}>Loading marks sheet…</div>
+      ) : sheetQ.isError ? (
+        <div style={{ color: '#b91c1c', padding: 16 }}>Failed to load marks sheet.</div>
+      ) : (
+        <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)', overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
+                <th style={{ padding: '8px 6px' }}>#</th>
+                <th style={{ padding: '8px 6px' }}>Student</th>
+                <th style={{ padding: '8px 6px' }}>Roll No</th>
+                <th style={{ padding: '8px 6px' }}>Marks</th>
+                <th style={{ padding: '8px 6px' }}>Absent</th>
+                <th style={{ padding: '8px 6px' }}>Remarks</th>
+                <th style={{ padding: '8px 6px' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => (
+                <tr key={r.studentId} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
+                  <td style={{ padding: '6px 6px', color: '#94a3b8', fontSize: 12 }}>{idx + 1}</td>
+                  <td style={{ padding: '6px 6px', fontWeight: 600 }}>{r.fullName}</td>
+                  <td style={{ padding: '6px 6px', fontSize: 12, color: '#64748b' }}>{r.admissionNo}</td>
+                  <td style={{ padding: '6px 4px', minWidth: 80 }}>
+                    <input
+                      type="number"
+                      min={0}
+                      max={sheet?.maxMarks}
+                      step="0.5"
+                      disabled={isLocked || r.absent}
+                      value={r.marksObtained ?? ''}
+                      onChange={(e) => updateRow(r.studentId, { marksObtained: e.target.value === '' ? null : Number(e.target.value) })}
+                      style={{ width: 70, fontSize: 12 }}
+                    />
+                  </td>
+                  <td style={{ padding: '6px 6px' }}>
+                    <input
+                      type="checkbox"
+                      checked={r.absent}
+                      disabled={isLocked}
+                      onChange={(e) => updateRow(r.studentId, { absent: e.target.checked, marksObtained: e.target.checked ? null : r.marksObtained })}
+                    />
+                  </td>
+                  <td style={{ padding: '6px 4px', minWidth: 120 }}>
+                    <input
+                      value={r.remarks ?? ''}
+                      disabled={isLocked}
+                      onChange={(e) => updateRow(r.studentId, { remarks: e.target.value || null })}
+                      style={{ width: '100%', fontSize: 12 }}
+                    />
+                  </td>
+                  <td style={{ padding: '6px 6px' }}>
+                    <StatusChip level={markStatusLevel(r.status)} label={r.status ?? 'Not entered'} />
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, idx) => {
-                  const marksNum = row.marksObtained.trim() === '' ? null : Number(row.marksObtained);
-                  const marksError = !row.absent && marksNum !== null && marksNum > maxMarks;
-                  return (
-                    <tr key={row.studentId} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
-                      <td style={{ padding: '6px 6px', color: '#94a3b8', fontSize: 12 }}>{idx + 1}</td>
-                      <td style={{ padding: '6px 6px', fontSize: 12, color: '#64748b' }}>{row.admissionNo}</td>
-                      <td style={{ padding: '6px 6px', fontWeight: 700 }}>{row.fullName}</td>
-                      <td style={{ padding: '6px 6px' }}>
-                        <input
-                          type="number"
-                          min={0}
-                          max={maxMarks}
-                          step="0.01"
-                          value={row.absent ? '' : row.marksObtained}
-                          disabled={isLocked || row.absent}
-                          onChange={(e) => setRow(row.studentId, { marksObtained: e.target.value })}
-                          style={{
-                            width: 80,
-                            borderColor: marksError ? '#dc2626' : undefined,
-                            background: row.absent ? '#f1f5f9' : undefined,
-                          }}
-                        />
-                        {marksError ? (
-                          <div style={{ color: '#dc2626', fontSize: 11, marginTop: 2 }}>Exceeds max</div>
-                        ) : null}
-                      </td>
-                      <td style={{ padding: '6px 6px' }}>
-                        <label className="row" style={{ gap: 6, alignItems: 'center', cursor: isLocked ? 'default' : 'pointer' }}>
-                          <input
-                            type="checkbox"
-                            checked={row.absent}
-                            disabled={isLocked}
-                            onChange={(e) => setRow(row.studentId, {
-                              absent: e.target.checked,
-                              marksObtained: e.target.checked ? '' : row.marksObtained,
-                            })}
-                          />
-                          <span style={{ fontSize: 12 }}>Absent</span>
-                        </label>
-                        {row.absent ? (
-                          <input
-                            type="text"
-                            value={row.absentReason}
-                            disabled={isLocked}
-                            placeholder="Reason (optional)"
-                            onChange={(e) => setRow(row.studentId, { absentReason: e.target.value })}
-                            style={{ marginTop: 4, fontSize: 12, width: 140 }}
-                          />
-                        ) : null}
-                      </td>
-                      <td style={{ padding: '6px 6px' }}>
-                        <input
-                          type="text"
-                          value={row.remarks}
-                          disabled={isLocked}
-                          placeholder="Optional remarks"
-                          onChange={(e) => setRow(row.studentId, { remarks: e.target.value })}
-                          style={{ fontSize: 12, width: 140 }}
-                        />
-                      </td>
-                      <td style={{ padding: '6px 6px' }}>
-                        {row.status ? (
-                          <StatusChip level={markStatusLevel(row.status)} label={row.status} />
-                        ) : (
-                          <span className="muted" style={{ fontSize: 11 }}>Unsaved</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {!isLocked && !isSubmitted ? (
-            <div className="row" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-              <button type="button" className="btn secondary"
-                disabled={draftMutation.isPending || submitMutation.isPending}
-                onClick={() => draftMutation.mutate()}>
-                {draftMutation.isPending ? 'Saving…' : 'Save Draft'}
-              </button>
-              <button type="button" className="btn"
-                disabled={draftMutation.isPending || submitMutation.isPending}
-                onClick={() => submitMutation.mutate()}>
-                {submitMutation.isPending ? 'Submitting…' : 'Submit Marks'}
-              </button>
-            </div>
-          ) : null}
-          {isLocked ? (
-            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-              Marks are locked. Contact admin to reopen if needed.
-            </div>
-          ) : isSubmitted ? (
-            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-              Marks have been submitted. Contact admin to reopen for corrections.
-            </div>
-          ) : null}
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={7} className="muted" style={{ padding: 16 }}>No students found.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      ) : sheetQ.isSuccess ? (
-        <div className="card" style={{ padding: 14, border: '1px solid rgba(15,23,42,0.1)' }}>
-          <div className="muted">No students found in this class group.</div>
-        </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -3893,7 +3479,7 @@ function ComponentDetailBlock({ comp }: { comp: StudentResultComponentDTO }) {
   );
 }
 
-// ─────────────────────────────── Results Panel ───────────────────────────────
+// ──��──────────────────────────── Results Panel ───────────────────────────────
 
 function ResultsPanel({
   schemes,
@@ -3908,7 +3494,9 @@ function ResultsPanel({
 }) {
   const [filterAcademicYearId, setFilterAcademicYearId] = useState('');
   const [filterSchemeId, setFilterSchemeId] = useState('');
+  const [filterSchemeStatus, setFilterSchemeStatus] = useState<'' | 'PUBLISHED' | 'ARCHIVED'>('');
   const [filterClassGroupId, setFilterClassGroupId] = useState('');
+  const [filterGrade, setFilterGrade] = useState('');
   const [filterSubjectId, setFilterSubjectId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
@@ -3918,6 +3506,22 @@ function ResultsPanel({
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
 
   const qc = useQueryClient();
+
+  const gradeOptions = useMemo(() => {
+    const set = new Set<number>();
+    classGroups.forEach((cg) => { if (cg.gradeLevel != null) set.add(cg.gradeLevel); });
+    return [...set].sort((a, b) => a - b);
+  }, [classGroups]);
+
+  const sectionOptions = useMemo(() => {
+    if (!filterGrade) return classGroups;
+    return classGroups.filter((cg) => String(cg.gradeLevel) === filterGrade);
+  }, [classGroups, filterGrade]);
+
+  const filteredSchemeOptions = useMemo(() => {
+    if (!filterSchemeStatus) return schemes;
+    return schemes.filter((s) => s.status === filterSchemeStatus);
+  }, [schemes, filterSchemeStatus]);
 
   // Persisted results query
   const resultsQ = useQuery({
@@ -4122,7 +3726,7 @@ function ResultsPanel({
                 ))}
               </div>
               <SmartSelect value={filterSchemeId} onChange={setFilterSchemeId}
-                options={filteredSchemeOptions.map((s) => ({ value: String(s.id), label: s.name, meta: s.status === 'PUBLISHED' ? 'Published' : s.status === 'ARCHIVED' ? 'Archived' : 'Draft' }))}
+                options={filteredSchemeOptions.map((s) => ({ value: String(s.id), label: s.name, meta: s.status }))}
                 placeholder="All schemes" allowClear searchable />
             </div>
           </label>
@@ -4147,7 +3751,7 @@ function ResultsPanel({
             <SmartSelect
               value={filterSubjectId}
               onChange={(v) => { setFilterSubjectId(v); setPreviewResults(null); }}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} � ${s.name}` : s.name }))}
+              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} – ${s.name}` : s.name }))}
               placeholder="All subjects"
               allowClear
               searchable
