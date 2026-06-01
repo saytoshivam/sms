@@ -691,49 +691,95 @@ function SchemeForm({
 
 type MenuAction = { label: string; icon?: string; danger?: boolean; disabled?: boolean; onClick: () => void };
 
-function PortalMenu({ anchorRef, open, onClose, actions }: { anchorRef: React.RefObject<HTMLButtonElement | null>; open: boolean; onClose: () => void; actions: MenuAction[] }) {
+function PortalMenu({ triggerRect, onClose, actions }: {
+  triggerRect: DOMRect | null;
+  onClose: () => void;
+  actions: MenuAction[];
+}) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<React.CSSProperties>({ position: 'fixed', top: 0, right: 0, zIndex: 9999 });
 
-  useEffect(() => {
-    if (!open || !anchorRef.current) return;
-    const rect = anchorRef.current.getBoundingClientRect();
+  // Compute position synchronously from the already-captured rect
+  const style = useMemo<React.CSSProperties | null>(() => {
+    if (!triggerRect) return null;
     const OFFSET = 6;
-    const menuHeight = 240; // approximate
-    const menuWidth = 180;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const top = spaceBelow > menuHeight ? rect.bottom + OFFSET : rect.top - OFFSET - menuHeight;
-    const right = window.innerWidth - rect.right;
-    setStyle({ position: 'fixed', top: Math.max(8, top), right: Math.max(8, right), zIndex: 9999, minWidth: menuWidth });
-  }, [open, anchorRef]);
+    const estimatedHeight = actions.length * 36 + 16;
+    const spaceBelow = window.innerHeight - triggerRect.bottom;
+    const top = spaceBelow > estimatedHeight
+      ? triggerRect.bottom + OFFSET
+      : triggerRect.top - OFFSET - estimatedHeight;
+    const right = window.innerWidth - triggerRect.right;
+    return {
+      position: 'fixed',
+      top: Math.max(8, top),
+      right: Math.max(8, right),
+      minWidth: 172,
+      zIndex: 9999,
+    };
+  }, [triggerRect, actions.length]);
 
+  // Close on outside mousedown
   useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
+    if (!triggerRect) return;
+    function handle(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
     }
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
     }
-    document.addEventListener('mousedown', handleClick);
+    // Close on scroll so menu doesn't float away from the row
+    function handleScroll() { onClose(); }
+    document.addEventListener('mousedown', handle);
     document.addEventListener('keydown', handleKey);
-    return () => { document.removeEventListener('mousedown', handleClick); document.removeEventListener('keydown', handleKey); };
-  }, [open, onClose]);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handle);
+      document.removeEventListener('keydown', handleKey);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [triggerRect, onClose]);
 
-  if (!open) return null;
+  if (!triggerRect || !style) return null;
+
   return createPortal(
-    <div ref={menuRef} style={{ ...style, background: '#fff', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 6, boxShadow: '0 8px 24px rgba(15,23,42,0.16)', padding: '4px 0', minWidth: style.minWidth }}>
+    <div
+      ref={menuRef}
+      style={{
+        ...style,
+        background: '#fff',
+        border: '1.5px solid rgba(15,23,42,0.12)',
+        borderRadius: 10,
+        boxShadow: '0 8px 30px rgba(15,23,42,0.14), 0 2px 8px rgba(15,23,42,0.08)',
+        padding: '4px 0',
+      }}
+    >
       {actions.map((action) => (
         <button
           key={action.label}
           type="button"
           disabled={action.disabled}
-          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', fontSize: 13, background: 'none', border: 'none', cursor: action.disabled ? 'default' : 'pointer', color: action.danger ? '#b45309' : '#0f172a', opacity: action.disabled ? 0.5 : 1, whiteSpace: 'nowrap' }}
-          onMouseOver={(e) => { if (!action.disabled) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(15,23,42,0.05)'; }}
-          onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
-          onClick={() => { action.onClick(); onClose(); }}
+          className={action.danger ? '' : ''}
+          style={{
+            display: 'block',
+            width: '100%',
+            textAlign: 'left',
+            padding: '8px 14px',
+            fontSize: 13,
+            fontWeight: 600,
+            background: 'none',
+            border: 'none',
+            cursor: action.disabled ? 'default' : 'pointer',
+            color: action.danger ? '#b45309' : '#0f172a',
+            opacity: action.disabled ? 0.5 : 1,
+            whiteSpace: 'nowrap',
+            borderRadius: 7,
+            margin: '0 4px',
+            width: 'calc(100% - 8px)',
+          } as React.CSSProperties}
+          onMouseEnter={(e) => { if (!action.disabled) (e.currentTarget).style.background = 'rgba(234,88,12,0.09)'; }}
+          onMouseLeave={(e) => { (e.currentTarget).style.background = 'none'; }}
+          onClick={(e) => { e.stopPropagation(); action.onClick(); onClose(); }}
         >
-          {action.icon ? `${action.icon} ` : ''}{action.label}
+          {action.icon ? `${action.icon}  ` : ''}{action.label}
         </button>
       ))}
     </div>,
@@ -745,8 +791,7 @@ function RowActions({ g, onView, onEdit, onPublish, onClone, onSetDefault, onArc
   g: GradingScheme; onView: () => void; onEdit: () => void; onPublish: () => void; onClone: () => void; onSetDefault: () => void; onArchive: () => void;
   publishPending: boolean; clonePending: boolean; setDefaultPending: boolean; archivePending: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
+  const [triggerRect, setTriggerRect] = useState<DOMRect | null>(null);
   const archived = g.status === 'ARCHIVED';
   const isDraft = g.status === 'DRAFT';
   const isActive = g.status === 'ACTIVE' || g.active;
@@ -762,17 +807,20 @@ function RowActions({ g, onView, onEdit, onPublish, onClone, onSetDefault, onArc
     <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
       <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }} onClick={onView}>View</button>
       <button
-        ref={btnRef}
         type="button"
-        style={{ background: 'none', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: '#64748b' }}
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        style={{ background: 'none', border: '1.5px solid rgba(15,23,42,0.15)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: '#64748b' }}
+        onClick={(e) => {
+          e.stopPropagation();
+          // Capture the exact rect synchronously from the click event
+          setTriggerRect((prev) => prev ? null : (e.currentTarget as HTMLButtonElement).getBoundingClientRect());
+        }}
         title="More actions"
         aria-haspopup="true"
-        aria-expanded={open}
+        aria-expanded={!!triggerRect}
       >
         ⋯
       </button>
-      <PortalMenu anchorRef={btnRef} open={open} onClose={() => setOpen(false)} actions={actions} />
+      <PortalMenu triggerRect={triggerRect} onClose={() => setTriggerRect(null)} actions={actions} />
     </div>
   );
 }
