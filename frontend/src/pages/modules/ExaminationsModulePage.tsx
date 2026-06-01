@@ -2379,7 +2379,7 @@ function GradingPanel({
           <SmartSelect
             value={filterState}
             onChange={setFilterState}
-            options={(['Active', 'Draft', 'Has Conflicts'].map((s) => ({ value: s, label: s }))}
+            options={['Active', 'Draft', 'Has Conflicts'].map((s) => ({ value: s, label: s }))}
             placeholder="All states"
             allowClear
           />
