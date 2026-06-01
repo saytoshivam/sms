@@ -227,7 +227,7 @@ function statusForScheme(scheme: GradingScheme): { label: 'Active' | 'Draft' | '
 }
 
 function scopeLabel(scheme: GradingScheme | FormState): string {
-  return scheme.scope === 'CLASS_GROUP' ? 'Class Group' : 'School-wide';
+  return scheme.scope === 'CLASS_GROUP' ? 'Class' : 'School-wide';
 }
 
 function appliesToLabel(scheme: GradingScheme): string {
@@ -301,31 +301,114 @@ function SchemeForm({
   onPublish: (form: FormState) => void;
 }) {
   const [form, setForm] = useState<FormState>(initial);
-  useEffect(() => setForm(initial), [initial]);
+
+  // Derive initial selected grade level from existing classGroupIds
+  const initialGradeLevel = useMemo(() => {
+    if (initial.classGroupIds.length > 0) {
+      const cg = classGroups.find((c) => c.id === initial.classGroupIds[0]);
+      return cg?.gradeLevel != null ? String(cg.gradeLevel) : '';
+    }
+    return '';
+  }, [initial.classGroupIds, classGroups]);
+
+  const [selectedGradeLevel, setSelectedGradeLevel] = useState<string>(initialGradeLevel);
+
+  useEffect(() => {
+    setForm(initial);
+    // Re-derive grade level when initial changes (e.g. switching between edit targets)
+    if (initial.classGroupIds.length > 0) {
+      const cg = classGroups.find((c) => c.id === initial.classGroupIds[0]);
+      setSelectedGradeLevel(cg?.gradeLevel != null ? String(cg.gradeLevel) : '');
+    } else {
+      setSelectedGradeLevel('');
+    }
+  }, [initial, classGroups]);
+
   const draftIssues = validateForm(form, false);
   const publishIssues = validateForm(form, true);
   const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
+
+  // Unique sorted grade levels
+  const gradeLevelOptions = useMemo(() => {
+    const seen = new Set<number>();
+    return classGroups
+      .filter((cg) => cg.gradeLevel != null && !seen.has(cg.gradeLevel!) && seen.add(cg.gradeLevel!))
+      .sort((a, b) => (a.gradeLevel ?? 0) - (b.gradeLevel ?? 0))
+      .map((cg) => ({ value: String(cg.gradeLevel), label: `Class ${cg.gradeLevel}` }));
+  }, [classGroups]);
+
+  // Sections for the selected grade level
+  const sectionOptions = useMemo(() => {
+    if (!selectedGradeLevel) return [];
+    return classGroups
+      .filter((cg) => String(cg.gradeLevel) === selectedGradeLevel)
+      .map((cg) => ({
+        value: String(cg.id),
+        label: cg.section ? `Section ${cg.section}` : (cg.displayName ?? `ID ${cg.id}`),
+      }));
+  }, [classGroups, selectedGradeLevel]);
+
+  // Currently selected section id
+  const selectedSectionId = useMemo(() => {
+    if (!selectedGradeLevel) return '';
+    const match = classGroups
+      .filter((cg) => String(cg.gradeLevel) === selectedGradeLevel)
+      .find((cg) => form.classGroupIds.includes(cg.id));
+    return match ? String(match.id) : '';
+  }, [classGroups, form.classGroupIds, selectedGradeLevel]);
+
   return (
     <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
         <label className="stack" style={{ gap: 6 }}><span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scheme name</span><input value={form.name} onChange={(e) => set({ name: e.target.value })} /></label>
-        <label className="stack" style={{ gap: 6 }}><span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scope</span><SmartSelect value={form.scope} onChange={(v) => set({ scope: (v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP', classGroupIds: v === 'CLASS_GROUP' ? form.classGroupIds : [] })} options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]} /></label>
+        <label className="stack" style={{ gap: 6 }}>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Scope</span>
+          <SmartSelect
+            value={form.scope}
+            onChange={(v) => {
+              const scope = (v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP';
+              set({ scope, classGroupIds: [] });
+              setSelectedGradeLevel('');
+            }}
+            options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class' }]}
+          />
+        </label>
         <label className="stack" style={{ gap: 6 }}><span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Passing percentage</span><input type="number" min={0} max={100} step="0.01" value={form.passingPercent} onChange={(e) => set({ passingPercent: e.target.value })} /></label>
         <label className="stack" style={{ gap: 6 }}><span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Effective From (optional)</span><SmartSelect value={form.effectiveFromAcademicYearId} onChange={(v) => set({ effectiveFromAcademicYearId: v })} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="Always" allowClear /></label>
         <label className="stack" style={{ gap: 6 }}><span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Effective To (optional)</span><SmartSelect value={form.effectiveToAcademicYearId} onChange={(v) => set({ effectiveToAcademicYearId: v })} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="Always" allowClear /></label>
         <label className="row" style={{ gap: 8, alignItems: 'center', marginTop: 22 }}><input type="checkbox" checked={form.defaultScheme} onChange={(e) => set({ defaultScheme: e.target.checked })} /><span style={{ fontSize: 13 }}>Default scheme</span></label>
       </div>
+
       {form.scope === 'CLASS_GROUP' ? (
-        <div className="stack" style={{ gap: 6, marginTop: 10 }}>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Applies to classes</div>
-          <div style={{ display: 'grid', gap: 6, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-            {classGroups.map((cg) => {
-              const checked = form.classGroupIds.includes(cg.id);
-              return <label key={cg.id} className="row" style={{ gap: 8, alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={checked} onChange={(e) => set({ classGroupIds: e.target.checked ? [...form.classGroupIds, cg.id] : form.classGroupIds.filter((id) => id !== cg.id) })} /><span>{cg.displayName ?? `Grade ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}`}</span></label>;
-            })}
-          </div>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 10 }}>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class</span>
+            <SmartSelect
+              value={selectedGradeLevel}
+              onChange={(v) => {
+                setSelectedGradeLevel(v);
+                set({ classGroupIds: [] }); // clear section when class changes
+              }}
+              options={gradeLevelOptions}
+              placeholder="Select class"
+              allowClear
+            />
+          </label>
+          {selectedGradeLevel ? (
+            <label className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Section</span>
+              <SmartSelect
+                value={selectedSectionId}
+                onChange={(v) => set({ classGroupIds: v ? [Number(v)] : [] })}
+                options={sectionOptions}
+                placeholder={sectionOptions.length === 0 ? 'No sections found' : 'Select section'}
+                allowClear
+              />
+            </label>
+          ) : null}
         </div>
       ) : null}
+
       <BandEditor bands={form.bands} onChange={(bands) => set({ bands })} />
       {publishIssues.length > 0 ? <div style={{ marginTop: 10, color: '#991b1b', fontSize: 12 }}><div style={{ fontWeight: 800 }}>Validation</div><ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{publishIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div> : null}
       {submitError ? <div style={{ color: '#b91c1c', marginTop: 8 }}>{formatApiError(submitError)}</div> : null}
