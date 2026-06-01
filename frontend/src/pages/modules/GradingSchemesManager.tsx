@@ -409,11 +409,38 @@ function scopeLabel(scheme: GradingScheme | FormState): string {
   return 'School-wide';
 }
 
-function appliesToLabel(scheme: GradingScheme): string {
+function appliesToLabel(scheme: GradingScheme, classGroups: ClassGroup[] = []): string {
   if (scheme.scope !== 'CLASS_GROUP') return 'All classes';
-  const labels = scheme.classGroupLabels?.filter(Boolean) ?? [];
+  const classGroupIds = scheme.classGroupIds?.length
+    ? scheme.classGroupIds
+    : scheme.classGroupId ? [scheme.classGroupId] : [];
+  if (classGroupIds.length === 0) {
+    // Fall back to stored labels
+    const labels = scheme.classGroupLabels?.filter(Boolean) ?? [];
+    return labels.length > 0 ? labels.join(', ') : (scheme.classGroupLabel ?? 'Selected class');
+  }
+  const { sections } = deriveClassSelection(classGroupIds, classGroups);
+  if (sections.length === 0) {
+    // CLASS scope — show unique grade levels
+    const grades = new Set<number>();
+    classGroupIds.forEach((id) => {
+      const cg = classGroups.find((c) => c.id === id);
+      if (cg?.gradeLevel != null) grades.add(cg.gradeLevel);
+    });
+    if (grades.size > 0) {
+      return Array.from(grades).sort((a, b) => a - b).map((g) => `Class ${g}`).join(', ');
+    }
+  }
+  // SECTION scope — show section labels
+  const labels = classGroupIds.map((id) => {
+    const cg = classGroups.find((c) => c.id === id);
+    if (!cg) return null;
+    return cg.section ? `Class ${cg.gradeLevel} – ${cg.section}` : `Class ${cg.gradeLevel}`;
+  }).filter(Boolean) as string[];
   if (labels.length > 0) return labels.join(', ');
-  return scheme.classGroupLabel ?? 'Selected class';
+  // Final fallback to stored labels
+  const stored = scheme.classGroupLabels?.filter(Boolean) ?? [];
+  return stored.length > 0 ? stored.join(', ') : (scheme.classGroupLabel ?? 'Selected class');
 }
 
 function passingPercent(scheme: GradingScheme): number | null {
@@ -776,7 +803,7 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
   const filtered = useMemo(() => gradingSchemes.filter((g) => {
     const q = search.trim().toLowerCase();
     const state = statusForScheme(g).label;
-    if (q && !g.name.toLowerCase().includes(q) && !appliesToLabel(g).toLowerCase().includes(q)) return false;
+    if (q && !g.name.toLowerCase().includes(q) && !appliesToLabel(g, classGroups).toLowerCase().includes(q)) return false;
     if (filterScope && g.scope !== filterScope) return false;
     if (filterYear) {
       const yearId = Number(filterYear);
@@ -803,7 +830,7 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
             <div>
               <button type="button" className="btn secondary" onClick={() => setSelectedId(null)} style={{ marginBottom: 10 }}>← Back to grading schemes</button>
               <h2 style={{ margin: 0, fontSize: 18 }}>{selected.name}</h2>
-              <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>Effective Period: {effectivePeriodLabel(selected, academicYears)} · Scope: {scopeLabel(selected)} · Applies To: {appliesToLabel(selected)} · Default: {selected.defaultScheme ? 'Yes' : 'No'}</div>
+              <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>Effective Period: {effectivePeriodLabel(selected, academicYears)} · Scope: {scopeLabel(selected)} · Applies To: {appliesToLabel(selected, classGroups)} · Default: {selected.defaultScheme ? 'Yes' : 'No'}</div>
               {isInvalidPeriod(selected) ? <div style={{ marginTop: 4, fontSize: 12, color: '#b91c1c' }}>⚠ Effective from cannot be after effective to.</div> : null}
               {!isInvalidPeriod(selected) && effectivePeriodLabel(selected, academicYears) === 'Always' ? <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>Applies across academic years.</div> : null}
               <div className="muted" style={{ marginTop: 5, fontSize: 12 }}>Used in result calculation after weighted scores are computed. Class-group schemes override the school-wide default when applicable.</div>
@@ -870,7 +897,7 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
                       <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{rowHelper(g)}</div>
                     </td>
                     <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>{scopeLabel(g)}</td>
-                    <td style={{ padding: '9px 8px' }}>{appliesToLabel(g)}</td>
+                    <td style={{ padding: '9px 8px' }}>{appliesToLabel(g, classGroups)}</td>
                     <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>
                       {periodInvalid
                         ? <span style={{ color: '#b91c1c', fontSize: 12 }}>⚠ Invalid period</span>
