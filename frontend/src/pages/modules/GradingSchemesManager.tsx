@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation } from '@tanstack/react-query';
 import { StatusChip, type StatusLevel } from '../../components/module/ModulePage';
@@ -64,6 +64,171 @@ type FormState = {
   defaultScheme: boolean;
   bands: DraftBand[];
 };
+
+// ─── Multi-select dropdown ───────────────────────────────────────────────────
+type MultiSelectOption = { value: string; label: string };
+
+function MultiSelectDropdown({
+  values,
+  onChange,
+  options,
+  placeholder = 'Select…',
+}: {
+  values: string[];
+  onChange: (values: string[]) => void;
+  options: MultiSelectOption[];
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query]);
+
+  useLayoutEffect(() => {
+    if (!open) { setMenuStyle(null); return; }
+    const update = () => {
+      const el = triggerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const gap = 4;
+      const maxList = 280;
+      const vh = window.innerHeight;
+      const spaceBelow = vh - rect.bottom - gap - 8;
+      const spaceAbove = rect.top - gap - 8;
+      const openUp = spaceBelow < 180 && spaceAbove > spaceBelow;
+      const maxHeight = Math.min(maxList, Math.max(120, openUp ? spaceAbove : spaceBelow));
+      setMenuStyle({
+        position: 'fixed',
+        left: Math.max(8, rect.left),
+        top: openUp ? Math.max(8, rect.top - gap - maxHeight) : rect.bottom + gap,
+        width: rect.width,
+        maxHeight,
+        zIndex: 40000,
+      });
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => { window.removeEventListener('scroll', update, true); window.removeEventListener('resize', update); };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false); setQuery('');
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { setOpen(false); setQuery(''); } }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) requestAnimationFrame(() => searchRef.current?.focus());
+  }, [open]);
+
+  function toggle(val: string) {
+    onChange(values.includes(val) ? values.filter((v) => v !== val) : [...values, val]);
+  }
+
+  const triggerLabel = values.length === 0
+    ? placeholder
+    : values.length === 1
+      ? (options.find((o) => o.value === values[0])?.label ?? values[0])
+      : `${values.length} selected`;
+
+  return (
+    <div className="select-keeper catalog-combobox">
+      <div className="catalog-combobox__field">
+        <button
+          ref={triggerRef}
+          type="button"
+          className="catalog-combobox__input"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          style={{ textAlign: 'left', color: values.length === 0 ? '#94a3b8' : undefined, fontWeight: values.length > 0 ? 700 : 500 }}
+        >
+          <span className="catalog-combobox__text">{triggerLabel}</span>
+        </button>
+        <span className="select-keeper__chev" aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
+      </div>
+      {open && menuStyle && createPortal(
+        <div
+          ref={menuRef}
+          style={{
+            ...menuStyle,
+            background: '#fff',
+            border: '1px solid rgba(15,23,42,0.15)',
+            borderRadius: 6,
+            boxShadow: '0 8px 24px rgba(15,23,42,0.14)',
+            display: 'flex',
+            flexDirection: 'column',
+            padding: 5,
+            overflow: 'hidden',
+          }}
+        >
+          {options.length > 6 && (
+            <div style={{ padding: '0 0 6px 0', borderBottom: '1px solid rgba(15,23,42,0.08)', marginBottom: 4 }}>
+              <input
+                ref={searchRef}
+                type="text"
+                className="select-keeper__search"
+                placeholder="Search…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                style={{ margin: 0 }}
+              />
+            </div>
+          )}
+          {values.length > 0 && (
+            <button
+              type="button"
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 8px', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontStyle: 'italic', borderBottom: '1px solid rgba(15,23,42,0.07)', marginBottom: 3 }}
+              onClick={() => onChange([])}
+            >
+              — Clear all —
+            </button>
+          )}
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            {filtered.length === 0 && <li className="muted" style={{ padding: '8px 10px', fontSize: 12 }}>No matches</li>}
+            {filtered.map((opt) => {
+              const checked = values.includes(opt.value);
+              return (
+                <li key={opt.value}>
+                  <label
+                    style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '7px 10px', fontSize: 13, cursor: 'pointer', borderRadius: 4, background: checked ? 'rgba(59,130,246,0.07)' : 'transparent', fontWeight: checked ? 700 : 400 }}
+                    onMouseOver={(e) => { if (!checked) (e.currentTarget as HTMLElement).style.background = 'rgba(15,23,42,0.04)'; }}
+                    onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.background = checked ? 'rgba(59,130,246,0.07)' : 'transparent'; }}
+                  >
+                    <input type="checkbox" checked={checked} onChange={() => toggle(opt.value)} style={{ accentColor: '#3b82f6', flexShrink: 0 }} />
+                    <span>{opt.label}</span>
+                    {checked && <span style={{ marginLeft: 'auto', color: '#3b82f6', fontSize: 14 }}>✓</span>}
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const STANDARD_BANDS: DraftBand[] = [
   { grade: 'A1', minPercent: 91, maxPercent: 100, label: 'Outstanding', resultType: 'PASS', sequence: 1 },
@@ -410,31 +575,21 @@ function SchemeForm({
 
       {form.scope === 'CLASS_GROUP' ? (
         <div style={{ marginTop: 12, border: '1px solid rgba(15,23,42,0.08)', borderRadius: 6, padding: 12, background: 'rgba(15,23,42,0.01)' }}>
-          {/* Class multi-select */}
+          {/* Class multi-select dropdown */}
           <div style={{ marginBottom: 10 }}>
             <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Class <span style={{ fontWeight: 400 }}>(select one or more)</span></div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {gradeLevelOptions.map((opt) => (
-                <label key={opt.value} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '4px 10px', borderRadius: 5, border: `1px solid ${selGrades.includes(opt.value) ? '#3b82f6' : 'rgba(15,23,42,0.15)'}`, background: selGrades.includes(opt.value) ? '#eff6ff' : 'transparent' }}>
-                  <input
-                    type="checkbox"
-                    checked={selGrades.includes(opt.value)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelGrades((prev) => [...prev, opt.value]);
-                      } else {
-                        setSelGrades((prev) => prev.filter((g) => g !== opt.value));
-                        // Remove sections belonging to this grade
-                        const idsForGrade = classGroups.filter((cg) => String(cg.gradeLevel) === opt.value).map((cg) => cg.id);
-                        setSelSections((prev) => prev.filter((id) => !idsForGrade.includes(id)));
-                      }
-                    }}
-                    style={{ accentColor: '#3b82f6' }}
-                  />
-                  <span style={{ fontWeight: selGrades.includes(opt.value) ? 700 : 400 }}>{opt.label}</span>
-                </label>
-              ))}
-            </div>
+            <MultiSelectDropdown
+              values={selGrades}
+              onChange={(grades) => {
+                // Remove sections for deselected grades
+                const removed = selGrades.filter((g) => !grades.includes(g));
+                const removedIds = classGroups.filter((cg) => cg.gradeLevel != null && removed.includes(String(cg.gradeLevel))).map((cg) => cg.id);
+                setSelSections((prev) => prev.filter((id) => !removedIds.includes(id)));
+                setSelGrades(grades);
+              }}
+              options={gradeLevelOptions}
+              placeholder="Select class(es)…"
+            />
           </div>
 
           {/* Section multi-select (optional, only when classes selected and sections exist) */}
