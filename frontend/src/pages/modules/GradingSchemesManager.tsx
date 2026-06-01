@@ -86,6 +86,8 @@ function MultiSelectDropdown({
   const searchRef = useRef<HTMLInputElement>(null);
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties | null>(null);
 
+  const showSearch = options.length > 6;
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
@@ -98,19 +100,25 @@ function MultiSelectDropdown({
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const gap = 4;
-      const maxList = 280;
+      const maxList = 300;
       const vh = window.innerHeight;
+      const vw = window.innerWidth;
       const spaceBelow = vh - rect.bottom - gap - 8;
       const spaceAbove = rect.top - gap - 8;
       const openUp = spaceBelow < 180 && spaceAbove > spaceBelow;
       const maxHeight = Math.min(maxList, Math.max(120, openUp ? spaceAbove : spaceBelow));
+      const left = Math.min(Math.max(8, rect.left), Math.max(8, vw - rect.width - 8));
       setMenuStyle({
         position: 'fixed',
-        left: Math.max(8, rect.left),
+        left,
         top: openUp ? Math.max(8, rect.top - gap - maxHeight) : rect.bottom + gap,
         width: rect.width,
         maxHeight,
         zIndex: 40000,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: 5,
       });
     };
     update();
@@ -133,8 +141,8 @@ function MultiSelectDropdown({
   }, [open]);
 
   useEffect(() => {
-    if (open) requestAnimationFrame(() => searchRef.current?.focus());
-  }, [open]);
+    if (open && showSearch) requestAnimationFrame(() => searchRef.current?.focus());
+  }, [open, showSearch]);
 
   function toggle(val: string) {
     onChange(values.includes(val) ? values.filter((v) => v !== val) : [...values, val]);
@@ -156,7 +164,7 @@ function MultiSelectDropdown({
           aria-haspopup="listbox"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
-          style={{ textAlign: 'left', color: values.length === 0 ? '#94a3b8' : undefined, fontWeight: values.length > 0 ? 700 : 500 }}
+          style={{ color: values.length === 0 ? '#94a3b8' : undefined, fontWeight: values.length > 0 ? 700 : 500 }}
         >
           <span className="catalog-combobox__text">{triggerLabel}</span>
         </button>
@@ -166,23 +174,11 @@ function MultiSelectDropdown({
           </svg>
         </span>
       </div>
+
       {open && menuStyle && createPortal(
-        <div
-          ref={menuRef}
-          style={{
-            ...menuStyle,
-            background: '#fff',
-            border: '1px solid rgba(15,23,42,0.15)',
-            borderRadius: 6,
-            boxShadow: '0 8px 24px rgba(15,23,42,0.14)',
-            display: 'flex',
-            flexDirection: 'column',
-            padding: 5,
-            overflow: 'hidden',
-          }}
-        >
-          {options.length > 6 && (
-            <div style={{ padding: '0 0 6px 0', borderBottom: '1px solid rgba(15,23,42,0.08)', marginBottom: 4 }}>
+        <div ref={menuRef} className="select-keeper__menu--portal" style={menuStyle}>
+          {showSearch && (
+            <div style={{ paddingBottom: 4, borderBottom: '1px solid rgba(15,23,42,0.08)', marginBottom: 4 }}>
               <input
                 ref={searchRef}
                 type="text"
@@ -194,29 +190,39 @@ function MultiSelectDropdown({
               />
             </div>
           )}
-          {values.length > 0 && (
-            <button
-              type="button"
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 8px', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontStyle: 'italic', borderBottom: '1px solid rgba(15,23,42,0.07)', marginBottom: 3 }}
-              onClick={() => onChange([])}
-            >
-              — Clear all —
-            </button>
-          )}
-          <ul style={{ margin: 0, padding: 0, listStyle: 'none', overflowY: 'auto', flex: 1, minHeight: 0 }}>
-            {filtered.length === 0 && <li className="muted" style={{ padding: '8px 10px', fontSize: 12 }}>No matches</li>}
+          <ul className="select-keeper__menu-list" role="listbox" aria-multiselectable="true">
+            {values.length > 0 && (
+              <li role="presentation">
+                <button
+                  type="button"
+                  className="select-keeper__option"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onChange([])}
+                  style={{ fontStyle: 'italic', color: '#64748b', borderBottom: '1px solid rgba(15,23,42,0.07)', borderRadius: 0, marginBottom: 2 }}
+                >
+                  <span className="catalog-combobox__text">— Clear all —</span>
+                </button>
+              </li>
+            )}
+            {filtered.length === 0 && (
+              <li className="muted" style={{ padding: '8px 12px', fontSize: 12 }}>No matches</li>
+            )}
             {filtered.map((opt) => {
               const checked = values.includes(opt.value);
               return (
-                <li key={opt.value}>
+                <li key={opt.value} role="presentation">
                   <label
-                    style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '7px 10px', fontSize: 13, cursor: 'pointer', borderRadius: 4, background: checked ? 'rgba(59,130,246,0.07)' : 'transparent', fontWeight: checked ? 700 : 400 }}
-                    onMouseOver={(e) => { if (!checked) (e.currentTarget as HTMLElement).style.background = 'rgba(15,23,42,0.04)'; }}
-                    onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.background = checked ? 'rgba(59,130,246,0.07)' : 'transparent'; }}
+                    className={checked ? 'select-keeper__option select-keeper__option--selected' : 'select-keeper__option'}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                    onMouseDown={(e) => e.preventDefault()}
                   >
-                    <input type="checkbox" checked={checked} onChange={() => toggle(opt.value)} style={{ accentColor: '#3b82f6', flexShrink: 0 }} />
-                    <span>{opt.label}</span>
-                    {checked && <span style={{ marginLeft: 'auto', color: '#3b82f6', fontSize: 14 }}>✓</span>}
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(opt.value)}
+                      style={{ accentColor: '#ea580c', flexShrink: 0, width: 14, height: 14 }}
+                    />
+                    <span className="catalog-combobox__text">{opt.label}</span>
                   </label>
                 </li>
               );
