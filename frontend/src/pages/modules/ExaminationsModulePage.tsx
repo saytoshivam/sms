@@ -2508,7 +2508,8 @@ function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingS
                   <th key={h} style={{ padding: '8px 6px' }}>{h}</th>
                 ))}
               </tr>
-              <tbody>
+            </thead>
+            <tbody>
                 {sortedBands.map((b) => {
                   const isPass = passing != null && b.maxPercent >= passing;
                   return (
@@ -2529,7 +2530,6 @@ function GradingDetailCard({ scheme, academicYears, onBack }: { scheme: GradingS
               </tbody>
             </table>
           </div>
-        </div>
         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
           {validationRows.map((row) => (
             <div key={row.label} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
