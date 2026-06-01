@@ -56,7 +56,7 @@ type DraftBand = {
 
 type FormState = {
   name: string;
-  scope: 'SCHOOL' | 'CLASS_GROUP';
+  scope: 'SCHOOL' | 'CLASS' | 'SECTION';
   classGroupIds: number[];
   effectiveFromAcademicYearId: string;
   effectiveToAcademicYearId: string;
@@ -289,7 +289,7 @@ function defaultLabelForGrade(grade: string): string {
   return found?.label ?? grade;
 }
 
-function formFromScheme(scheme?: GradingScheme | null): FormState {
+function formFromScheme(scheme?: GradingScheme | null, classGroups: ClassGroup[] = []): FormState {
   if (!scheme) {
     return {
       name: 'Default Grading Scheme',
@@ -303,9 +303,14 @@ function formFromScheme(scheme?: GradingScheme | null): FormState {
     };
   }
   const classGroupIds = scheme.classGroupIds?.length ? scheme.classGroupIds : scheme.classGroupId ? [scheme.classGroupId] : [];
+  let scope: 'SCHOOL' | 'CLASS' | 'SECTION' = 'SCHOOL';
+  if (scheme.scope === 'CLASS_GROUP') {
+    const { sections } = deriveClassSelection(classGroupIds, classGroups);
+    scope = sections.length > 0 ? 'SECTION' : 'CLASS';
+  }
   return {
     name: scheme.name,
-    scope: scheme.scope === 'CLASS_GROUP' ? 'CLASS_GROUP' : 'SCHOOL',
+    scope,
     classGroupIds,
     effectiveFromAcademicYearId: scheme.effectiveFromAcademicYearId ? String(scheme.effectiveFromAcademicYearId) : '',
     effectiveToAcademicYearId: scheme.effectiveToAcademicYearId ? String(scheme.effectiveToAcademicYearId) : '',
@@ -328,11 +333,12 @@ function formFromScheme(scheme?: GradingScheme | null): FormState {
 }
 
 function payload(form: FormState, status: 'DRAFT' | 'ACTIVE') {
+  const isClassScope = form.scope === 'CLASS' || form.scope === 'SECTION';
   return {
     name: form.name.trim(),
-    scope: form.scope,
-    classGroupId: form.scope === 'CLASS_GROUP' ? form.classGroupIds[0] ?? null : null,
-    classGroupIds: form.scope === 'CLASS_GROUP' ? form.classGroupIds : [],
+    scope: isClassScope ? 'CLASS_GROUP' : 'SCHOOL',
+    classGroupId: isClassScope ? form.classGroupIds[0] ?? null : null,
+    classGroupIds: isClassScope ? form.classGroupIds : [],
     defaultScheme: form.defaultScheme,
     passingPercent: Number(form.passingPercent),
     effectiveFromAcademicYearId: form.effectiveFromAcademicYearId ? Number(form.effectiveFromAcademicYearId) : null,
@@ -358,7 +364,7 @@ function validateForm(form: FormState, strict: boolean): string[] {
   if (!form.scope) issues.push('Scope is required.');
   const passing = Number(form.passingPercent);
   if (!Number.isFinite(passing) || passing < 0 || passing > 100) issues.push('Passing percentage must be between 0 and 100.');
-  if (form.scope === 'CLASS_GROUP' && form.classGroupIds.length === 0) issues.push('CLASS_GROUP scope requires at least one class.');
+  if ((form.scope === 'CLASS' || form.scope === 'SECTION') && form.classGroupIds.length === 0) issues.push('Class scope requires at least one class selected.');
   const from = form.effectiveFromAcademicYearId ? Number(form.effectiveFromAcademicYearId) : null;
   const to = form.effectiveToAcademicYearId ? Number(form.effectiveToAcademicYearId) : null;
   if (from != null && to != null && from > to) issues.push('Effective From must be before or equal to Effective To.');
@@ -398,7 +404,9 @@ function statusForScheme(scheme: GradingScheme): { label: 'Active' | 'Draft' | '
 }
 
 function scopeLabel(scheme: GradingScheme | FormState): string {
-  return scheme.scope === 'CLASS_GROUP' ? 'Class' : 'School-wide';
+  if (scheme.scope === 'SECTION') return 'Section';
+  if (scheme.scope === 'CLASS' || scheme.scope === 'CLASS_GROUP') return 'Class';
+  return 'School-wide';
 }
 
 function appliesToLabel(scheme: GradingScheme): string {
@@ -504,9 +512,13 @@ function SchemeForm({
 
   // Resolve final classGroupIds for submission
   function resolveClassGroupIds(): number[] {
-    if (form.scope !== 'CLASS_GROUP' || selGrades.length === 0) return [];
-    if (selSections.length > 0) return selSections;
-    // No specific sections selected → all sections of the selected grade levels
+    if (form.scope === 'SCHOOL') return [];
+    if (selGrades.length === 0) return [];
+    if (form.scope === 'SECTION') {
+      // Specific sections only
+      return selSections;
+    }
+    // CLASS scope → all sections of selected grade levels
     return classGroups
       .filter((cg) => cg.gradeLevel != null && selGrades.includes(String(cg.gradeLevel)))
       .map((cg) => cg.id);
@@ -546,15 +558,20 @@ function SchemeForm({
   // Applied-to summary text
   const appliedSummary = useMemo(() => {
     if (selGrades.length === 0) return null;
-    if (selSections.length === 0) {
-      return `Applies to all sections of ${selGrades.sort((a, b) => Number(a) - Number(b)).map((g) => `Class ${g}`).join(', ')}`;
+    const sortedGrades = [...selGrades].sort((a, b) => Number(a) - Number(b));
+    if (form.scope === 'CLASS') {
+      return `Applies to all sections of ${sortedGrades.map((g) => `Class ${g}`).join(', ')}`;
     }
-    const labels = selSections.map((id) => {
-      const cg = classGroups.find((c) => c.id === id);
-      return cg ? `Class ${cg.gradeLevel}${cg.section ? ` – ${cg.section}` : ''}` : `#${id}`;
-    });
-    return `Applies to: ${labels.join(', ')}`;
-  }, [selGrades, selSections, classGroups]);
+    if (form.scope === 'SECTION') {
+      if (selSections.length === 0) return `Select sections to apply to`;
+      const labels = selSections.map((id) => {
+        const cg = classGroups.find((c) => c.id === id);
+        return cg ? `Class ${cg.gradeLevel}${cg.section ? ` – ${cg.section}` : ''}` : `#${id}`;
+      });
+      return `Applies to: ${labels.join(', ')}`;
+    }
+    return null;
+  }, [selGrades, selSections, classGroups, form.scope]);
 
   return (
     <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
@@ -565,12 +582,16 @@ function SchemeForm({
           <SmartSelect
             value={form.scope}
             onChange={(v) => {
-              const scope = (v || 'SCHOOL') as 'SCHOOL' | 'CLASS_GROUP';
+              const scope = (v || 'SCHOOL') as 'SCHOOL' | 'CLASS' | 'SECTION';
               set({ scope, classGroupIds: [] });
               setSelGrades([]);
               setSelSections([]);
             }}
-            options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class' }]}
+            options={[
+              { value: 'SCHOOL', label: 'School-wide' },
+              { value: 'CLASS', label: 'Class' },
+              { value: 'SECTION', label: 'Section' },
+            ]}
           />
         </label>
         <label className="stack" style={{ gap: 6 }}><span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Passing percentage</span><input type="number" min={0} max={100} step="0.01" value={form.passingPercent} onChange={(e) => set({ passingPercent: e.target.value })} /></label>
@@ -579,7 +600,7 @@ function SchemeForm({
         <label className="row" style={{ gap: 8, alignItems: 'center', marginTop: 22 }}><input type="checkbox" checked={form.defaultScheme} onChange={(e) => set({ defaultScheme: e.target.checked })} /><span style={{ fontSize: 13 }}>Default scheme</span></label>
       </div>
 
-      {form.scope === 'CLASS_GROUP' ? (
+      {(form.scope === 'CLASS' || form.scope === 'SECTION') ? (
         <div style={{ marginTop: 12, border: '1px solid rgba(15,23,42,0.08)', borderRadius: 6, padding: 12, background: 'rgba(15,23,42,0.01)' }}>
           {/* Class multi-select dropdown */}
           <div style={{ marginBottom: 10 }}>
@@ -587,7 +608,6 @@ function SchemeForm({
             <MultiSelectDropdown
               values={selGrades}
               onChange={(grades) => {
-                // Remove sections for deselected grades
                 const removed = selGrades.filter((g) => !grades.includes(g));
                 const removedIds = classGroups.filter((cg) => cg.gradeLevel != null && removed.includes(String(cg.gradeLevel))).map((cg) => cg.id);
                 setSelSections((prev) => prev.filter((id) => !removedIds.includes(id)));
@@ -598,12 +618,10 @@ function SchemeForm({
             />
           </div>
 
-          {/* Section multi-select dropdown (optional, only when classes selected and sections exist) */}
-          {selGrades.length > 0 && hasSections ? (
+          {/* Section multi-select dropdown — only shown when scope = SECTION */}
+          {form.scope === 'SECTION' && selGrades.length > 0 && hasSections ? (
             <div style={{ marginBottom: 10 }}>
-              <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                Section <span style={{ fontWeight: 400 }}>(optional — leave empty to apply to all sections)</span>
-              </div>
+              <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Section</div>
               <MultiSelectDropdown
                 values={selSections.map(String)}
                 onChange={(vals) => setSelSections(vals.map(Number))}
@@ -613,7 +631,7 @@ function SchemeForm({
                     label: `${gradeLabel} – ${cg.section ?? cg.displayName ?? `#${cg.id}`}`,
                   }))
                 )}
-                placeholder="All sections (leave empty to apply to all)"
+                placeholder="Select section(s)…"
               />
             </div>
           ) : null}
@@ -772,11 +790,11 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
 
   if (selected) {
     const state = statusForScheme(selected);
-    const issues = validateForm(formFromScheme(selected), true);
+    const issues = validateForm(formFromScheme(selected, classGroups), true);
     const pp = passingPercent(selected);
     const archived = selected.status === 'ARCHIVED';
     if (editing) {
-      return <div className="stack" style={{ gap: 12 }}><div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}><button type="button" className="btn secondary" onClick={() => setEditing(false)}>← Back to view</button><div style={{ fontWeight: 900 }}>Edit Grading Scheme</div></div><SchemeForm initial={formFromScheme(selected)} academicYears={academicYears} classGroups={classGroups} saving={save.isPending} submitError={save.error} onCancel={() => setEditing(false)} onSaveDraft={(form) => save.mutate({ id: selected.id, form, status: 'DRAFT' })} onPublish={(form) => save.mutate({ id: selected.id, form, status: 'ACTIVE' })} /></div>;
+      return <div className="stack" style={{ gap: 12 }}><div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}><button type="button" className="btn secondary" onClick={() => setEditing(false)}>← Back to view</button><div style={{ fontWeight: 900 }}>Edit Grading Scheme</div></div><SchemeForm initial={formFromScheme(selected, classGroups)} academicYears={academicYears} classGroups={classGroups} saving={save.isPending} submitError={save.error} onCancel={() => setEditing(false)} onSaveDraft={(form) => save.mutate({ id: selected.id, form, status: 'DRAFT' })} onPublish={(form) => save.mutate({ id: selected.id, form, status: 'ACTIVE' })} /></div>;
     }
     return (
       <div className="stack" style={{ gap: 12 }}>
