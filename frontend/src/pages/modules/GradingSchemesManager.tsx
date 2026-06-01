@@ -811,8 +811,9 @@ function RowActions({ g, onView, onEdit, onPublish, onClone, onSetDefault, onArc
         style={{ background: 'none', border: '1.5px solid rgba(15,23,42,0.15)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: '#64748b' }}
         onClick={(e) => {
           e.stopPropagation();
-          // Capture the exact rect synchronously from the click event
-          setTriggerRect((prev) => prev ? null : (e.currentTarget as HTMLButtonElement).getBoundingClientRect());
+          // Capture rect synchronously before React clears currentTarget
+          const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+          setTriggerRect((prev) => prev ? null : rect);
         }}
         title="More actions"
         aria-haspopup="true"
