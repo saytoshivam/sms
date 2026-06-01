@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation } from '@tanstack/react-query';
 import { StatusChip, type StatusLevel } from '../../components/module/ModulePage';
 import { SmartSelect } from '../../components/SmartSelect';
@@ -99,9 +100,17 @@ function effectivePeriodLabel(scheme: GradingScheme, academicYears: AcademicYear
   const fromId = scheme.effectiveFromAcademicYearId ?? scheme.academicYearId ?? null;
   const toId = scheme.effectiveToAcademicYearId ?? scheme.academicYearId ?? null;
   if (fromId == null && toId == null) return 'Always';
+  // Detect invalid period: from is after to
+  if (fromId != null && toId != null && fromId > toId) return 'Invalid period';
   const from = fromId == null ? 'Beginning' : yearLabel(academicYears, fromId);
   const to = toId == null ? 'No end' : yearLabel(academicYears, toId);
   return fromId === toId ? from : `${from} → ${to}`;
+}
+
+function isInvalidPeriod(scheme: GradingScheme): boolean {
+  const fromId = scheme.effectiveFromAcademicYearId ?? scheme.academicYearId ?? null;
+  const toId = scheme.effectiveToAcademicYearId ?? scheme.academicYearId ?? null;
+  return fromId != null && toId != null && fromId > toId;
 }
 
 function defaultLabelForGrade(grade: string): string {
@@ -329,6 +338,94 @@ function SchemeForm({
   );
 }
 
+type MenuAction = { label: string; icon?: string; danger?: boolean; disabled?: boolean; onClick: () => void };
+
+function PortalMenu({ anchorRef, open, onClose, actions }: { anchorRef: React.RefObject<HTMLButtonElement | null>; open: boolean; onClose: () => void; actions: MenuAction[] }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<React.CSSProperties>({ position: 'fixed', top: 0, right: 0, zIndex: 9999 });
+
+  useEffect(() => {
+    if (!open || !anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    const OFFSET = 6;
+    const menuHeight = 240; // approximate
+    const menuWidth = 180;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const top = spaceBelow > menuHeight ? rect.bottom + OFFSET : rect.top - OFFSET - menuHeight;
+    const right = window.innerWidth - rect.right;
+    setStyle({ position: 'fixed', top: Math.max(8, top), right: Math.max(8, right), zIndex: 9999, minWidth: menuWidth });
+  }, [open, anchorRef]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('mousedown', handleClick); document.removeEventListener('keydown', handleKey); };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return createPortal(
+    <div ref={menuRef} style={{ ...style, background: '#fff', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 6, boxShadow: '0 8px 24px rgba(15,23,42,0.16)', padding: '4px 0', minWidth: style.minWidth }}>
+      {actions.map((action) => (
+        <button
+          key={action.label}
+          type="button"
+          disabled={action.disabled}
+          style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', fontSize: 13, background: 'none', border: 'none', cursor: action.disabled ? 'default' : 'pointer', color: action.danger ? '#b45309' : '#0f172a', opacity: action.disabled ? 0.5 : 1, whiteSpace: 'nowrap' }}
+          onMouseOver={(e) => { if (!action.disabled) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(15,23,42,0.05)'; }}
+          onMouseOut={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+          onClick={() => { action.onClick(); onClose(); }}
+        >
+          {action.icon ? `${action.icon} ` : ''}{action.label}
+        </button>
+      ))}
+    </div>,
+    document.body
+  );
+}
+
+function RowActions({ g, onView, onEdit, onPublish, onClone, onSetDefault, onArchive, publishPending, clonePending, setDefaultPending, archivePending }: {
+  g: GradingScheme; onView: () => void; onEdit: () => void; onPublish: () => void; onClone: () => void; onSetDefault: () => void; onArchive: () => void;
+  publishPending: boolean; clonePending: boolean; setDefaultPending: boolean; archivePending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const archived = g.status === 'ARCHIVED';
+  const isDraft = g.status === 'DRAFT';
+  const isActive = g.status === 'ACTIVE' || g.active;
+
+  const actions: MenuAction[] = [];
+  if (!archived) actions.push({ label: 'Edit', icon: '✎', onClick: onEdit });
+  if (isDraft) actions.push({ label: 'Publish', icon: '✓', onClick: onPublish, disabled: publishPending });
+  actions.push({ label: 'Clone', icon: '⎘', onClick: onClone, disabled: clonePending });
+  if (isActive && !g.defaultScheme && g.scope !== 'CLASS_GROUP') actions.push({ label: 'Set as Default', icon: '★', onClick: onSetDefault, disabled: setDefaultPending });
+  if (!archived) actions.push({ label: isDraft ? 'Discard Draft' : 'Archive', icon: isDraft ? '✕' : '▾', danger: true, onClick: onArchive, disabled: archivePending });
+
+  return (
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
+      <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }} onClick={onView}>View</button>
+      <button
+        ref={btnRef}
+        type="button"
+        style={{ background: 'none', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 4, padding: '3px 8px', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: '#64748b' }}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        title="More actions"
+        aria-haspopup="true"
+        aria-expanded={open}
+      >
+        ⋯
+      </button>
+      <PortalMenu anchorRef={btnRef} open={open} onClose={() => setOpen(false)} actions={actions} />
+    </div>
+  );
+}
+
 export function GradingSchemesManager({ gradingSchemes, academicYears, classGroups, onChanged }: { gradingSchemes: GradingScheme[]; academicYears: AcademicYear[]; classGroups: ClassGroup[]; onChanged: () => Promise<void> }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -337,7 +434,6 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
   const [filterScope, setFilterScope] = useState('');
   const [filterYear, setFilterYear] = useState('');
   const [filterState, setFilterState] = useState('');
-  const [activeMenuId, setActiveMenuId] = useState<number | null>(null);
   const selected = gradingSchemes.find((g) => g.id === selectedId) ?? null;
 
   const save = useMutation({
@@ -384,9 +480,16 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
               <button type="button" className="btn secondary" onClick={() => setSelectedId(null)} style={{ marginBottom: 10 }}>← Back to grading schemes</button>
               <h2 style={{ margin: 0, fontSize: 18 }}>{selected.name}</h2>
               <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>Effective Period: {effectivePeriodLabel(selected, academicYears)} · Scope: {scopeLabel(selected)} · Applies To: {appliesToLabel(selected)} · Default: {selected.defaultScheme ? 'Yes' : 'No'}</div>
-              {effectivePeriodLabel(selected, academicYears) === 'Always' ? <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>Applies across academic years.</div> : null}
+              {isInvalidPeriod(selected) ? <div style={{ marginTop: 4, fontSize: 12, color: '#b91c1c' }}>⚠ Effective from cannot be after effective to.</div> : null}
+              {!isInvalidPeriod(selected) && effectivePeriodLabel(selected, academicYears) === 'Always' ? <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>Applies across academic years.</div> : null}
               <div className="muted" style={{ marginTop: 5, fontSize: 12 }}>Used in result calculation after weighted scores are computed. Class-group schemes override the school-wide default when applicable.</div>
-              <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}><StatusChip level={state.level} label={state.label} />{selected.defaultScheme ? <StatusChip level="info" label="Default" /> : null}<StatusChip level={pp != null ? 'ok' : 'warn'} label={pp != null ? `Passing rule: ${pp}% and above` : 'Passing rule missing'} />{selected.conflict ? <StatusChip level="error" label={selected.conflictMessage ?? 'Conflict'} /> : null}</div>
+              <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                <StatusChip level={state.level} label={state.label} />
+                {selected.status === 'ACTIVE' && selected.defaultScheme ? <StatusChip level="info" label="Default" /> : null}
+                {selected.status === 'ARCHIVED' && selected.defaultScheme ? <StatusChip level="idle" label="Was default" /> : null}
+                <StatusChip level={pp != null ? 'ok' : 'warn'} label={pp != null ? `Passing rule: ${pp}% and above` : 'Passing rule missing'} />
+                {selected.conflict ? <StatusChip level="error" label={selected.conflictMessage ?? 'Conflict'} /> : null}
+              </div>
             </div>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               {!archived ? <button type="button" className="btn" onClick={() => setEditing(true)}>Edit</button> : null}
@@ -413,7 +516,7 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
       {createOpen ? <SchemeForm initial={formFromScheme(null)} academicYears={academicYears} classGroups={classGroups} saving={save.isPending} submitError={save.error} onCancel={() => setCreateOpen(false)} onSaveDraft={(form) => save.mutate({ form, status: 'DRAFT' })} onPublish={(form) => save.mutate({ form, status: 'ACTIVE' })} /> : null}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: 12 }}><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search grading scheme..." style={{ fontSize: 13, padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', gridColumn: 'span 2' }} /><SmartSelect value={filterScope} onChange={setFilterScope} options={[{ value: 'SCHOOL', label: 'School-wide' }, { value: 'CLASS_GROUP', label: 'Class Group' }]} placeholder="All scopes" allowClear /><SmartSelect value={filterYear} onChange={setFilterYear} options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))} placeholder="All academic years" allowClear /><SmartSelect value={filterState} onChange={setFilterState} options={['Active', 'Draft', 'Archived', 'Needs Setup', 'Has Conflict'].map((s) => ({ value: s, label: s }))} placeholder="All states" allowClear /></div>
-        <div style={{ overflowX: activeMenuId !== null ? 'visible' : 'auto' }} onClick={() => activeMenuId !== null && setActiveMenuId(null)}>
+        <div style={{ overflowX: 'auto' }} >
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
@@ -429,77 +532,43 @@ export function GradingSchemesManager({ gradingSchemes, academicYears, classGrou
               ) : filtered.map((g) => {
                 const state = statusForScheme(g);
                 const pp = passingPercent(g);
-                const archived = g.status === 'ARCHIVED';
-                const isDraft = g.status === 'DRAFT';
-                const isActive = g.status === 'ACTIVE' || g.active;
-                const isMenuOpen = activeMenuId === g.id;
+                const periodLabel = effectivePeriodLabel(g, academicYears);
+                const periodInvalid = isInvalidPeriod(g);
                 return (
                   <tr key={g.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.07)', cursor: 'pointer' }} onClick={() => setSelectedId(g.id)}>
                     <td style={{ padding: '9px 8px', fontWeight: 800 }}>
                       <div className="row" style={{ gap: 6, alignItems: 'center' }}>
                         <span>{g.name}</span>
-                        {g.defaultScheme ? <StatusChip level="info" label="Default" /> : null}
+                        {g.status === 'ACTIVE' && g.defaultScheme ? <StatusChip level="info" label="Default" /> : null}
+                        {g.status === 'ARCHIVED' && g.defaultScheme ? <StatusChip level="idle" label="Was default" /> : null}
                         {g.conflict ? <StatusChip level="error" label="Conflict" /> : null}
                       </div>
                       <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>{rowHelper(g)}</div>
                     </td>
                     <td style={{ padding: '9px 8px', color: '#475569', whiteSpace: 'nowrap' }}>{scopeLabel(g)}</td>
                     <td style={{ padding: '9px 8px' }}>{appliesToLabel(g)}</td>
-                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>{effectivePeriodLabel(g, academicYears)}</td>
+                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>
+                      {periodInvalid
+                        ? <span style={{ color: '#b91c1c', fontSize: 12 }}>⚠ Invalid period</span>
+                        : periodLabel}
+                    </td>
                     <td style={{ padding: '9px 8px', textAlign: 'center' }}>{g.bands?.length ?? 0}</td>
                     <td style={{ padding: '9px 8px', textAlign: 'center' }}>{pp != null ? `${pp}%` : '—'}</td>
                     <td style={{ padding: '9px 8px' }}><StatusChip level={state.level} label={state.label} /></td>
-                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          className="btn"
-                          style={{ fontSize: 11, padding: '3px 10px' }}
-                          onClick={() => setSelectedId(g.id)}
-                        >
-                          View
-                        </button>
-                        <div style={{ position: 'relative' }}>
-                          <button
-                            type="button"
-                            style={{ background: 'none', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 4, padding: '3px 7px', cursor: 'pointer', fontSize: 14, lineHeight: 1, color: '#64748b' }}
-                            onClick={(e) => { e.stopPropagation(); setActiveMenuId(isMenuOpen ? null : g.id); }}
-                            title="More actions"
-                          >
-                            ⋯
-                          </button>
-                          {isMenuOpen && (
-                            <div
-                              style={{ position: 'absolute', right: 0, top: '110%', zIndex: 50, background: '#fff', border: '1px solid rgba(15,23,42,0.15)', borderRadius: 6, boxShadow: '0 4px 12px rgba(15,23,42,0.12)', minWidth: 160, padding: '4px 0' }}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {!archived && (
-                                <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => { setSelectedId(g.id); setEditing(true); setActiveMenuId(null); }}>
-                                  ✎ Edit
-                                </button>
-                              )}
-                              {isDraft && (
-                                <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', color: '#065f46' }} disabled={publish.isPending} onClick={() => { publish.mutate(g.id); setActiveMenuId(null); }}>
-                                  ✓ Publish
-                                </button>
-                              )}
-                              <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }} disabled={clone.isPending} onClick={() => { clone.mutate(g.id); setActiveMenuId(null); }}>
-                                ⎘ Clone
-                              </button>
-                              {isActive && !g.defaultScheme && g.scope !== 'CLASS_GROUP' && (
-                                <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' }} disabled={setDefault.isPending} onClick={() => { setDefault.mutate(g.id); setActiveMenuId(null); }}>
-                                  ★ Set as Default
-                                </button>
-                              )}
-                              {!archived && (
-                                <button type="button" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', color: '#b45309' }} disabled={archive.isPending} onClick={() => { archive.mutate(g.id); setActiveMenuId(null); }}>
-                                  {isDraft ? '✕ Discard Draft' : '▾ Archive'}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                    <td style={{ padding: '9px 8px', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                      <RowActions
+                        g={g}
+                        onView={() => setSelectedId(g.id)}
+                        onEdit={() => { setSelectedId(g.id); setEditing(true); }}
+                        onPublish={() => publish.mutate(g.id)}
+                        onClone={() => clone.mutate(g.id)}
+                        onSetDefault={() => setDefault.mutate(g.id)}
+                        onArchive={() => archive.mutate(g.id)}
+                        publishPending={publish.isPending}
+                        clonePending={clone.isPending}
+                        setDefaultPending={setDefault.isPending}
+                        archivePending={archive.isPending}
+                      />
                     </td>
                   </tr>
                 );
