@@ -590,7 +590,7 @@ export function ExaminationsModulePage() {
 
   const gradingQ = useQuery({
     queryKey: ['grading-schemes'],
-    queryFn: async () => (await api.get<GradingScheme[]>('/api/grading-schemes')).data,
+    queryFn: async () => (await api.get<GradingScheme[]>('/api/exams/grading-schemes')).data,
   });
 
   const classGroups = pageContent(classGroupsQ.data ?? null);
