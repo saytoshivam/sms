@@ -282,12 +282,23 @@ public class AssessmentSchemeController {
 
     /**
      * Bulk-publishes (moves to SCHEDULED) multiple DRAFT assessment instances.
-     * Instances that fail validation (missing date/time/marks) are listed in the errors field.
+     * Instances that fail validation (missing date/time/marks, conflicts) are listed in rowErrors.
      */
     @PostMapping("/schedule/bulk-publish")
     public ResponseEntity<AssessmentScheduleService.ExamBulkPublishResultDTO> bulkPublishAssessments(
             @Valid @RequestBody BulkPublishRequestDTO dto
     ) {
         return ResponseEntity.ok(assessmentScheduleService.bulkPublishAssessments(dto));
+    }
+
+    /**
+     * Returns whether marks entry is eligible (at least one published/scheduled assessment exists).
+     * Used by the Marks Entry tab gate.
+     */
+    @GetMapping("/schedule/marks-entry-gate")
+    public ResponseEntity<Boolean> isMarksEntryEligible() {
+        Integer schoolId = com.myhaimi.sms.utils.TenantContext.getTenantId();
+        if (schoolId == null) return ResponseEntity.ok(false);
+        return ResponseEntity.ok(assessmentScheduleService.hasMarksEntryEligibleSchedule(schoolId));
     }
 }

@@ -1989,7 +1989,7 @@ function ComponentFormPanel({
 function instanceStatusLevel(status: AssessmentInstanceStatus): StatusLevel {
   switch (status) {
     case 'DRAFT': return 'idle';
-    case 'SCHEDULED': return 'info';
+    case 'SCHEDULED': return 'ok';      // Published/Scheduled = green
     case 'MARKS_ENTRY_OPEN': return 'warn';
     case 'MARKS_SUBMITTED': return 'warn';
     case 'LOCKED': return 'ok';
@@ -2001,11 +2001,11 @@ function instanceStatusLevel(status: AssessmentInstanceStatus): StatusLevel {
 function instanceStatusLabel(status: AssessmentInstanceStatus): string {
   switch (status) {
     case 'DRAFT': return 'Draft';
-    case 'SCHEDULED': return 'Scheduled';
+    case 'SCHEDULED': return 'Published';   // Treat SCHEDULED as "Published" in UI
     case 'MARKS_ENTRY_OPEN': return 'Marks Open';
     case 'MARKS_SUBMITTED': return 'Submitted';
     case 'LOCKED': return 'Locked';
-    case 'PUBLISHED': return 'Published';
+    case 'PUBLISHED': return 'Finalised';
     case 'CANCELLED': return 'Cancelled';
   }
 }
@@ -2046,6 +2046,7 @@ function ExamSchedulePanel({
   const [viewMode, setViewMode] = useState<'class' | 'flat'>('class');
   const [expandedClasses, setExpandedClasses] = useState<Set<string>>(new Set());
   const [lastGenerateResult, setLastGenerateResult] = useState<ExamScheduleGenerateResponse | null>(null);
+  const [lastPublishResult, setLastPublishResult] = useState<ExamBulkPublishResult | null>(null);
 
   const serverQs = useMemo(() => {
     const p = new URLSearchParams();
@@ -2099,16 +2100,26 @@ function ExamSchedulePanel({
     onError: (e) => toast.error('Could not delete', formatApiError(e)),
   });
 
+  const openMarksMutation = useMutation({
+    mutationFn: async (id: number) => (await api.post<AssessmentInstance>(`/api/exams/assessments/${id}/open-marks`)).data,
+    onSuccess: async () => { toast.success('Marks entry opened'); await qc.invalidateQueries({ queryKey: ['exam-assessments'] }); },
+    onError: (e) => toast.error('Could not open marks entry', formatApiError(e)),
+  });
+
   const bulkPublishMutation = useMutation({
     mutationFn: async (ids: number[]) => {
       if (ids.length === 0) throw new Error('No draft assessments to publish');
       return (await api.post<ExamBulkPublishResult>('/api/exams/schedule/bulk-publish', { assessmentIds: ids })).data;
     },
     onSuccess: async (data) => {
-      toast.success(
-        'Bulk publish complete',
-        `${data.publishedCount} scheduled.${data.failedCount > 0 ? ` ${data.failedCount} failed (missing date/time/marks).` : ''}`,
-      );
+      setLastPublishResult(data);
+      if (data.failedCount === 0) {
+        toast.success('Schedule published', `${data.publishedCount} exam${data.publishedCount === 1 ? '' : 's'} published successfully.`);
+      } else if (data.publishedCount === 0) {
+        toast.error('Publish failed', `All ${data.failedCount} rows failed validation. See errors below.`);
+      } else {
+        toast.success('Partial publish', `${data.publishedCount} published, ${data.failedCount} failed. See errors below.`);
+      }
       await qc.invalidateQueries({ queryKey: ['exam-assessments'] });
     },
     onError: (e) => toast.error('Bulk publish failed', formatApiError(e)),
@@ -2118,12 +2129,20 @@ function ExamSchedulePanel({
 
   const allData = assessmentsQ.data ?? [];
   const draftCount = allData.filter((a) => a.status === 'DRAFT').length;
-  const scheduledCount = allData.filter((a) => a.status === 'SCHEDULED').length;
+  const publishedCount = allData.filter((a) => a.status === 'SCHEDULED').length;
   const activeCount = allData.filter((a) => ['MARKS_ENTRY_OPEN','MARKS_SUBMITTED','LOCKED','PUBLISHED'].includes(a.status)).length;
   const cancelledCount = allData.filter((a) => a.status === 'CANCELLED').length;
   const missingDateCount = assessments.filter((a) => !a.assessmentDate && a.status !== 'CANCELLED').length;
+  // Validation issues in current view (drafts missing required fields)
+  const draftValidationIssues = assessments.filter((a) =>
+    a.status === 'DRAFT' && (!a.assessmentDate || !a.startTime || !a.endTime || !(a.maxMarks > 0))
+  ).length;
 
   const draftIdsInView = assessments.filter((a) => a.status === 'DRAFT').map((a) => a.id);
+  // Only drafts that have all required fields — these are the ones the backend will actually publish
+  const draftIdsReadyToPublish = assessments
+    .filter((a) => a.status === 'DRAFT' && !!a.assessmentDate && !!a.startTime && !!a.endTime && (a.maxMarks ?? 0) > 0)
+    .map((a) => a.id);
 
   const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
   const publishedSchemes = schemes.filter((s) => s.status === 'PUBLISHED');
@@ -2213,10 +2232,11 @@ function ExamSchedulePanel({
     const isCancelled = a.status === 'CANCELLED';
     const canEdit = isDraft || isScheduled;
     const canPublish = isDraft;
+    const canOpenMarks = isScheduled;
     const canCancel = isDraft || isScheduled;
     const canClone = isScheduled || isActive || isCancelled;
     const canDelete = isDraft || isCancelled;
-    const hasMenu = canPublish || canClone || canCancel || canDelete;
+    const hasMenu = canPublish || canOpenMarks || canClone || canCancel || canDelete;
     const timeStr = a.startTime ? (a.endTime ? `${a.startTime.slice(0,5)}–${a.endTime.slice(0,5)}` : a.startTime.slice(0,5)) : '';
     const isMenuOpen = menuRect?.id === a.id;
     return (
@@ -2250,6 +2270,7 @@ function ExamSchedulePanel({
                 {isMenuOpen && createPortal(
                   <div style={{ position: 'fixed', top: Math.max(8, menuRect!.rect.bottom + 6), right: Math.max(8, window.innerWidth - menuRect!.rect.right), zIndex: 9999, background: '#fff', border: '1.5px solid rgba(15,23,42,0.12)', borderRadius: 10, boxShadow: '0 8px 30px rgba(15,23,42,0.14)', padding: '4px 0', minWidth: 172 }}>
                     {canPublish && <button type="button" style={menuItemStyle('#065f46')} disabled={publishMutation.isPending} onClick={() => { publishMutation.mutate(a.id); setMenuRect(null); }}>✓ Publish / Schedule</button>}
+                    {canOpenMarks && <button type="button" style={menuItemStyle('#1d4ed8')} disabled={openMarksMutation.isPending} onClick={() => { openMarksMutation.mutate(a.id); setMenuRect(null); }}>📝 Open Marks Entry</button>}
                     {canClone && <button type="button" style={menuItemStyle()} disabled={cloneMutation.isPending} onClick={() => { cloneMutation.mutate(a.id); setMenuRect(null); }}>⎘ Clone as Draft</button>}
                     {canCancel && <button type="button" style={menuItemStyle('#b45309')} disabled={cancelMutation.isPending} onClick={() => { cancelMutation.mutate(a.id); setMenuRect(null); }}>✕ Cancel</button>}
                     {canDelete && <button type="button" style={menuItemStyle('#b91c1c')} disabled={deleteMutation.isPending} onClick={() => { deleteMutation.mutate(a.id); setMenuRect(null); }}>🗑 Delete Draft</button>}
@@ -2300,9 +2321,10 @@ function ExamSchedulePanel({
           {[
             { label: 'Total', value: allData.length, bg: '#eff6ff', color: '#1d4ed8' },
             { label: 'Drafts', value: draftCount, bg: '#fef3c7', color: '#92400e' },
-            { label: 'Scheduled', value: scheduledCount, bg: '#d1fae5', color: '#065f46' },
+            { label: 'Published', value: publishedCount, bg: '#d1fae5', color: '#065f46' },
             { label: 'In Progress', value: activeCount, bg: '#ede9fe', color: '#4338ca' },
             { label: 'Missing Dates', value: missingDateCount, bg: missingDateCount > 0 ? '#fff7ed' : '#f1f5f9', color: missingDateCount > 0 ? '#c2410c' : '#475569' },
+            { label: 'Not Ready', value: draftValidationIssues, bg: draftValidationIssues > 0 ? '#fee2e2' : '#f1f5f9', color: draftValidationIssues > 0 ? '#991b1b' : '#475569' },
             { label: 'Cancelled', value: cancelledCount, bg: cancelledCount > 0 ? '#fee2e2' : '#f1f5f9', color: cancelledCount > 0 ? '#991b1b' : '#475569' },
           ].map((c) => (
             <div key={c.label} style={{ background: c.bg, borderRadius: 8, padding: '10px 14px' }}>
@@ -2361,6 +2383,30 @@ function ExamSchedulePanel({
             <button type="button" className="btn secondary" style={{ fontSize: 12 }}
               onClick={() => setLastGenerateResult(null)}>Dismiss</button>
           </div>
+        </div>
+      )}
+
+      {/* Last publish result — show row-level errors */}
+      {lastPublishResult != null && lastPublishResult.failedCount > 0 && (
+        <div className="card" style={{ padding: 12, border: '1.5px solid rgba(220,38,38,0.3)', background: 'rgba(254,242,242,0.6)' }}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: '#991b1b' }}>
+              ⚠ {lastPublishResult.failedCount} row{lastPublishResult.failedCount === 1 ? '' : 's'} could not be published
+              {lastPublishResult.publishedCount > 0 && ` (${lastPublishResult.publishedCount} published successfully)`}
+            </div>
+            <button type="button" className="btn secondary" style={{ fontSize: 11 }}
+              onClick={() => setLastPublishResult(null)}>Dismiss</button>
+          </div>
+          <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: '#7f1d1d' }}>
+            {lastPublishResult.rowErrors.slice(0, 10).map((e, i) => (
+              <li key={i} style={{ marginBottom: 3 }}>
+                <strong>{e.assessmentName ?? `#${e.assessmentId}`}</strong>: {e.reason}
+              </li>
+            ))}
+            {lastPublishResult.rowErrors.length > 10 && (
+              <li className="muted">…and {lastPublishResult.rowErrors.length - 10} more errors</li>
+            )}
+          </ul>
         </div>
       )}
 
@@ -2464,16 +2510,18 @@ function ExamSchedulePanel({
               <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={collapseAll}>Collapse All</button>
             </div>
           )}
-          {draftIdsInView.length > 0 && (
+          {draftIdsReadyToPublish.length > 0 && (
             <button
               type="button"
               className="btn"
               style={{ fontSize: 11, padding: '3px 12px', background: '#065f46', color: '#fff' }}
               disabled={bulkPublishMutation.isPending}
-              onClick={() => bulkPublishMutation.mutate(draftIdsInView)}
-              title={`Publish all ${draftIdsInView.length} draft exam${draftIdsInView.length === 1 ? '' : 's'} in current view (must have date, time, and max marks)`}
+              onClick={() => bulkPublishMutation.mutate(draftIdsReadyToPublish)}
+              title={`Publish ${draftIdsReadyToPublish.length} ready draft${draftIdsReadyToPublish.length === 1 ? '' : 's'} (have date, time & max marks set). ${draftIdsInView.length - draftIdsReadyToPublish.length} draft${draftIdsInView.length - draftIdsReadyToPublish.length === 1 ? '' : 's'} missing required fields will be skipped.`}
             >
-              {bulkPublishMutation.isPending ? 'Publishing…' : `Publish Schedule (${draftIdsInView.length} draft${draftIdsInView.length === 1 ? '' : 's'})`}
+              {bulkPublishMutation.isPending
+                ? 'Publishing…'
+                : `Publish Schedule (${draftIdsReadyToPublish.length}${draftIdsInView.length > draftIdsReadyToPublish.length ? `/${draftIdsInView.length}` : ''} draft${draftIdsReadyToPublish.length === 1 ? '' : 's'})`}
             </button>
           )}
           <span className="muted" style={{ fontSize: 12 }}>{assessments.length} assessment{assessments.length === 1 ? '' : 's'}</span>
@@ -2894,7 +2942,7 @@ type ExamScheduleGenerateResponse = {
 type ExamBulkPublishResult = {
   publishedCount: number;
   failedCount: number;
-  errors: string[];
+  rowErrors: Array<{ assessmentId: number; assessmentName: string | null; reason: string }>;
   published: AssessmentInstance[];
 };
 
@@ -3556,19 +3604,28 @@ function MarksEntryPanel({
   const [filterClassGroupId, setFilterClassGroupId] = useState('');
   const [filterSubjectId, setFilterSubjectId] = useState('');
   const [filterSchemeId, setFilterSchemeId] = useState('');
-  const [filterStatus, setFilterStatus] = useState('MARKS_ENTRY_OPEN');
+  const [filterStatus, setFilterStatus] = useState('');
   const [enteringInstanceId, setEnteringInstanceId] = useState<number | null>(null);
 
   // Check if any published (SCHEDULED or beyond) assessments exist — gate for Marks Entry
   const publishedCheckQ = useQuery({
-    queryKey: ['exam-assessments-published-check'],
-    queryFn: async () =>
-      (await api.get<AssessmentInstance[]>('/api/exams/assessments')).data,
+    queryKey: ['exam-marks-entry-gate'],
+    queryFn: async () => (await api.get<boolean>('/api/exams/schedule/marks-entry-gate')).data,
     staleTime: 30_000,
   });
-  const hasPublishedSchedule = (publishedCheckQ.data ?? []).some(
-    (a) => ['SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED'].includes(a.status),
-  );
+  const hasPublishedSchedule = publishedCheckQ.data === true;
+
+  const qc = useQueryClient();
+
+  const openMarksMutation = useMutation({
+    mutationFn: async (id: number) => (await api.post<AssessmentInstance>(`/api/exams/assessments/${id}/open-marks`)).data,
+    onSuccess: async () => {
+      toast.success('Marks entry opened');
+      await qc.invalidateQueries({ queryKey: ['exam-assessments-marks'] });
+      await qc.invalidateQueries({ queryKey: ['exam-marks-entry-gate'] });
+    },
+    onError: (e) => toast.error('Could not open marks entry', formatApiError(e)),
+  });
 
   const serverQs = useMemo(() => {
     const p = new URLSearchParams();
@@ -3584,12 +3641,14 @@ function MarksEntryPanel({
   });
 
   const assessments = useMemo(() => {
-    const list = assessmentsQ.data ?? [];
+    const list = (assessmentsQ.data ?? []).filter(
+      (a) => !['DRAFT', 'CANCELLED'].includes(a.status),
+    );
     if (!filterStatus) return list;
     return list.filter((a) => a.status === filterStatus);
   }, [assessmentsQ.data, filterStatus]);
 
-  const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
+  const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED'];
 
   if (enteringInstanceId != null) {
     return (
@@ -3607,7 +3666,7 @@ function MarksEntryPanel({
         <div>
           <div style={{ fontWeight: 900 }}>Marks Entry</div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-            Showing assessments where marks can be entered. Use "Publish / Schedule" on the Schedule tab to unlock marks entry.
+            Published assessments appear here. Open marks entry for SCHEDULED assessments, then enter marks when in Marks Open status.
           </div>
         </div>
       </div>
@@ -3698,14 +3757,35 @@ function MarksEntryPanel({
                       <StatusChip level={instanceStatusLevel(a.status)} label={instanceStatusLabel(a.status)} />
                     </td>
                     <td style={{ padding: '8px 6px' }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        style={{ fontSize: 11, padding: '3px 10px' }}
-                        onClick={() => setEnteringInstanceId(a.id)}
-                      >
-                        Enter Marks
-                      </button>
+                      {a.status === 'SCHEDULED' ? (
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          style={{ fontSize: 11, padding: '3px 10px' }}
+                          disabled={openMarksMutation.isPending}
+                          onClick={() => openMarksMutation.mutate(a.id)}
+                        >
+                          {openMarksMutation.isPending ? '…' : 'Open Marks Entry'}
+                        </button>
+                      ) : ['MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED'].includes(a.status) ? (
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ fontSize: 11, padding: '3px 10px' }}
+                          onClick={() => setEnteringInstanceId(a.id)}
+                        >
+                          Enter Marks
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          style={{ fontSize: 11, padding: '3px 10px' }}
+                          onClick={() => setEnteringInstanceId(a.id)}
+                        >
+                          View Marks
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -3726,7 +3806,7 @@ function MarksEntrySheet({ instanceId, onClose }: { instanceId: number; onClose:
 
   const sheetQ = useQuery({
     queryKey: ['marks-sheet', instanceId],
-    queryFn: async () => (await api.get<MarksEntrySheetDTO>(`/api/exams/marks/${instanceId}/sheet`)).data,
+    queryFn: async () => (await api.get<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks-sheet`)).data,
   });
 
   const rows = localRows ?? sheetQ.data?.rows ?? [];
@@ -3737,26 +3817,33 @@ function MarksEntrySheet({ instanceId, onClose }: { instanceId: number; onClose:
   };
 
   const saveDraftMutation = useMutation({
-    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/marks/${instanceId}/save-draft`, { rows })).data,
+    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks/draft`, { rows })).data,
     onSuccess: async (data) => { setLocalRows(data.rows); toast.success('Draft saved'); await qc.invalidateQueries({ queryKey: ['marks-sheet', instanceId] }); },
     onError: (e) => toast.error('Save failed', formatApiError(e)),
   });
 
   const submitMutation = useMutation({
-    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/marks/${instanceId}/submit`, { rows })).data,
+    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks/submit`, { rows })).data,
     onSuccess: async (data) => { setLocalRows(data.rows); toast.success('Marks submitted'); await qc.invalidateQueries({ queryKey: ['marks-sheet', instanceId] }); },
     onError: (e) => toast.error('Submit failed', formatApiError(e)),
   });
 
   const lockMutation = useMutation({
-    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/marks/${instanceId}/lock`)).data,
+    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks/lock`)).data,
     onSuccess: async (data) => { setLocalRows(data.rows); toast.success('Marks locked'); await qc.invalidateQueries({ queryKey: ['marks-sheet', instanceId] }); },
     onError: (e) => toast.error('Lock failed', formatApiError(e)),
+  });
+
+  const reopenMutation = useMutation({
+    mutationFn: async () => (await api.post<MarksEntrySheetDTO>(`/api/exams/assessments/${instanceId}/marks/reopen`)).data,
+    onSuccess: async (data) => { setLocalRows(data.rows); toast.success('Marks reopened'); await qc.invalidateQueries({ queryKey: ['marks-sheet', instanceId] }); },
+    onError: (e) => toast.error('Reopen failed', formatApiError(e)),
   });
 
   const isLocked = sheet?.assessmentStatus === 'LOCKED' || sheet?.assessmentStatus === 'PUBLISHED';
   const canSubmit = sheet?.assessmentStatus === 'MARKS_ENTRY_OPEN';
   const canLock = sheet?.assessmentStatus === 'MARKS_SUBMITTED';
+  const canReopen = sheet?.assessmentStatus === 'LOCKED' || sheet?.assessmentStatus === 'MARKS_SUBMITTED';
 
   return (
     <div className="stack" style={{ gap: 12 }}>
@@ -3781,6 +3868,11 @@ function MarksEntrySheet({ instanceId, onClose }: { instanceId: number; onClose:
             {canLock && (
               <button type="button" className="btn" disabled={lockMutation.isPending} onClick={() => lockMutation.mutate()}>
                 {lockMutation.isPending ? 'Locking…' : 'Lock Marks'}
+              </button>
+            )}
+            {canReopen && (
+              <button type="button" className="btn secondary" disabled={reopenMutation.isPending} onClick={() => reopenMutation.mutate()}>
+                {reopenMutation.isPending ? 'Reopening…' : 'Reopen Marks'}
               </button>
             )}
           </div>

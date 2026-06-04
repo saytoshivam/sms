@@ -5,6 +5,7 @@ import com.myhaimi.sms.entity.ClassGroup;
 import com.myhaimi.sms.entity.Room;
 import com.myhaimi.sms.entity.School;
 import com.myhaimi.sms.entity.Subject;
+import com.myhaimi.sms.entity.TimetableStatus;
 import com.myhaimi.sms.modules.exam.dto.AssessmentGenerateRequestDTO;
 import com.myhaimi.sms.modules.exam.dto.AssessmentInstanceCreateDTO;
 import com.myhaimi.sms.modules.exam.dto.AssessmentInstanceDTO;
@@ -37,8 +38,13 @@ import com.myhaimi.sms.repository.SubjectClassGroupRepo;
 import com.myhaimi.sms.repository.SubjectRepo;
 import com.myhaimi.sms.repository.TimetableEntryRepo;
 import com.myhaimi.sms.repository.TimetableVersionRepo;
+import com.myhaimi.sms.repository.UserRepo;
+import com.myhaimi.sms.security.RoleNames;
 import com.myhaimi.sms.utils.TenantContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,7 +60,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -73,6 +81,11 @@ public class AssessmentScheduleService {
     private final SubjectClassGroupRepo subjectClassGroupRepo;
     private final TimetableVersionRepo timetableVersionRepo;
     private final TimetableEntryRepo timetableEntryRepo;
+    private final UserRepo userRepo;
+
+    /** Statuses that are considered "not active" for conflict detection. */
+    private static final List<AssessmentInstanceStatus> CONFLICT_EXCLUDE_STATUSES =
+            List.of(AssessmentInstanceStatus.CANCELLED, AssessmentInstanceStatus.DRAFT);
 
     @Transactional
     public AssessmentInstanceDTO createAssessment(AssessmentInstanceCreateDTO dto) {
@@ -99,6 +112,7 @@ public class AssessmentScheduleService {
         Integer schoolId = requireSchoolId();
         AssessmentInstance instance = requireInstance(assessmentId, schoolId);
         ensureEditable(instance);
+        enforceScheduleEditPermission(instance);
 
         validateDuplicateName(instance.getId(), schoolId, instance.getComponent().getId(), dto.classGroupId(), dto.subjectId(), dto.name());
         validateAssessmentCountLimit(schoolId, instance.getComponent(), dto.classGroupId(), dto.subjectId(), instance.getId());
@@ -159,19 +173,13 @@ public class AssessmentScheduleService {
 
     @Transactional
     public AssessmentInstanceDTO publishAssessment(Integer assessmentId) {
-        AssessmentInstance instance = requireInstance(assessmentId, requireSchoolId());
+        Integer schoolId = requireSchoolId();
+        AssessmentInstance instance = requireInstance(assessmentId, schoolId);
         if (instance.getStatus() != AssessmentInstanceStatus.DRAFT) {
             throw new IllegalStateException("Only DRAFT assessments can be published/scheduled");
         }
-        if (instance.getAssessmentDate() == null) {
-            throw new IllegalStateException("Assessment date is required before publishing");
-        }
-        if (instance.getStartTime() == null || instance.getEndTime() == null) {
-            throw new IllegalStateException("Start time and end time are required before publishing");
-        }
-        if (instance.getMaxMarks() == null || instance.getMaxMarks().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalStateException("Max marks must be greater than 0 before publishing");
-        }
+        enforceScheduleEditPermission(instance);
+        validatePublishReadiness(instance, schoolId);
         instance.setStatus(AssessmentInstanceStatus.SCHEDULED);
         return toDTO(instanceRepo.save(instance));
     }
@@ -501,55 +509,125 @@ public class AssessmentScheduleService {
 
     /**
      * Publishes (moves to SCHEDULED) multiple DRAFT assessment instances in one call.
-     * Instances that fail validation are reported but do not prevent others from being published.
-     * If ALL instances fail, an exception is thrown.
+     * Each instance is validated independently; failures are collected and returned.
+     *
+     * <p>Validations performed per row:
+     * <ul>
+     *   <li>Status must be DRAFT</li>
+     *   <li>Exam date, start time, end time required</li>
+     *   <li>End time must be after start time</li>
+     *   <li>Max marks must be > 0</li>
+     *   <li>Assessment scheme must still be PUBLISHED</li>
+     *   <li>No duplicate SCHEDULED row for same class-section + subject + component</li>
+     *   <li>No overlapping exam for same class-section on same date/time</li>
+     *   <li>No room double-booking (if room assigned)</li>
+     * </ul>
      */
     @Transactional
     public ExamBulkPublishResultDTO bulkPublishAssessments(BulkPublishRequestDTO dto) {
         Integer schoolId = requireSchoolId();
         List<AssessmentInstanceDTO> published = new ArrayList<>();
-        List<String> errors = new ArrayList<>();
+        List<RowError> rowErrors = new ArrayList<>();
 
         for (Integer id : dto.assessmentIds()) {
             try {
                 AssessmentInstance instance = requireInstance(id, schoolId);
+                String name = instance.getName();
+
                 if (instance.getStatus() != AssessmentInstanceStatus.DRAFT) {
-                    errors.add("Assessment #" + id + " (" + instance.getName() + "): not in DRAFT status");
+                    rowErrors.add(new RowError(id, name, "Row is not in DRAFT status (current: " + instance.getStatus() + ")"));
                     continue;
                 }
                 if (instance.getAssessmentDate() == null) {
-                    errors.add("Assessment #" + id + " (" + instance.getName() + "): exam date required");
+                    rowErrors.add(new RowError(id, name, "Exam date is required"));
                     continue;
                 }
                 if (instance.getStartTime() == null || instance.getEndTime() == null) {
-                    errors.add("Assessment #" + id + " (" + instance.getName() + "): start and end time required");
+                    rowErrors.add(new RowError(id, name, "Start time and end time are required"));
                     continue;
                 }
                 if (!instance.getEndTime().isAfter(instance.getStartTime())) {
-                    errors.add("Assessment #" + id + " (" + instance.getName() + "): end time must be after start time");
+                    rowErrors.add(new RowError(id, name, "End time must be after start time"));
                     continue;
                 }
                 if (instance.getMaxMarks() == null || instance.getMaxMarks().compareTo(BigDecimal.ZERO) <= 0) {
-                    errors.add("Assessment #" + id + " (" + instance.getName() + "): max marks must be > 0");
+                    rowErrors.add(new RowError(id, name, "Max marks must be greater than 0"));
                     continue;
                 }
+                // Scheme must still be published
+                if (instance.getScheme().getStatus() != AssessmentSchemeStatus.PUBLISHED) {
+                    rowErrors.add(new RowError(id, name,
+                            "Assessment scheme '" + instance.getScheme().getName() + "' is no longer PUBLISHED"));
+                    continue;
+                }
+                // Duplicate check: another SCHEDULED row for same class-section + subject + component
+                if (instanceRepo.existsBySchool_IdAndClassGroup_IdAndSubject_IdAndComponent_IdAndStatusAndIdNot(
+                        schoolId,
+                        instance.getClassGroup().getId(),
+                        instance.getSubject().getId(),
+                        instance.getComponent().getId(),
+                        AssessmentInstanceStatus.SCHEDULED,
+                        id)) {
+                    rowErrors.add(new RowError(id, name,
+                            "Duplicate: a published schedule already exists for this class-section + subject + component"));
+                    continue;
+                }
+                // Class-section time overlap
+                long classConflicts = instanceRepo.countOverlappingByClassTime(
+                        schoolId,
+                        instance.getClassGroup().getId(),
+                        instance.getAssessmentDate(),
+                        instance.getStartTime(),
+                        instance.getEndTime(),
+                        id,
+                        CONFLICT_EXCLUDE_STATUSES);
+                if (classConflicts > 0) {
+                    rowErrors.add(new RowError(id, name,
+                            "Time conflict: " + instance.getClassGroup().getDisplayName() + " already has "
+                                    + classConflicts + " other exam(s) at " + instance.getAssessmentDate()
+                                    + " " + instance.getStartTime() + "–" + instance.getEndTime()));
+                    continue;
+                }
+                // Room double-booking
+                if (instance.getRoom() != null) {
+                    long roomConflicts = instanceRepo.countOverlappingByRoom(
+                            schoolId,
+                            instance.getRoom().getId(),
+                            instance.getAssessmentDate(),
+                            instance.getStartTime(),
+                            instance.getEndTime(),
+                            id,
+                            CONFLICT_EXCLUDE_STATUSES);
+                    if (roomConflicts > 0) {
+                        rowErrors.add(new RowError(id, name,
+                                "Room conflict: room '" + instance.getRoom().getRoomNumber()
+                                        + "' is double-booked at " + instance.getAssessmentDate()
+                                        + " " + instance.getStartTime() + "–" + instance.getEndTime()));
+                        continue;
+                    }
+                }
+
                 instance.setStatus(AssessmentInstanceStatus.SCHEDULED);
                 published.add(toDTO(instanceRepo.save(instance)));
             } catch (Exception e) {
-                errors.add("Assessment #" + id + ": " + e.getMessage());
+                rowErrors.add(new RowError(id, null, e.getMessage()));
             }
         }
 
-        return new ExamBulkPublishResultDTO(published.size(), errors.size(), errors, published);
+        return new ExamBulkPublishResultDTO(published.size(), rowErrors.size(), rowErrors, published);
     }
 
+    /** Structured per-row error for bulk publish. */
+    public record RowError(Integer assessmentId, String assessmentName, String reason) {}
+
     /**
-     * Inline response record for bulk-publish results.
+     * Result of a bulk-publish operation.
+     * {@code rowErrors} contains one entry per failed row with structured detail.
      */
     public record ExamBulkPublishResultDTO(
             int publishedCount,
             int failedCount,
-            List<String> errors,
+            List<RowError> rowErrors,
             List<AssessmentInstanceDTO> published
     ) {}
 
@@ -1057,6 +1135,153 @@ public class AssessmentScheduleService {
                 ai.getCreatedAt(),
                 ai.getUpdatedAt()
         );
+    }
+
+    // ─────────────────────── Permission Enforcement ───────────────────────────
+
+    /**
+     * Validates that the authenticated caller may edit/publish the given assessment instance.
+     *
+     * <p>Privileged roles (SCHOOL_ADMIN, PRINCIPAL, VICE_PRINCIPAL, HOD, EXAM_COORDINATOR)
+     * may operate on any row.
+     *
+     * <p>TEACHER / CLASS_TEACHER may operate only if:
+     * <ol>
+     *   <li>The component's schedulingMode is DELEGATED or HYBRID.</li>
+     *   <li>The current published timetable confirms the teacher teaches
+     *       that subject in that class-section.</li>
+     * </ol>
+     */
+    private void enforceScheduleEditPermission(AssessmentInstance instance) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new AccessDeniedException("Not authenticated");
+        }
+        Set<String> roles = auth.getAuthorities().stream()
+                .map(ga -> ga.getAuthority().replaceFirst("^ROLE_", ""))
+                .collect(Collectors.toSet());
+
+        if (isPrivilegedForScheduling(roles)) return; // admins pass through
+
+        if (roles.contains(RoleNames.TEACHER) || roles.contains(RoleNames.CLASS_TEACHER)) {
+            AssessmentComponent component = instance.getComponent();
+            SchedulingMode mode = component.getSchedulingMode();
+            if (mode == SchedulingMode.CENTRALIZED) {
+                throw new AccessDeniedException(
+                        "Component '" + component.getName() + "' uses centralized scheduling. "
+                                + "Only admin/exam coordinator can publish this component.");
+            }
+            Integer callerStaffId = resolveCallerStaffId(auth);
+            if (callerStaffId == null) {
+                throw new AccessDeniedException(
+                        "Your account is not linked to a staff profile. Cannot verify scheduling permission.");
+            }
+            Integer schoolId = requireSchoolId();
+            Integer publishedTtId = timetableVersionRepo
+                    .findTopBySchool_IdAndStatusOrderByVersionDesc(schoolId, TimetableStatus.PUBLISHED)
+                    .map(tv -> tv.getId())
+                    .orElse(null);
+            if (publishedTtId == null) {
+                throw new AccessDeniedException(
+                        "Teacher scheduling requires a published timetable. No published timetable found.");
+            }
+            List<Integer> timetableStaffIds = timetableEntryRepo.findStaffIdsByClassGroupAndSubject(
+                    schoolId, publishedTtId, instance.getClassGroup().getId(), instance.getSubject().getId());
+            if (!timetableStaffIds.contains(callerStaffId)) {
+                throw new AccessDeniedException(
+                        "You are not assigned to teach " + instance.getSubject().getName()
+                                + " in " + instance.getClassGroup().getDisplayName()
+                                + " according to the current published timetable.");
+            }
+            return;
+        }
+
+        throw new AccessDeniedException("You do not have permission to modify exam schedule rows.");
+    }
+
+    private boolean isPrivilegedForScheduling(Set<String> roles) {
+        return roles.contains(RoleNames.SCHOOL_ADMIN)
+                || roles.contains(RoleNames.PRINCIPAL)
+                || roles.contains(RoleNames.VICE_PRINCIPAL)
+                || roles.contains(RoleNames.HOD)
+                || roles.contains(RoleNames.EXAM_COORDINATOR);
+    }
+
+    private Integer resolveCallerStaffId(Authentication auth) {
+        if (auth == null) return null;
+        return userRepo.findFirstByEmailIgnoreCase(auth.getName())
+                .map(u -> u.getLinkedStaff() != null ? u.getLinkedStaff().getId() : null)
+                .orElse(null);
+    }
+
+    /**
+     * Validates all required fields before a single-row publish and checks for conflicts.
+     */
+    private void validatePublishReadiness(AssessmentInstance instance, Integer schoolId) {
+        if (instance.getAssessmentDate() == null)
+            throw new IllegalStateException("Exam date is required before publishing");
+        if (instance.getStartTime() == null || instance.getEndTime() == null)
+            throw new IllegalStateException("Start time and end time are required before publishing");
+        if (!instance.getEndTime().isAfter(instance.getStartTime()))
+            throw new IllegalStateException("End time must be after start time");
+        if (instance.getMaxMarks() == null || instance.getMaxMarks().compareTo(BigDecimal.ZERO) <= 0)
+            throw new IllegalStateException("Max marks must be greater than 0 before publishing");
+        if (instance.getScheme().getStatus() != AssessmentSchemeStatus.PUBLISHED)
+            throw new IllegalStateException("Assessment scheme '" + instance.getScheme().getName() + "' is no longer PUBLISHED");
+
+        // Duplicate check
+        if (instanceRepo.existsBySchool_IdAndClassGroup_IdAndSubject_IdAndComponent_IdAndStatusAndIdNot(
+                schoolId,
+                instance.getClassGroup().getId(),
+                instance.getSubject().getId(),
+                instance.getComponent().getId(),
+                AssessmentInstanceStatus.SCHEDULED,
+                instance.getId())) {
+            throw new IllegalStateException(
+                    "A published schedule already exists for this class-section + subject + component");
+        }
+        // Class-section time conflict
+        long classConflicts = instanceRepo.countOverlappingByClassTime(
+                schoolId, instance.getClassGroup().getId(),
+                instance.getAssessmentDate(), instance.getStartTime(), instance.getEndTime(),
+                instance.getId(), CONFLICT_EXCLUDE_STATUSES);
+        if (classConflicts > 0) {
+            throw new IllegalStateException(
+                    "Class-section '" + instance.getClassGroup().getDisplayName()
+                            + "' already has " + classConflicts + " exam(s) scheduled at this date/time");
+        }
+        // Room double-booking
+        if (instance.getRoom() != null) {
+            long roomConflicts = instanceRepo.countOverlappingByRoom(
+                    schoolId, instance.getRoom().getId(),
+                    instance.getAssessmentDate(), instance.getStartTime(), instance.getEndTime(),
+                    instance.getId(), CONFLICT_EXCLUDE_STATUSES);
+            if (roomConflicts > 0) {
+                throw new IllegalStateException(
+                        "Room '" + instance.getRoom().getRoomNumber()
+                                + "' is double-booked at this date/time");
+            }
+        }
+    }
+
+    /**
+     * Returns true when at least one assessment instance is in a state that makes
+     * marks entry eligible (SCHEDULED, MARKS_ENTRY_OPEN, MARKS_SUBMITTED, LOCKED, PUBLISHED).
+     * Used by Marks Entry gate.
+     */
+    public boolean hasMarksEntryEligibleSchedule(Integer schoolId) {
+        return instanceRepo.listForFilters(schoolId, null, null, null, null, null)
+                .stream()
+                .anyMatch(ai -> isMarksEntryEligibleStatus(ai.getStatus()));
+    }
+
+    /** Helper: statuses that unlock marks entry. */
+    public static boolean isMarksEntryEligibleStatus(AssessmentInstanceStatus status) {
+        return status == AssessmentInstanceStatus.SCHEDULED
+                || status == AssessmentInstanceStatus.MARKS_ENTRY_OPEN
+                || status == AssessmentInstanceStatus.MARKS_SUBMITTED
+                || status == AssessmentInstanceStatus.LOCKED
+                || status == AssessmentInstanceStatus.PUBLISHED;
     }
 }
 
