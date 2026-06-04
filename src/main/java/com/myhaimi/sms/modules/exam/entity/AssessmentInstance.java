@@ -95,6 +95,14 @@ public class AssessmentInstance {
     @Column(name = "instructions", columnDefinition = "TEXT")
     private String instructions;
 
+    /**
+     * Staff ID of the teacher assigned as scheduling owner, derived from the published timetable
+     * at generation time (for DELEGATED / HYBRID components only).
+     * Read-only after creation; null for CENTRALIZED components.
+     */
+    @Column(name = "assigned_teacher_staff_id")
+    private Integer assignedTeacherStaffId;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

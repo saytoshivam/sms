@@ -32,6 +32,8 @@ public record AssessmentInstanceDTO(
         Integer sequence,
         String scheduleGroupId,
         String instructions,
+        /** Staff ID of the assigned teacher (from published timetable, DELEGATED/HYBRID only). */
+        Integer assignedTeacherStaffId,
         Instant createdAt,
         Instant updatedAt
 ) {}

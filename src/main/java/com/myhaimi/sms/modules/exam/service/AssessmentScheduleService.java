@@ -87,6 +87,15 @@ public class AssessmentScheduleService {
     private static final List<AssessmentInstanceStatus> CONFLICT_EXCLUDE_STATUSES =
             List.of(AssessmentInstanceStatus.CANCELLED, AssessmentInstanceStatus.DRAFT);
 
+    /** Statuses where marks entry is eligible (assessment is in published/active state). */
+    private static final List<AssessmentInstanceStatus> MARKS_ENTRY_ELIGIBLE_STATUSES = List.of(
+            AssessmentInstanceStatus.SCHEDULED,
+            AssessmentInstanceStatus.MARKS_ENTRY_OPEN,
+            AssessmentInstanceStatus.MARKS_SUBMITTED,
+            AssessmentInstanceStatus.LOCKED,
+            AssessmentInstanceStatus.PUBLISHED
+    );
+
     @Transactional
     public AssessmentInstanceDTO createAssessment(AssessmentInstanceCreateDTO dto) {
         Integer schoolId = requireSchoolId();
@@ -113,6 +122,16 @@ public class AssessmentScheduleService {
         AssessmentInstance instance = requireInstance(assessmentId, schoolId);
         ensureEditable(instance);
         enforceScheduleEditPermission(instance);
+
+        // Immutability guard: class-section and subject are set at generation time and cannot be changed.
+        if (dto.classGroupId() != null && !dto.classGroupId().equals(instance.getClassGroup().getId())) {
+            throw new IllegalArgumentException(
+                    "Class/section cannot be changed on an existing assessment instance (generated from scheme).");
+        }
+        if (dto.subjectId() != null && !dto.subjectId().equals(instance.getSubject().getId())) {
+            throw new IllegalArgumentException(
+                    "Subject cannot be changed on an existing assessment instance (generated from scheme).");
+        }
 
         validateDuplicateName(instance.getId(), schoolId, instance.getComponent().getId(), dto.classGroupId(), dto.subjectId(), dto.name());
         validateAssessmentCountLimit(schoolId, instance.getComponent(), dto.classGroupId(), dto.subjectId(), instance.getId());
@@ -152,10 +171,11 @@ public class AssessmentScheduleService {
     @Transactional
     public AssessmentInstanceDTO openMarksEntry(Integer assessmentId) {
         AssessmentInstance instance = requireInstance(assessmentId, requireSchoolId());
-        if (instance.getStatus() == AssessmentInstanceStatus.LOCKED
-                || instance.getStatus() == AssessmentInstanceStatus.PUBLISHED
-                || instance.getStatus() == AssessmentInstanceStatus.CANCELLED) {
-            throw new IllegalStateException("Marks entry cannot be opened for status " + instance.getStatus());
+        if (instance.getStatus() != AssessmentInstanceStatus.SCHEDULED) {
+            throw new IllegalStateException(
+                    "Marks entry can only be opened for SCHEDULED (published) assessments. "
+                            + "Current status: " + instance.getStatus()
+                            + ". Publish the exam schedule first.");
         }
         instance.setStatus(AssessmentInstanceStatus.MARKS_ENTRY_OPEN);
         return toDTO(instanceRepo.save(instance));
@@ -730,6 +750,13 @@ public class AssessmentScheduleService {
                         maxMarks = BigDecimal.ZERO; // draft – admin must set before publish
                     }
 
+                    // Assign teacher owner only for DELEGATED / HYBRID components
+                    Integer ownerStaffId = null;
+                    if (component.getSchedulingMode() == SchedulingMode.DELEGATED
+                            || component.getSchedulingMode() == SchedulingMode.HYBRID) {
+                        ownerStaffId = teacherStaffId;
+                    }
+
                     for (int seq = 1; seq <= total; seq++) {
                         String name = defaultGeneratedName(component, seq);
 
@@ -759,6 +786,7 @@ public class AssessmentScheduleService {
                         inst.setEndTime(defEnd);
                         inst.setRoom(room);
                         inst.setScheduleGroupId(groupId);
+                        inst.setAssignedTeacherStaffId(ownerStaffId);
 
                         created.add(instanceRepo.save(inst));
                     }
@@ -1132,6 +1160,7 @@ public class AssessmentScheduleService {
                 ai.getSequence(),
                 ai.getScheduleGroupId(),
                 ai.getInstructions(),
+                ai.getAssignedTeacherStaffId(),
                 ai.getCreatedAt(),
                 ai.getUpdatedAt()
         );
@@ -1267,12 +1296,10 @@ public class AssessmentScheduleService {
     /**
      * Returns true when at least one assessment instance is in a state that makes
      * marks entry eligible (SCHEDULED, MARKS_ENTRY_OPEN, MARKS_SUBMITTED, LOCKED, PUBLISHED).
-     * Used by Marks Entry gate.
+     * Used by Marks Entry gate. Uses an efficient count query — does not load all rows.
      */
     public boolean hasMarksEntryEligibleSchedule(Integer schoolId) {
-        return instanceRepo.listForFilters(schoolId, null, null, null, null, null)
-                .stream()
-                .anyMatch(ai -> isMarksEntryEligibleStatus(ai.getStatus()));
+        return instanceRepo.countBySchoolIdAndStatusIn(schoolId, MARKS_ENTRY_ELIGIBLE_STATUSES) > 0;
     }
 
     /** Helper: statuses that unlock marks entry. */

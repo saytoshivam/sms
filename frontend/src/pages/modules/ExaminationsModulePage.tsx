@@ -154,6 +154,8 @@ type AssessmentInstance = {
   sequence: number;
   scheduleGroupId: string | null;
   instructions: string | null;
+  /** Staff ID of the teacher assigned as scheduling owner (DELEGATED/HYBRID components only). */
+  assignedTeacherStaffId: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -2144,6 +2146,34 @@ function ExamSchedulePanel({
     .filter((a) => a.status === 'DRAFT' && !!a.assessmentDate && !!a.startTime && !!a.endTime && (a.maxMarks ?? 0) > 0)
     .map((a) => a.id);
 
+  // Compute IDs of assessments that have time conflicts with another assessment in the same class on the same date.
+  // Only considers non-DRAFT, non-CANCELLED rows with full time info.
+  const conflictingAssessmentIds = useMemo(() => {
+    const ids = new Set<number>();
+    const groups = new Map<string, AssessmentInstance[]>();
+    for (const a of allData) {
+      if (a.status === 'CANCELLED' || a.status === 'DRAFT') continue;
+      if (!a.assessmentDate || !a.startTime || !a.endTime) continue;
+      const key = `${a.classGroupId}::${a.assessmentDate}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(a);
+    }
+    for (const group of groups.values()) {
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          const a = group[i], b = group[j];
+          // Exclusive time overlap: startA < endB && endA > startB
+          if (a.startTime! < b.endTime! && a.endTime! > b.startTime!) {
+            ids.add(a.id);
+            ids.add(b.id);
+          }
+        }
+      }
+    }
+    return ids;
+  }, [allData]);
+  const conflictCount = conflictingAssessmentIds.size;
+
   const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
   const publishedSchemes = schemes.filter((s) => s.status === 'PUBLISHED');
 
@@ -2325,6 +2355,7 @@ function ExamSchedulePanel({
             { label: 'In Progress', value: activeCount, bg: '#ede9fe', color: '#4338ca' },
             { label: 'Missing Dates', value: missingDateCount, bg: missingDateCount > 0 ? '#fff7ed' : '#f1f5f9', color: missingDateCount > 0 ? '#c2410c' : '#475569' },
             { label: 'Not Ready', value: draftValidationIssues, bg: draftValidationIssues > 0 ? '#fee2e2' : '#f1f5f9', color: draftValidationIssues > 0 ? '#991b1b' : '#475569' },
+            { label: 'Conflicts', value: conflictCount, bg: conflictCount > 0 ? '#fef3c7' : '#f1f5f9', color: conflictCount > 0 ? '#92400e' : '#475569' },
             { label: 'Cancelled', value: cancelledCount, bg: cancelledCount > 0 ? '#fee2e2' : '#f1f5f9', color: cancelledCount > 0 ? '#991b1b' : '#475569' },
           ].map((c) => (
             <div key={c.label} style={{ background: c.bg, borderRadius: 8, padding: '10px 14px' }}>
@@ -2581,6 +2612,7 @@ function ExamSchedulePanel({
             const scheduledItems = allItems.filter((a) => a.status === 'SCHEDULED').length;
             const subjectCount = new Set(allItems.map((a) => a.subjectId)).size;
             const sectionCount = grade.sections.length;
+            const gradeConflicts = allItems.filter((a) => conflictingAssessmentIds.has(a.id)).length;
             return (
               <div key={grade.gradeKey} className="card" style={{ border: '1px solid rgba(15,23,42,0.1)', padding: 0, overflow: 'hidden' }}>
                 {/* Grade summary row */}
@@ -2596,6 +2628,7 @@ function ExamSchedulePanel({
                     {missingDates > 0 && <span style={{ fontWeight: 700, color: '#c2410c' }}>{missingDates} missing date{missingDates === 1 ? '' : 's'}</span>}
                     {draftItems > 0 && <StatusChip level="warn" label={`${draftItems} draft`} />}
                     {scheduledItems > 0 && <StatusChip level="ok" label={`${scheduledItems} scheduled`} />}
+                    {gradeConflicts > 0 && <StatusChip level="error" label={`${gradeConflicts} conflict${gradeConflicts === 1 ? '' : 's'}`} />}
                   </div>
                 </button>
                 {isGradeExpanded && (
@@ -2604,6 +2637,7 @@ function ExamSchedulePanel({
                       const isSectionExpanded = expandedClasses.has(`s:${section.classGroupId}`);
                       const sItems = section.items;
                       const sMissing = sItems.filter((a) => !a.assessmentDate && a.status !== 'CANCELLED').length;
+                      const sConflicts = sItems.filter((a) => conflictingAssessmentIds.has(a.id)).length;
                       const byComponent = new Map<string, { componentName: string; schemeName: string; items: AssessmentInstance[] }>();
                       for (const a of sItems) {
                         const key = `${a.componentId}`;
@@ -2621,6 +2655,7 @@ function ExamSchedulePanel({
                             <div className="row" style={{ gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#64748b' }}>
                               <span>{sItems.length} exam{sItems.length === 1 ? '' : 's'}</span>
                               {sMissing > 0 && <span style={{ color: '#c2410c', fontWeight: 600 }}>{sMissing} missing date{sMissing === 1 ? '' : 's'}</span>}
+                              {sConflicts > 0 && <span style={{ color: '#92400e', fontWeight: 700, background: '#fef3c7', padding: '1px 6px', borderRadius: 4 }}>⚠ {sConflicts} time conflict{sConflicts === 1 ? '' : 's'}</span>}
                             </div>
                           </button>
                           {isSectionExpanded && (
