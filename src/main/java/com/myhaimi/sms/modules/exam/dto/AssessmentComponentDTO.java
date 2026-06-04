@@ -2,6 +2,7 @@ package com.myhaimi.sms.modules.exam.dto;
 
 import com.myhaimi.sms.modules.exam.entity.enums.CalculationRule;
 import com.myhaimi.sms.modules.exam.entity.enums.ComponentType;
+import com.myhaimi.sms.modules.exam.entity.enums.SchedulingMode;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -18,6 +19,9 @@ public record AssessmentComponentDTO(
         Integer bestOfCount,
         Integer sequence,
         boolean mandatory,
+        boolean requiresScheduling,
+        boolean marksEntryRequired,
+        SchedulingMode schedulingMode,
         Instant createdAt,
         Instant updatedAt
 ) {}

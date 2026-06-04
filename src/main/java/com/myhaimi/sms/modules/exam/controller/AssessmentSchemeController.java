@@ -251,6 +251,20 @@ public class AssessmentSchemeController {
 
     // ─────────────────── Smart Schedule Generation ───────────────────────────
 
+    /**
+     * Generates draft exam schedule instances for ALL class-sections × subjects
+     * using the published assessment scheme override hierarchy.
+     * Admin only provides: academic year, schedule name, optional date window,
+     * default times, room strategy, and date distribution strategy.
+     */
+    @PostMapping("/schedule/generate-from-schemes")
+    public ResponseEntity<ExamScheduleGenerateResponseDTO> generateFromSchemes(
+            @Valid @RequestBody ExamScheduleGenerateRequestDTO dto
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(assessmentScheduleService.generateFromSchemes(dto));
+    }
+
     @PostMapping("/schedule/generate-candidates")
     public ResponseEntity<List<ScheduleCandidateDTO>> generateScheduleCandidates(
             @Valid @RequestBody ScheduleGenerateCandidatesRequestDTO dto
@@ -264,5 +278,16 @@ public class AssessmentSchemeController {
     ) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(assessmentScheduleService.bulkSaveDrafts(dto));
+    }
+
+    /**
+     * Bulk-publishes (moves to SCHEDULED) multiple DRAFT assessment instances.
+     * Instances that fail validation (missing date/time/marks) are listed in the errors field.
+     */
+    @PostMapping("/schedule/bulk-publish")
+    public ResponseEntity<AssessmentScheduleService.ExamBulkPublishResultDTO> bulkPublishAssessments(
+            @Valid @RequestBody BulkPublishRequestDTO dto
+    ) {
+        return ResponseEntity.ok(assessmentScheduleService.bulkPublishAssessments(dto));
     }
 }

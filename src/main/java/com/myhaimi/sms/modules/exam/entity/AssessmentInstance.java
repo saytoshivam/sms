@@ -84,6 +84,17 @@ public class AssessmentInstance {
     @Column(nullable = false)
     private Integer sequence;
 
+    /**
+     * Optional batch identifier grouping all instances generated together
+     * (e.g. from one "Generate from Scheme" run).
+     */
+    @Column(name = "schedule_group_id", length = 64)
+    private String scheduleGroupId;
+
+    /** Optional per-instance exam instructions visible to invigilators/students. */
+    @Column(name = "instructions", columnDefinition = "TEXT")
+    private String instructions;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

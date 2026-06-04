@@ -2,6 +2,7 @@ package com.myhaimi.sms.modules.exam.entity;
 
 import com.myhaimi.sms.modules.exam.entity.enums.CalculationRule;
 import com.myhaimi.sms.modules.exam.entity.enums.ComponentType;
+import com.myhaimi.sms.modules.exam.entity.enums.SchedulingMode;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -63,6 +64,28 @@ public class AssessmentComponent {
 
     @Column(nullable = false)
     private boolean mandatory = true;
+
+    /**
+     * Whether this component should appear in the Exam Schedule.
+     * Defaults to true for most component types; false for ATTENDANCE.
+     * Set to false for calculated/derived components that don't need a physical exam slot.
+     */
+    @Column(name = "requires_scheduling", nullable = false, columnDefinition = "boolean default true")
+    private boolean requiresScheduling = true;
+
+    /**
+     * Whether marks must be entered for this component (enables Marks Entry tab row).
+     */
+    @Column(name = "marks_entry_required", nullable = false, columnDefinition = "boolean default true")
+    private boolean marksEntryRequired = true;
+
+    /**
+     * Scheduling ownership mode.
+     * Defaults to CENTRALIZED (only admin/exam-controller can schedule).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scheduling_mode", length = 16, nullable = false, columnDefinition = "varchar(16) default 'CENTRALIZED'")
+    private SchedulingMode schedulingMode = SchedulingMode.CENTRALIZED;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

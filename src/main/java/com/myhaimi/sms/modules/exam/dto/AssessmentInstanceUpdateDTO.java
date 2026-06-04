@@ -19,6 +19,7 @@ public record AssessmentInstanceUpdateDTO(
         LocalTime endTime,
         Integer roomId,
         @NotNull @DecimalMin("0.01") BigDecimal maxMarks,
-        @NotNull @Min(1) Integer sequence
+        @NotNull @Min(1) Integer sequence,
+        String instructions
 ) {}
 

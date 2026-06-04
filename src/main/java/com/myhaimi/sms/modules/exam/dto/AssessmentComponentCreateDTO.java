@@ -2,6 +2,7 @@ package com.myhaimi.sms.modules.exam.dto;
 
 import com.myhaimi.sms.modules.exam.entity.enums.CalculationRule;
 import com.myhaimi.sms.modules.exam.entity.enums.ComponentType;
+import com.myhaimi.sms.modules.exam.entity.enums.SchedulingMode;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -19,5 +20,11 @@ public record AssessmentComponentCreateDTO(
         Integer totalAssessments,
         Integer bestOfCount,
         @NotNull @Min(1) Integer sequence,
-        boolean mandatory
+        boolean mandatory,
+        /** Whether this component requires a physical scheduled exam slot. Defaults to true. */
+        Boolean requiresScheduling,
+        /** Whether marks must be entered for this component. Defaults to true. */
+        Boolean marksEntryRequired,
+        /** Scheduling ownership mode. Defaults to CENTRALIZED. */
+        SchedulingMode schedulingMode
 ) {}

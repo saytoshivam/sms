@@ -12,6 +12,7 @@ import com.myhaimi.sms.modules.exam.entity.enums.ExamApplicableScopeType;
 import com.myhaimi.sms.modules.exam.entity.enums.GradeResultType;
 import com.myhaimi.sms.modules.exam.entity.enums.GradingSchemeScope;
 import com.myhaimi.sms.modules.exam.entity.enums.GradingSchemeStatus;
+import com.myhaimi.sms.modules.exam.entity.enums.SchedulingMode;
 import com.myhaimi.sms.modules.exam.repository.*;
 import com.myhaimi.sms.repository.AcademicYearRepo;
 import com.myhaimi.sms.repository.ClassGroupRepo;
@@ -642,6 +643,16 @@ public class AssessmentSchemeService {
         comp.setBestOfCount(dto.bestOfCount());
         comp.setSequence(dto.sequence());
         comp.setMandatory(dto.mandatory());
+        // Scheduling fields – fall back to sensible defaults when not provided
+        if (dto.requiresScheduling() != null) {
+            comp.setRequiresScheduling(dto.requiresScheduling());
+        } else {
+            // ATTENDANCE component type is never schedulable by default
+            comp.setRequiresScheduling(dto.componentType() != com.myhaimi.sms.modules.exam.entity.enums.ComponentType.ATTENDANCE
+                    && dto.calculationRule() != com.myhaimi.sms.modules.exam.entity.enums.CalculationRule.ATTENDANCE_PERCENTAGE);
+        }
+        comp.setMarksEntryRequired(dto.marksEntryRequired() == null || dto.marksEntryRequired());
+        comp.setSchedulingMode(dto.schedulingMode() != null ? dto.schedulingMode() : SchedulingMode.CENTRALIZED);
     }
 
     private AssessmentScheme requireDraftScheme(Integer schemeId) {
@@ -743,7 +754,9 @@ public class AssessmentSchemeService {
     private AssessmentComponentDTO toComponentDTO(AssessmentComponent c) {
         return new AssessmentComponentDTO(
                 c.getId(), c.getScheme().getId(), c.getName(), c.getComponentType(), c.getWeightagePercent(), c.getMaxMarks(),
-                c.getCalculationRule(), c.getTotalAssessments(), c.getBestOfCount(), c.getSequence(), c.isMandatory(), c.getCreatedAt(), c.getUpdatedAt()
+                c.getCalculationRule(), c.getTotalAssessments(), c.getBestOfCount(), c.getSequence(), c.isMandatory(),
+                c.isRequiresScheduling(), c.isMarksEntryRequired(), c.getSchedulingMode(),
+                c.getCreatedAt(), c.getUpdatedAt()
         );
     }
 

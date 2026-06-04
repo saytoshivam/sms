@@ -89,5 +89,20 @@ public interface TimetableEntryRepo extends JpaRepository<TimetableEntry, Intege
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update TimetableEntry e set e.staff = null where e.school.id = :schoolId")
     int clearStaffBySchool_Id(@Param("schoolId") Integer schoolId);
+
+    /**
+     * Returns the staff ID of the teacher assigned to a given class-section + subject
+     * in the provided published timetable version (uses DISTINCT to deduplicate).
+     */
+    @Query("select distinct e.staff.id from TimetableEntry e " +
+           "where e.school.id = :schoolId " +
+           "and e.timetableVersion.id = :versionId " +
+           "and e.classGroup.id = :classGroupId " +
+           "and e.subject.id = :subjectId")
+    List<Integer> findStaffIdsByClassGroupAndSubject(
+            @Param("schoolId") Integer schoolId,
+            @Param("versionId") Integer versionId,
+            @Param("classGroupId") Integer classGroupId,
+            @Param("subjectId") Integer subjectId);
 }
 

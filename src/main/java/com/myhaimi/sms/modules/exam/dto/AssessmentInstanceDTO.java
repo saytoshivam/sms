@@ -30,6 +30,8 @@ public record AssessmentInstanceDTO(
         BigDecimal maxMarks,
         AssessmentInstanceStatus status,
         Integer sequence,
+        String scheduleGroupId,
+        String instructions,
         Instant createdAt,
         Instant updatedAt
 ) {}

@@ -40,6 +40,8 @@ type CalculationRule =
   | 'MANUAL'
   | 'ATTENDANCE_PERCENTAGE';
 
+type SchedulingMode = 'CENTRALIZED' | 'DELEGATED' | 'HYBRID';
+
 type AssessmentComponent = {
   id: number;
   schemeId: number;
@@ -52,6 +54,9 @@ type AssessmentComponent = {
   bestOfCount: number | null;
   sequence: number;
   mandatory: boolean;
+  requiresScheduling: boolean;
+  marksEntryRequired: boolean;
+  schedulingMode: SchedulingMode;
 };
 
 type AssessmentScheme = {
@@ -147,6 +152,8 @@ type AssessmentInstance = {
   maxMarks: number;
   status: AssessmentInstanceStatus;
   sequence: number;
+  scheduleGroupId: string | null;
+  instructions: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -1410,7 +1417,7 @@ function AssessmentSchemesPanel({
             </div>
 
             <div className="card" style={{ padding: 12, border: '1px dashed rgba(15,23,42,0.18)' }}>
-              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Step 4: Review</div>
+              <div style={{ fontWeight: 800, fontSize: 13 }}>Step 4: Review</div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {(() => {
                   const componentCount = form.draftComponents.length;
@@ -2034,8 +2041,11 @@ function ExamSchedulePanel({
   const [filterStatus, setFilterStatus] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
-  const [panelMode, setPanelMode] = useState<'none' | 'create' | 'bulk'>('none');
+  const [panelMode, setPanelMode] = useState<'none' | 'create' | 'generate'>('none');
   const [editingInstance, setEditingInstance] = useState<AssessmentInstance | null>(null);
+  const [viewMode, setViewMode] = useState<'class' | 'flat'>('class');
+  const [expandedClasses, setExpandedClasses] = useState<Set<number>>(new Set());
+  const [lastGenerateResult, setLastGenerateResult] = useState<ExamScheduleGenerateResponse | null>(null);
 
   const serverQs = useMemo(() => {
     const p = new URLSearchParams();
@@ -2089,26 +2099,120 @@ function ExamSchedulePanel({
     onError: (e) => toast.error('Could not delete', formatApiError(e)),
   });
 
+  const bulkPublishMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      if (ids.length === 0) throw new Error('No draft assessments to publish');
+      return (await api.post<ExamBulkPublishResult>('/api/exams/schedule/bulk-publish', { assessmentIds: ids })).data;
+    },
+    onSuccess: async (data) => {
+      toast.success(
+        'Bulk publish complete',
+        `${data.publishedCount} scheduled.${data.failedCount > 0 ? ` ${data.failedCount} failed (missing date/time/marks).` : ''}`,
+      );
+      await qc.invalidateQueries({ queryKey: ['exam-assessments'] });
+    },
+    onError: (e) => toast.error('Bulk publish failed', formatApiError(e)),
+  });
+
   const onRefresh = async () => { await qc.invalidateQueries({ queryKey: ['exam-assessments'] }); };
 
-  const publishedSchemes = schemes.filter((s) => s.status === 'PUBLISHED');
-  const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
-
-  // Summary counts (from unfiltered data)
   const allData = assessmentsQ.data ?? [];
   const draftCount = allData.filter((a) => a.status === 'DRAFT').length;
   const scheduledCount = allData.filter((a) => a.status === 'SCHEDULED').length;
   const activeCount = allData.filter((a) => ['MARKS_ENTRY_OPEN','MARKS_SUBMITTED','LOCKED','PUBLISHED'].includes(a.status)).length;
   const cancelledCount = allData.filter((a) => a.status === 'CANCELLED').length;
+  const missingDateCount = assessments.filter((a) => !a.assessmentDate && a.status !== 'CANCELLED').length;
 
-  // Scheme options filtered by status toggle
+  const draftIdsInView = assessments.filter((a) => a.status === 'DRAFT').map((a) => a.id);
+
+  const STATUS_OPTIONS: AssessmentInstanceStatus[] = ['DRAFT', 'SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED', 'CANCELLED'];
+  const publishedSchemes = schemes.filter((s) => s.status === 'PUBLISHED');
+
   const filteredSchemeOptions = useMemo(() => {
     if (!filterSchemeStatus) return schemes;
     return schemes.filter((s) => s.status === filterSchemeStatus);
   }, [schemes, filterSchemeStatus]);
 
-  // Row action menu
+  // Class-wise grouping: classGroupId → { label, items }
+  const classwiseGroups = useMemo(() => {
+    const map = new Map<number, { label: string; items: AssessmentInstance[] }>();
+    for (const a of assessments) {
+      if (!map.has(a.classGroupId)) map.set(a.classGroupId, { label: a.classGroupLabel, items: [] });
+      map.get(a.classGroupId)!.items.push(a);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[1].label.localeCompare(b[1].label));
+  }, [assessments]);
+
+  const toggleClass = (id: number) => {
+    setExpandedClasses((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const expandAll = () => setExpandedClasses(new Set(classwiseGroups.map(([id]) => id)));
+  const collapseAll = () => setExpandedClasses(new Set());
+
   const [menuRect, setMenuRect] = useState<{ id: number; rect: DOMRect } | null>(null);
+
+  const renderInstanceRow = (a: AssessmentInstance) => {
+    const isDraft = a.status === 'DRAFT';
+    const isScheduled = a.status === 'SCHEDULED';
+    const isActive = ['MARKS_ENTRY_OPEN','MARKS_SUBMITTED','LOCKED','PUBLISHED'].includes(a.status);
+    const isCancelled = a.status === 'CANCELLED';
+    const canEdit = isDraft || isScheduled;
+    const canPublish = isDraft;
+    const canCancel = isDraft || isScheduled;
+    const canClone = isScheduled || isActive || isCancelled;
+    const canDelete = isDraft || isCancelled;
+    const hasMenu = canPublish || canClone || canCancel || canDelete;
+    const timeStr = a.startTime ? (a.endTime ? `${a.startTime.slice(0,5)}–${a.endTime.slice(0,5)}` : a.startTime.slice(0,5)) : '';
+    const isMenuOpen = menuRect?.id === a.id;
+    return (
+      <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', background: !a.assessmentDate && a.status !== 'CANCELLED' ? 'rgba(251,191,36,0.05)' : undefined }}>
+        <td style={{ padding: '7px 8px', fontWeight: 700, fontSize: 13 }}>{a.name}</td>
+        <td style={{ padding: '7px 8px', fontSize: 12, color: '#475569' }}>{a.componentName}</td>
+        <td style={{ padding: '7px 8px', fontSize: 12, color: '#475569' }}>{a.schemeName}</td>
+        <td style={{ padding: '7px 8px', fontSize: 12 }}>{a.subjectName}</td>
+        <td style={{ padding: '7px 8px', whiteSpace: 'nowrap', fontSize: 12 }}>
+          {a.assessmentDate ? (
+            <div><div>{a.assessmentDate}</div>{timeStr && <div className="muted" style={{ fontSize: 11 }}>{timeStr}</div>}</div>
+          ) : <span style={{ color: '#f59e0b', fontWeight: 700 }}>Missing</span>}
+        </td>
+        <td style={{ padding: '7px 8px', fontSize: 12 }}>{a.roomLabel ?? <span className="muted">—</span>}</td>
+        <td style={{ padding: '7px 8px', textAlign: 'right', fontSize: 12 }}>{a.maxMarks > 0 ? a.maxMarks : <span style={{ color: '#f59e0b' }}>—</span>}</td>
+        <td style={{ padding: '7px 8px' }}>
+          <StatusChip level={instanceStatusLevel(a.status)} label={instanceStatusLabel(a.status)} />
+        </td>
+        <td style={{ padding: '7px 8px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }}
+              onClick={() => { setEditingInstance(a); setPanelMode('none'); }}>
+              {canEdit ? 'Edit' : 'View'}
+            </button>
+            {hasMenu && (
+              <>
+                <button type="button"
+                  style={{ background: 'none', border: '1.5px solid rgba(15,23,42,0.15)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: '#64748b' }}
+                  onClick={(e) => { e.stopPropagation(); const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setMenuRect((prev) => prev?.id === a.id ? null : { id: a.id, rect }); }}
+                  title="More actions">⋯</button>
+                {isMenuOpen && createPortal(
+                  <div style={{ position: 'fixed', top: Math.max(8, menuRect!.rect.bottom + 6), right: Math.max(8, window.innerWidth - menuRect!.rect.right), zIndex: 9999, background: '#fff', border: '1.5px solid rgba(15,23,42,0.12)', borderRadius: 10, boxShadow: '0 8px 30px rgba(15,23,42,0.14)', padding: '4px 0', minWidth: 172 }}>
+                    {canPublish && <button type="button" style={menuItemStyle('#065f46')} disabled={publishMutation.isPending} onClick={() => { publishMutation.mutate(a.id); setMenuRect(null); }}>✓ Publish / Schedule</button>}
+                    {canClone && <button type="button" style={menuItemStyle()} disabled={cloneMutation.isPending} onClick={() => { cloneMutation.mutate(a.id); setMenuRect(null); }}>⎘ Clone as Draft</button>}
+                    {canCancel && <button type="button" style={menuItemStyle('#b45309')} disabled={cancelMutation.isPending} onClick={() => { cancelMutation.mutate(a.id); setMenuRect(null); }}>✕ Cancel</button>}
+                    {canDelete && <button type="button" style={menuItemStyle('#b91c1c')} disabled={deleteMutation.isPending} onClick={() => { deleteMutation.mutate(a.id); setMenuRect(null); }}>🗑 Delete Draft</button>}
+                  </div>,
+                  document.body
+                )}
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <div className="stack" style={{ gap: 12 }}>
@@ -2125,9 +2229,9 @@ function ExamSchedulePanel({
             <button
               type="button"
               className="btn secondary"
-              onClick={() => { setPanelMode(panelMode === 'bulk' ? 'none' : 'bulk'); setEditingInstance(null); }}
+              onClick={() => { setPanelMode(panelMode === 'generate' ? 'none' : 'generate'); setEditingInstance(null); setLastGenerateResult(null); }}
             >
-              {panelMode === 'bulk' ? 'Close' : 'Generate from Scheme'}
+              {panelMode === 'generate' ? 'Close' : 'Generate from Scheme'}
             </button>
             <button
               type="button"
@@ -2148,6 +2252,7 @@ function ExamSchedulePanel({
             { label: 'Drafts', value: draftCount, bg: '#fef3c7', color: '#92400e' },
             { label: 'Scheduled', value: scheduledCount, bg: '#d1fae5', color: '#065f46' },
             { label: 'In Progress', value: activeCount, bg: '#ede9fe', color: '#4338ca' },
+            { label: 'Missing Dates', value: missingDateCount, bg: missingDateCount > 0 ? '#fff7ed' : '#f1f5f9', color: missingDateCount > 0 ? '#c2410c' : '#475569' },
             { label: 'Cancelled', value: cancelledCount, bg: cancelledCount > 0 ? '#fee2e2' : '#f1f5f9', color: cancelledCount > 0 ? '#991b1b' : '#475569' },
           ].map((c) => (
             <div key={c.label} style={{ background: c.bg, borderRadius: 8, padding: '10px 14px' }}>
@@ -2157,6 +2262,68 @@ function ExamSchedulePanel({
           ))}
         </div>
       )}
+
+      {/* Inline panels */}
+      {panelMode === 'create' && editingInstance == null ? (
+        <CreateAssessmentForm
+          publishedSchemes={publishedSchemes}
+          classGroups={classGroups}
+          subjects={subjects}
+          rooms={roomsQ.data ?? []}
+          onSuccess={async () => { setPanelMode('none'); await onRefresh(); }}
+          onCancel={() => setPanelMode('none')}
+        />
+      ) : null}
+
+      {panelMode === 'generate' ? (
+        <GenerateFromSchemePanel
+          academicYears={academicYears}
+          onSuccess={async (result) => {
+            setLastGenerateResult(result);
+            setPanelMode('none');
+            await onRefresh();
+          }}
+          onCancel={() => setPanelMode('none')}
+        />
+      ) : null}
+
+      {/* Last generation result summary */}
+      {lastGenerateResult != null && panelMode === 'none' && (
+        <div className="card" style={{ padding: 12, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.04)' }}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 13, color: '#065f46' }}>
+                ✓ Draft schedule generated — {lastGenerateResult.generatedCount} exam{lastGenerateResult.generatedCount === 1 ? '' : 's'} created
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                Skipped (already existed): {lastGenerateResult.skippedCount} ·
+                Missing scheme: {lastGenerateResult.missingSchemeCount} ·
+                Not schedulable: {lastGenerateResult.notSchedulableCount}
+                {lastGenerateResult.scheduleGroupId ? ` · Group: ${lastGenerateResult.scheduleGroupId}` : ''}
+              </div>
+              {lastGenerateResult.warnings.length > 0 && (
+                <ul style={{ margin: '6px 0 0 0', padding: '0 0 0 16px', fontSize: 11, color: '#c2410c' }}>
+                  {lastGenerateResult.warnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
+                  {lastGenerateResult.warnings.length > 5 && <li>…and {lastGenerateResult.warnings.length - 5} more</li>}
+                </ul>
+              )}
+            </div>
+            <button type="button" className="btn secondary" style={{ fontSize: 12 }}
+              onClick={() => setLastGenerateResult(null)}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
+      {editingInstance != null ? (
+        <EditAssessmentForm
+          instance={editingInstance}
+          classGroups={classGroups}
+          subjects={subjects}
+          rooms={roomsQ.data ?? []}
+          onSuccess={async () => { setEditingInstance(null); await onRefresh(); }}
+          onCancel={() => setEditingInstance(null)}
+        />
+      ) : null}
 
       {/* Filters */}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
@@ -2231,145 +2398,145 @@ function ExamSchedulePanel({
         </div>
       </div>
 
-      {/* Inline panels */}
-      {panelMode === 'create' && editingInstance == null ? (
-        <CreateAssessmentForm
-          publishedSchemes={publishedSchemes}
-          classGroups={classGroups}
-          subjects={subjects}
-          rooms={roomsQ.data ?? []}
-          onSuccess={async () => { setPanelMode('none'); await onRefresh(); }}
-          onCancel={() => setPanelMode('none')}
-        />
-      ) : null}
+      {/* View mode toggle + bulk actions */}
+      {allData.length > 0 && (
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="row" style={{ gap: 4 }}>
+            {(['class', 'flat'] as const).map((m) => (
+              <button key={m} type="button"
+                style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid rgba(15,23,42,0.2)', cursor: 'pointer', background: viewMode === m ? '#0f172a' : 'transparent', color: viewMode === m ? '#fff' : '#0f172a', fontWeight: viewMode === m ? 700 : 400 }}
+                onClick={() => setViewMode(m)}>
+                {m === 'class' ? 'Class View' : 'Flat Table'}
+              </button>
+            ))}
+          </div>
+          {viewMode === 'class' && (
+            <div className="row" style={{ gap: 6 }}>
+              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={expandAll}>Expand All</button>
+              <button type="button" className="btn secondary" style={{ fontSize: 11, padding: '3px 10px' }} onClick={collapseAll}>Collapse All</button>
+            </div>
+          )}
+          {draftIdsInView.length > 0 && (
+            <button
+              type="button"
+              className="btn"
+              style={{ fontSize: 11, padding: '3px 12px', background: '#065f46', color: '#fff' }}
+              disabled={bulkPublishMutation.isPending}
+              onClick={() => bulkPublishMutation.mutate(draftIdsInView)}
+              title={`Publish all ${draftIdsInView.length} draft exam${draftIdsInView.length === 1 ? '' : 's'} in current view (must have date, time, and max marks)`}
+            >
+              {bulkPublishMutation.isPending ? 'Publishing…' : `Publish Schedule (${draftIdsInView.length} draft${draftIdsInView.length === 1 ? '' : 's'})`}
+            </button>
+          )}
+          <span className="muted" style={{ fontSize: 12 }}>{assessments.length} assessment{assessments.length === 1 ? '' : 's'}</span>
+        </div>
+      )}
 
-      {panelMode === 'bulk' ? (
-        <SmartGeneratePanel
-          academicYears={academicYears}
-          classGroups={classGroups}
-          subjects={subjects}
-          rooms={roomsQ.data ?? []}
-          onSuccess={async () => { setPanelMode('none'); await onRefresh(); }}
-          onCancel={() => setPanelMode('none')}
-        />
-      ) : null}
-
-      {editingInstance != null ? (
-        <EditAssessmentForm
-          instance={editingInstance}
-          classGroups={classGroups}
-          subjects={subjects}
-          rooms={roomsQ.data ?? []}
-          onSuccess={async () => { setEditingInstance(null); await onRefresh(); }}
-          onCancel={() => setEditingInstance(null)}
-        />
-      ) : null}
-
-      {/* Assessments table */}
-      <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
-        {assessmentsQ.isLoading ? (
-          <div className="muted" style={{ padding: 12 }}>Loading…</div>
-        ) : assessmentsQ.isError ? (
-          <div style={{ color: '#b91c1c', padding: 12 }}>Failed to load assessments.</div>
-        ) : (
+      {/* Schedule content */}
+      {assessmentsQ.isLoading ? (
+        <div className="muted" style={{ padding: 16 }}>Loading…</div>
+      ) : assessmentsQ.isError ? (
+        <div style={{ color: '#b91c1c', padding: 16 }}>Failed to load assessments.</div>
+      ) : assessments.length === 0 ? (
+        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+          <div className="muted" style={{ fontSize: 14, marginBottom: 16 }}>
+            {allData.length === 0
+              ? 'No exams scheduled yet. Generate schedules from published assessment schemes or schedule an assessment manually.'
+              : 'No assessments match the current filters.'}
+          </div>
+          {allData.length === 0 && (
+            <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
+              <button type="button" className="btn secondary" onClick={(e) => { e.stopPropagation(); setPanelMode('generate'); setEditingInstance(null); }}>
+                Generate from Scheme
+              </button>
+              <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setPanelMode('create'); setEditingInstance(null); }}>
+                + Schedule Assessment
+              </button>
+            </div>
+          )}
+        </div>
+      ) : viewMode === 'flat' ? (
+        /* ── Flat table view ── */
+        <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '2px solid rgba(15,23,42,0.1)', background: 'rgba(15,23,42,0.02)' }}>
-                  {['Assessment', 'Component', 'Class / Section', 'Subject', 'Date & Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
-                    <th key={h} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontWeight: 800, fontSize: 12 }}>{h}</th>
+                  {['Assessment', 'Component', 'Scheme', 'Subject', 'Date & Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
+                    <th key={h} style={{ padding: '8px 8px', whiteSpace: 'nowrap', fontWeight: 800, fontSize: 12 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody>
-                {assessments.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} style={{ padding: 32, textAlign: 'center' }}>
-                      <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-                        {allData.length === 0
-                          ? 'No exams scheduled yet. Generate schedules from a published assessment scheme or schedule an assessment manually.'
-                          : 'No assessments match the current filters.'}
-                      </div>
-                      {allData.length === 0 && (
-                        <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
-                          <button type="button" className="btn secondary" onClick={(e) => { e.stopPropagation(); setPanelMode('bulk'); setEditingInstance(null); }}>
-                            Generate from Scheme
-                          </button>
-                          <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setPanelMode('create'); setEditingInstance(null); }}>
-                            + Schedule Assessment
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ) : assessments.map((a) => {
-                  const isDraft = a.status === 'DRAFT';
-                  const isScheduled = a.status === 'SCHEDULED';
-                  const isActive = ['MARKS_ENTRY_OPEN','MARKS_SUBMITTED','LOCKED','PUBLISHED'].includes(a.status);
-                  const isCancelled = a.status === 'CANCELLED';
-                  const canEdit = isDraft || isScheduled;
-                  const canPublish = isDraft;
-                  const canCancel = isDraft || isScheduled;
-                  const canClone = isScheduled || isActive || isCancelled;
-                  const canDelete = isDraft || isCancelled;
-                  const hasMenu = canPublish || canClone || canCancel || canDelete;
-                  const timeStr = a.startTime ? (a.endTime ? `${a.startTime.slice(0,5)}–${a.endTime.slice(0,5)}` : a.startTime.slice(0,5)) : '';
-                  const isMenuOpen = menuRect?.id === a.id;
-                  return (
-                    <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,23,42,0.08)' }}>
-                      <td style={{ padding: '8px 6px', fontWeight: 700 }}>{a.name}</td>
-                      <td style={{ padding: '8px 6px', color: '#475569', fontSize: 12 }}>{a.schemeName}</td>
-                      <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.componentName}</td>
-                      <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.classGroupLabel}</td>
-                      <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.subjectName}</td>
-                      <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
-                        {a.assessmentDate ? (
-                          <div><div>{a.assessmentDate}</div>{timeStr && <div className="muted" style={{ fontSize: 11 }}>{timeStr}</div>}</div>
-                        ) : <span className="muted">—</span>}
-                      </td>
-                      <td style={{ padding: '8px 6px', fontSize: 12 }}>{a.roomLabel ?? <span className="muted">—</span>}</td>
-                      <td style={{ padding: '8px 6px', textAlign: 'right', fontSize: 12 }}>{a.maxMarks}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        <StatusChip level={instanceStatusLevel(a.status)} label={instanceStatusLabel(a.status)} />
-                      </td>
-                      <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
-                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                          <button type="button" className="btn" style={{ fontSize: 11, padding: '3px 10px' }}
-                            onClick={() => { setEditingInstance(a); setPanelMode('none'); }}>
-                            {canEdit ? 'Edit' : 'View'}
-                          </button>
-                          {hasMenu && (
-                            <>
-                              <button type="button"
-                                style={{ background: 'none', border: '1.5px solid rgba(15,23,42,0.15)', borderRadius: 6, padding: '3px 8px', cursor: 'pointer', fontSize: 15, lineHeight: 1, color: '#64748b' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                  setMenuRect((prev) => prev?.id === a.id ? null : { id: a.id, rect });
-                                }}
-                                title="More actions"
-                              >⋯</button>
-                              {isMenuOpen && createPortal(
-                                <div style={{ position: 'fixed', top: Math.max(8, menuRect!.rect.bottom + 6), right: Math.max(8, window.innerWidth - menuRect!.rect.right), zIndex: 9999, background: '#fff', border: '1.5px solid rgba(15,23,42,0.12)', borderRadius: 10, boxShadow: '0 8px 30px rgba(15,23,42,0.14)', padding: '4px 0', minWidth: 172 }}>
-                                  {canPublish && <button type="button" style={menuItemStyle('#065f46')} disabled={publishMutation.isPending} onClick={() => { publishMutation.mutate(a.id); setMenuRect(null); }}>✓ Publish / Schedule</button>}
-                                  {canClone && <button type="button" style={menuItemStyle()} disabled={cloneMutation.isPending} onClick={() => { cloneMutation.mutate(a.id); setMenuRect(null); }}>⎘ Clone as Draft</button>}
-                                  {canCancel && <button type="button" style={menuItemStyle('#b45309')} disabled={cancelMutation.isPending} onClick={() => { cancelMutation.mutate(a.id); setMenuRect(null); }}>✕ Cancel</button>}
-                                  {canDelete && <button type="button" style={menuItemStyle('#b91c1c')} disabled={deleteMutation.isPending} onClick={() => { deleteMutation.mutate(a.id); setMenuRect(null); }}>🗑 Delete Draft</button>}
-                                </div>,
-                                document.body
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+              <tbody>{assessments.map(renderInstanceRow)}</tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        /* ── Class-wise grouped view ── */
+        <div className="stack" style={{ gap: 8 }}>
+          {classwiseGroups.map(([classId, group]) => {
+            const isExpanded = expandedClasses.has(classId);
+            const items = group.items;
+            const missingDates = items.filter((a) => !a.assessmentDate && a.status !== 'CANCELLED').length;
+            const draftItems = items.filter((a) => a.status === 'DRAFT').length;
+            const scheduledItems = items.filter((a) => a.status === 'SCHEDULED').length;
+            const subjectCount = new Set(items.map((a) => a.subjectId)).size;
+            const componentCount = new Set(items.map((a) => a.componentId)).size;
+            // Group items by component then subject for display
+            const byComponent = new Map<string, { componentName: string; schemeName: string; items: AssessmentInstance[] }>();
+            for (const a of items) {
+              const key = `${a.componentId}`;
+              if (!byComponent.has(key)) byComponent.set(key, { componentName: a.componentName, schemeName: a.schemeName, items: [] });
+              byComponent.get(key)!.items.push(a);
+            }
+            return (
+              <div key={classId} className="card" style={{ border: '1px solid rgba(15,23,42,0.1)', padding: 0, overflow: 'hidden' }}>
+                {/* Class summary row */}
+                <button type="button"
+                  style={{ width: '100%', background: isExpanded ? 'rgba(15,23,42,0.04)' : '#fff', border: 'none', cursor: 'pointer', padding: '12px 14px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
+                  onClick={() => toggleClass(classId)}>
+                  <span style={{ fontSize: 16 }}>{isExpanded ? '▾' : '▸'}</span>
+                  <span style={{ fontWeight: 900, fontSize: 15, flex: 1 }}>{group.label}</span>
+                  <div className="row" style={{ gap: 10, flexWrap: 'wrap', fontSize: 12, color: '#475569' }}>
+                    <span>{subjectCount} subject{subjectCount === 1 ? '' : 's'}</span>
+                    <span>{componentCount} component{componentCount === 1 ? '' : 's'}</span>
+                    <span style={{ fontWeight: 700, color: '#1d4ed8' }}>{items.length} exam{items.length === 1 ? '' : 's'}</span>
+                    {missingDates > 0 && <span style={{ fontWeight: 700, color: '#c2410c' }}>{missingDates} missing date{missingDates === 1 ? '' : 's'}</span>}
+                    {draftItems > 0 && <StatusChip level="warn" label={`${draftItems} draft`} />}
+                    {scheduledItems > 0 && <StatusChip level="ok" label={`${scheduledItems} scheduled`} />}
+                  </div>
+                </button>
+                {isExpanded && (
+                  <div style={{ borderTop: '1px solid rgba(15,23,42,0.08)', padding: '0 0 8px' }}>
+                    {Array.from(byComponent.entries()).map(([compKey, compGroup]) => (
+                      <div key={compKey} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', marginBottom: 0 }}>
+                        {/* Component header */}
+                        <div style={{ padding: '10px 14px 4px', background: 'rgba(15,23,42,0.02)' }}>
+                          <span style={{ fontWeight: 800, fontSize: 13 }}>{compGroup.componentName}</span>
+                          <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>Scheme: {compGroup.schemeName}</span>
+                        </div>
+                        {/* Subject rows under this component */}
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                            <thead>
+                              <tr style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', background: 'rgba(15,23,42,0.01)' }}>
+                                {['Assessment', 'Subject', 'Date & Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
+                                  <th key={h} style={{ padding: '5px 8px', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap', textAlign: 'left' }}>{h}</th>
+                                ))}
+                              </tr>
+                              <tbody>{compGroup.items.map(renderInstanceRow)}</tbody>
+                            </thead>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -2594,7 +2761,9 @@ function EditAssessmentForm({
           </label>
           <label className="stack" style={{ gap: 6 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Max marks</span>
-            <input type="number" min={0.01} step="0.01" value={form.maxMarks} onChange={(e) => set('maxMarks', e.target.value)} />
+            <input type="number" min={0.01} step="0.01" value={form.maxMarks}
+              onChange={(e) => set('maxMarks', e.target.value)}
+              placeholder="100" />
           </label>
           <label className="stack" style={{ gap: 6 }}>
             <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date</span>
@@ -2629,7 +2798,37 @@ function EditAssessmentForm({
   );
 }
 
-// ─────────────────────────────── Smart Generate Panel Types ──────────────────────
+// ─────────────────────────── Generate-from-Scheme Types ──────────────────────
+
+type GenerateFromSchemeForm = {
+  academicYearId: string;
+  scheduleName: string;
+  dateWindowFrom: string;
+  dateWindowTo: string;
+  defaultStartTime: string;
+  defaultEndTime: string;
+  roomStrategy: 'LEAVE_BLANK' | 'USE_HOMEROOM';
+  dateStrategy: 'LEAVE_BLANK' | 'AUTO_DISTRIBUTE' | 'SAME_SUBJECT_DATE';
+};
+
+type ExamScheduleGenerateResponse = {
+  scheduleGroupId: string;
+  generatedCount: number;
+  skippedCount: number;
+  missingSchemeCount: number;
+  notSchedulableCount: number;
+  warnings: string[];
+  instances: AssessmentInstance[];
+};
+
+type ExamBulkPublishResult = {
+  publishedCount: number;
+  failedCount: number;
+  errors: string[];
+  published: AssessmentInstance[];
+};
+
+// ─────────────────────────────── Legacy candidate types (kept for future) ────
 
 type SmartGenForm = {
   academicYearId: string;
@@ -2726,7 +2925,171 @@ const COMPONENT_TYPE_LABELS: Record<string, string> = {
   OTHER: 'Other',
 };
 
-// ─────────────────────────────── Smart Generate Panel ─────────────────────────
+// ─────────────────────────────── Generate from Scheme Panel ──────────────────
+
+/**
+ * The primary "Generate from Scheme" panel.
+ * Admin only provides scheduling-level inputs.
+ * The backend automatically resolves scheme/component/class/section/subject via the
+ * override hierarchy (Section+Subject > Class+Subject > Section > Class > School-wide).
+ */
+function GenerateFromSchemePanel({
+  academicYears,
+  onSuccess,
+  onCancel,
+}: {
+  academicYears: AcademicYear[];
+  onSuccess: (result: ExamScheduleGenerateResponse) => void;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState<GenerateFromSchemeForm>({
+    academicYearId: '',
+    scheduleName: '',
+    dateWindowFrom: '',
+    dateWindowTo: '',
+    defaultStartTime: '',
+    defaultEndTime: '',
+    roomStrategy: 'LEAVE_BLANK',
+    dateStrategy: 'LEAVE_BLANK',
+  });
+  const setF = <K extends keyof GenerateFromSchemeForm>(k: K, v: GenerateFromSchemeForm[K]) =>
+    setForm((p) => ({ ...p, [k]: v }));
+
+  const generateMutation = useMutation({
+    mutationFn: async () => {
+      if (!form.academicYearId) throw new Error('Select an academic year');
+      if (!form.scheduleName.trim()) throw new Error('Schedule name is required');
+      return (await api.post<ExamScheduleGenerateResponse>('/api/exams/schedule/generate-from-schemes', {
+        academicYearId: Number(form.academicYearId),
+        scheduleName: form.scheduleName.trim(),
+        dateWindowFrom: form.dateWindowFrom || null,
+        dateWindowTo: form.dateWindowTo || null,
+        defaultStartTime: form.defaultStartTime || null,
+        defaultEndTime: form.defaultEndTime || null,
+        roomStrategy: form.roomStrategy,
+        dateStrategy: form.dateStrategy,
+      })).data;
+    },
+    onSuccess: (data) => {
+      toast.success(
+        'Draft schedule generated',
+        `${data.generatedCount} exam${data.generatedCount === 1 ? '' : 's'} created as drafts.` +
+          (data.missingSchemeCount > 0 ? ` ${data.missingSchemeCount} class/subject combinations had no published scheme.` : '') +
+          (data.skippedCount > 0 ? ` ${data.skippedCount} already existed and were skipped.` : ''),
+      );
+      onSuccess(data);
+    },
+    onError: (e) => toast.error('Generation failed', formatApiError(e)),
+  });
+
+  return (
+    <div className="card" style={{ padding: 16, border: '1px solid rgba(15,23,42,0.12)' }}>
+      <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 4 }}>Generate from Scheme</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 14 }}>
+        Schedules are generated from published assessment schemes. Class, section, and subject overrides are applied automatically.
+        Only components where <em>requiresScheduling = true</em> will be scheduled (attendance and calculated components are skipped).
+      </div>
+
+      <div className="stack" style={{ gap: 14 }}>
+        {/* Academic Year + Schedule Name */}
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Academic Year *</span>
+            <SmartSelect
+              value={form.academicYearId}
+              onChange={(v) => setF('academicYearId', v)}
+              options={academicYears.map((y) => ({ value: String(y.id), label: y.label }))}
+              placeholder="Select academic year…"
+              allowClear
+            />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Schedule Name *</span>
+            <input
+              value={form.scheduleName}
+              onChange={(e) => setF('scheduleName', e.target.value)}
+              placeholder="e.g. Mid Term 2025-26"
+            />
+          </label>
+        </div>
+
+        {/* Date window */}
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date Window — From (optional)</span>
+            <DateKeeper value={form.dateWindowFrom} onChange={(v) => setF('dateWindowFrom', v)} emptyLabel="Not set" clearable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date Window — To (optional)</span>
+            <DateKeeper value={form.dateWindowTo} onChange={(v) => setF('dateWindowTo', v)} emptyLabel="Not set" clearable />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Default Start Time (optional)</span>
+            <TimeKeeper value={form.defaultStartTime} onChange={(v) => setF('defaultStartTime', v)} />
+          </label>
+          <label className="stack" style={{ gap: 6 }}>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Default End Time (optional)</span>
+            <TimeKeeper value={form.defaultEndTime} onChange={(v) => setF('defaultEndTime', v)} />
+          </label>
+        </div>
+
+        {/* Room Strategy */}
+        <div className="stack" style={{ gap: 6 }}>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Room Strategy</span>
+          <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
+            {([
+              ['LEAVE_BLANK', 'Leave blank – assign rooms later'],
+              ['USE_HOMEROOM', 'Use class homeroom if configured'],
+            ] as const).map(([v, lbl]) => (
+              <label key={v} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                <input type="radio" checked={form.roomStrategy === v} onChange={() => setF('roomStrategy', v)} />
+                {lbl}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Date Strategy */}
+        <div className="stack" style={{ gap: 6 }}>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Date Strategy</span>
+          <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
+            {([
+              ['LEAVE_BLANK', 'Leave dates blank – assign manually'],
+              ['AUTO_DISTRIBUTE', 'Auto-distribute across date window'],
+              ['SAME_SUBJECT_DATE', 'Same date per subject across all sections'],
+            ] as const).map(([v, lbl]) => (
+              <label key={v} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                <input type="radio" checked={form.dateStrategy === v} onChange={() => setF('dateStrategy', v)} />
+                {lbl}
+              </label>
+            ))}
+          </div>
+          {form.dateStrategy !== 'LEAVE_BLANK' && (!form.dateWindowFrom || !form.dateWindowTo) && (
+            <div style={{ color: '#c2410c', fontSize: 12 }}>
+              ⚠ Set a date window above to use this strategy.
+            </div>
+          )}
+        </div>
+
+        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={generateMutation.isPending}
+            onClick={() => generateMutation.mutate()}
+          >
+            {generateMutation.isPending ? 'Generating…' : 'Generate Draft Schedule'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────── Smart Generate Panel (legacy, kept for candidate preview) ─────
 
 function SmartGeneratePanel({
   academicYears,
