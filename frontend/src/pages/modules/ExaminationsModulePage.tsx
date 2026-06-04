@@ -2044,7 +2044,7 @@ function ExamSchedulePanel({
   const [panelMode, setPanelMode] = useState<'none' | 'create' | 'generate'>('none');
   const [editingInstance, setEditingInstance] = useState<AssessmentInstance | null>(null);
   const [viewMode, setViewMode] = useState<'class' | 'flat'>('class');
-  const [expandedClasses, setExpandedClasses] = useState<Set<number>>(new Set());
+  const [expandedClasses, setExpandedClasses] = useState<Set<string>>(new Set());
   const [lastGenerateResult, setLastGenerateResult] = useState<ExamScheduleGenerateResponse | null>(null);
 
   const serverQs = useMemo(() => {
@@ -2133,25 +2133,75 @@ function ExamSchedulePanel({
     return schemes.filter((s) => s.status === filterSchemeStatus);
   }, [schemes, filterSchemeStatus]);
 
-  // Class-wise grouping: classGroupId → { label, items }
-  const classwiseGroups = useMemo(() => {
-    const map = new Map<number, { label: string; items: AssessmentInstance[] }>();
-    for (const a of assessments) {
-      if (!map.has(a.classGroupId)) map.set(a.classGroupId, { label: a.classGroupLabel, items: [] });
-      map.get(a.classGroupId)!.items.push(a);
-    }
-    return Array.from(map.entries()).sort((a, b) => a[1].label.localeCompare(b[1].label));
-  }, [assessments]);
+  // Build a classGroupId → ClassGroup lookup for grade resolution
+  const classGroupById = useMemo(() => {
+    const m = new Map<number, ClassGroup>();
+    for (const cg of classGroups) m.set(cg.id, cg);
+    return m;
+  }, [classGroups]);
 
-  const toggleClass = (id: number) => {
+  type GradeSection = { classGroupId: number; sectionLabel: string; items: AssessmentInstance[] };
+  type GradeEntry = {
+    gradeKey: string;
+    gradeLabel: string;
+    gradeLevel: number | null;
+    sections: GradeSection[];
+    allItems: AssessmentInstance[];
+  };
+
+  // Class-wise grouping: grade-level → sections → items
+  const classwiseGroups = useMemo((): GradeEntry[] => {
+    // Build per-section data
+    const sectionMap = new Map<number, GradeSection>();
+    for (const a of assessments) {
+      if (!sectionMap.has(a.classGroupId)) {
+        sectionMap.set(a.classGroupId, { classGroupId: a.classGroupId, sectionLabel: a.classGroupLabel, items: [] });
+      }
+      sectionMap.get(a.classGroupId)!.items.push(a);
+    }
+    // Group sections by grade level
+    const gradeMap = new Map<string, GradeEntry>();
+    for (const [classGroupId, section] of sectionMap.entries()) {
+      const cg = classGroupById.get(classGroupId);
+      const gradeLevel = cg?.gradeLevel ?? null;
+      const gradeKey = gradeLevel != null ? `g:${gradeLevel}` : `g:${classGroupId}`;
+      const gradeLabel = gradeLevel != null ? `Class ${gradeLevel}` : (cg?.displayName ?? section.sectionLabel);
+      if (!gradeMap.has(gradeKey)) {
+        gradeMap.set(gradeKey, { gradeKey, gradeLabel, gradeLevel, sections: [], allItems: [] });
+      }
+      const grade = gradeMap.get(gradeKey)!;
+      grade.sections.push(section);
+      grade.allItems.push(...section.items);
+    }
+    // Sort sections within each grade by label
+    for (const grade of gradeMap.values()) {
+      grade.sections.sort((a, b) => a.sectionLabel.localeCompare(b.sectionLabel));
+    }
+    // Sort grades by level
+    return Array.from(gradeMap.values()).sort((a, b) => {
+      if (a.gradeLevel != null && b.gradeLevel != null) return a.gradeLevel - b.gradeLevel;
+      if (a.gradeLevel != null) return -1;
+      if (b.gradeLevel != null) return 1;
+      return a.gradeLabel.localeCompare(b.gradeLabel);
+    });
+  }, [assessments, classGroupById]);
+
+  const toggleKey = (key: string) => {
     setExpandedClasses((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   };
 
-  const expandAll = () => setExpandedClasses(new Set(classwiseGroups.map(([id]) => id)));
+  const expandAll = () => {
+    const keys = new Set<string>();
+    for (const grade of classwiseGroups) {
+      keys.add(grade.gradeKey);
+      for (const s of grade.sections) keys.add(`s:${s.classGroupId}`);
+    }
+    setExpandedClasses(keys);
+  };
   const collapseAll = () => setExpandedClasses(new Set());
 
   const [menuRect, setMenuRect] = useState<{ id: number; rect: DOMRect } | null>(null);
@@ -2317,8 +2367,6 @@ function ExamSchedulePanel({
       {editingInstance != null ? (
         <EditAssessmentForm
           instance={editingInstance}
-          classGroups={classGroups}
-          subjects={subjects}
           rooms={roomsQ.data ?? []}
           onSuccess={async () => { setEditingInstance(null); await onRefresh(); }}
           onCancel={() => setEditingInstance(null)}
@@ -2472,64 +2520,88 @@ function ExamSchedulePanel({
           </div>
         </div>
       ) : (
-        /* ── Class-wise grouped view ── */
+        /* ── Class-wise grouped view (grade → section → component → subject) ── */
         <div className="stack" style={{ gap: 8 }}>
-          {classwiseGroups.map(([classId, group]) => {
-            const isExpanded = expandedClasses.has(classId);
-            const items = group.items;
-            const missingDates = items.filter((a) => !a.assessmentDate && a.status !== 'CANCELLED').length;
-            const draftItems = items.filter((a) => a.status === 'DRAFT').length;
-            const scheduledItems = items.filter((a) => a.status === 'SCHEDULED').length;
-            const subjectCount = new Set(items.map((a) => a.subjectId)).size;
-            const componentCount = new Set(items.map((a) => a.componentId)).size;
-            // Group items by component then subject for display
-            const byComponent = new Map<string, { componentName: string; schemeName: string; items: AssessmentInstance[] }>();
-            for (const a of items) {
-              const key = `${a.componentId}`;
-              if (!byComponent.has(key)) byComponent.set(key, { componentName: a.componentName, schemeName: a.schemeName, items: [] });
-              byComponent.get(key)!.items.push(a);
-            }
+          <div className="muted" style={{ fontSize: 11, padding: '2px 0' }}>
+            Schedules are generated from published assessment schemes. Class, section, and subject overrides are applied automatically.
+          </div>
+          {classwiseGroups.map((grade) => {
+            const isGradeExpanded = expandedClasses.has(grade.gradeKey);
+            const allItems = grade.allItems;
+            const missingDates = allItems.filter((a) => !a.assessmentDate && a.status !== 'CANCELLED').length;
+            const draftItems = allItems.filter((a) => a.status === 'DRAFT').length;
+            const scheduledItems = allItems.filter((a) => a.status === 'SCHEDULED').length;
+            const subjectCount = new Set(allItems.map((a) => a.subjectId)).size;
+            const sectionCount = grade.sections.length;
             return (
-              <div key={classId} className="card" style={{ border: '1px solid rgba(15,23,42,0.1)', padding: 0, overflow: 'hidden' }}>
-                {/* Class summary row */}
+              <div key={grade.gradeKey} className="card" style={{ border: '1px solid rgba(15,23,42,0.1)', padding: 0, overflow: 'hidden' }}>
+                {/* Grade summary row */}
                 <button type="button"
-                  style={{ width: '100%', background: isExpanded ? 'rgba(15,23,42,0.04)' : '#fff', border: 'none', cursor: 'pointer', padding: '12px 14px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
-                  onClick={() => toggleClass(classId)}>
-                  <span style={{ fontSize: 16 }}>{isExpanded ? '▾' : '▸'}</span>
-                  <span style={{ fontWeight: 900, fontSize: 15, flex: 1 }}>{group.label}</span>
+                  style={{ width: '100%', background: isGradeExpanded ? 'rgba(15,23,42,0.04)' : '#fff', border: 'none', cursor: 'pointer', padding: '12px 14px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
+                  onClick={() => toggleKey(grade.gradeKey)}>
+                  <span style={{ fontSize: 16 }}>{isGradeExpanded ? '▾' : '▸'}</span>
+                  <span style={{ fontWeight: 900, fontSize: 15, flex: 1 }}>{grade.gradeLabel}</span>
                   <div className="row" style={{ gap: 10, flexWrap: 'wrap', fontSize: 12, color: '#475569' }}>
+                    <span>{sectionCount} section{sectionCount === 1 ? '' : 's'}</span>
                     <span>{subjectCount} subject{subjectCount === 1 ? '' : 's'}</span>
-                    <span>{componentCount} component{componentCount === 1 ? '' : 's'}</span>
-                    <span style={{ fontWeight: 700, color: '#1d4ed8' }}>{items.length} exam{items.length === 1 ? '' : 's'}</span>
+                    <span style={{ fontWeight: 700, color: '#1d4ed8' }}>{allItems.length} exam{allItems.length === 1 ? '' : 's'}</span>
                     {missingDates > 0 && <span style={{ fontWeight: 700, color: '#c2410c' }}>{missingDates} missing date{missingDates === 1 ? '' : 's'}</span>}
                     {draftItems > 0 && <StatusChip level="warn" label={`${draftItems} draft`} />}
                     {scheduledItems > 0 && <StatusChip level="ok" label={`${scheduledItems} scheduled`} />}
                   </div>
                 </button>
-                {isExpanded && (
-                  <div style={{ borderTop: '1px solid rgba(15,23,42,0.08)', padding: '0 0 8px' }}>
-                    {Array.from(byComponent.entries()).map(([compKey, compGroup]) => (
-                      <div key={compKey} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', marginBottom: 0 }}>
-                        {/* Component header */}
-                        <div style={{ padding: '10px 14px 4px', background: 'rgba(15,23,42,0.02)' }}>
-                          <span style={{ fontWeight: 800, fontSize: 13 }}>{compGroup.componentName}</span>
-                          <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>Scheme: {compGroup.schemeName}</span>
+                {isGradeExpanded && (
+                  <div style={{ borderTop: '1px solid rgba(15,23,42,0.08)' }}>
+                    {grade.sections.map((section) => {
+                      const isSectionExpanded = expandedClasses.has(`s:${section.classGroupId}`);
+                      const sItems = section.items;
+                      const sMissing = sItems.filter((a) => !a.assessmentDate && a.status !== 'CANCELLED').length;
+                      const byComponent = new Map<string, { componentName: string; schemeName: string; items: AssessmentInstance[] }>();
+                      for (const a of sItems) {
+                        const key = `${a.componentId}`;
+                        if (!byComponent.has(key)) byComponent.set(key, { componentName: a.componentName, schemeName: a.schemeName, items: [] });
+                        byComponent.get(key)!.items.push(a);
+                      }
+                      return (
+                        <div key={section.classGroupId} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)' }}>
+                          {/* Section header */}
+                          <button type="button"
+                            style={{ width: '100%', background: isSectionExpanded ? 'rgba(15,23,42,0.03)' : 'transparent', border: 'none', cursor: 'pointer', padding: '8px 14px 8px 28px', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}
+                            onClick={() => toggleKey(`s:${section.classGroupId}`)}>
+                            <span style={{ fontSize: 14 }}>{isSectionExpanded ? '▾' : '▸'}</span>
+                            <span style={{ fontWeight: 700, fontSize: 13 }}>{section.sectionLabel}</span>
+                            <div className="row" style={{ gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#64748b' }}>
+                              <span>{sItems.length} exam{sItems.length === 1 ? '' : 's'}</span>
+                              {sMissing > 0 && <span style={{ color: '#c2410c', fontWeight: 600 }}>{sMissing} missing date{sMissing === 1 ? '' : 's'}</span>}
+                            </div>
+                          </button>
+                          {isSectionExpanded && (
+                            <div style={{ borderTop: '1px solid rgba(15,23,42,0.05)', padding: '0 0 8px' }}>
+                              {Array.from(byComponent.entries()).map(([compKey, compGroup]) => (
+                                <div key={compKey} style={{ borderBottom: '1px solid rgba(15,23,42,0.06)', marginBottom: 0 }}>
+                                  <div style={{ padding: '8px 28px 4px', background: 'rgba(15,23,42,0.02)' }}>
+                                    <span style={{ fontWeight: 800, fontSize: 12 }}>{compGroup.componentName}</span>
+                                    <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>Scheme: {compGroup.schemeName}</span>
+                                  </div>
+                                  <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                      <thead>
+                                        <tr style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', background: 'rgba(15,23,42,0.01)' }}>
+                                          {['Assessment', 'Subject', 'Date & Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
+                                            <th key={h} style={{ padding: '5px 8px', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap', textAlign: 'left' }}>{h}</th>
+                                          ))}
+                                        </tr>
+                                        <tbody>{compGroup.items.map(renderInstanceRow)}</tbody>
+                                      </thead>
+                                    </table>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        {/* Subject rows under this component */}
-                        <div style={{ overflowX: 'auto' }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                            <thead>
-                              <tr style={{ borderBottom: '1px solid rgba(15,23,42,0.08)', background: 'rgba(15,23,42,0.01)' }}>
-                                {['Assessment', 'Subject', 'Date & Time', 'Room', 'Max Marks', 'Status', 'Actions'].map((h) => (
-                                  <th key={h} style={{ padding: '5px 8px', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap', textAlign: 'left' }}>{h}</th>
-                                ))}
-                              </tr>
-                              <tbody>{compGroup.items.map(renderInstanceRow)}</tbody>
-                            </thead>
-                          </table>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2685,31 +2757,28 @@ function CreateAssessmentForm({
 // ─────────────────────────────── Edit Assessment Form ───────────────────────────────
 
 type AssessmentEditForm = {
-  name: string; classGroupId: string; subjectId: string;
+  name: string;
   assessmentDate: string; startTime: string; endTime: string;
-  roomId: string; maxMarks: string; sequence: string;
+  roomId: string; maxMarks: string; sequence: string; instructions: string;
 };
 
 function EditAssessmentForm({
-  instance, classGroups, subjects, rooms, onSuccess, onCancel,
+  instance, rooms, onSuccess, onCancel,
 }: {
   instance: AssessmentInstance;
-  classGroups: ClassGroup[];
-  subjects: SubjectLite[];
   rooms: RoomLite[];
   onSuccess: () => Promise<void>;
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<AssessmentEditForm>({
     name: instance.name,
-    classGroupId: String(instance.classGroupId),
-    subjectId: String(instance.subjectId),
     assessmentDate: instance.assessmentDate ?? '',
     startTime: instance.startTime ?? '',
     endTime: instance.endTime ?? '',
     roomId: instance.roomId != null ? String(instance.roomId) : '',
     maxMarks: String(instance.maxMarks),
     sequence: String(instance.sequence),
+    instructions: instance.instructions ?? '',
   });
   const set = <K extends keyof AssessmentEditForm>(k: K, v: AssessmentEditForm[K]) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -2717,20 +2786,18 @@ function EditAssessmentForm({
 
   const updateMutation = useMutation({
     mutationFn: async () => {
-      if (!form.name.trim()) throw new Error('Name is required');
-      if (!form.classGroupId) throw new Error('Select class');
-      if (!form.subjectId) throw new Error('Select subject');
       if (!form.maxMarks || Number(form.maxMarks) <= 0) throw new Error('Max marks must be > 0');
       return (await api.put<AssessmentInstance>(`/api/exams/assessments/${instance.id}`, {
-        name: form.name.trim(),
-        classGroupId: Number(form.classGroupId),
-        subjectId: Number(form.subjectId),
+        name: form.name.trim() || instance.name,
+        classGroupId: instance.classGroupId,
+        subjectId: instance.subjectId,
         assessmentDate: form.assessmentDate || null,
         startTime: form.startTime || null,
         endTime: form.endTime || null,
         roomId: form.roomId ? Number(form.roomId) : null,
         maxMarks: Number(form.maxMarks),
         sequence: Number(form.sequence) || 1,
+        instructions: form.instructions || null,
       })).data;
     },
     onSuccess: async () => { toast.success('Assessment updated'); await onSuccess(); },
@@ -2739,8 +2806,17 @@ function EditAssessmentForm({
 
   return (
     <div className="card" style={{ padding: 12, border: '2px solid rgba(234,88,12,0.3)' }}>
-      <div style={{ fontWeight: 900, marginBottom: 2 }}>Edit: {instance.name}</div>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{instance.schemeName} · {instance.componentName}</div>
+      <div style={{ fontWeight: 900, marginBottom: 2 }}>Edit Assessment</div>
+      {/* Read-only context info */}
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', marginBottom: 10, padding: '8px 10px', background: 'rgba(15,23,42,0.03)', borderRadius: 6 }}>
+        <div><span className="muted" style={{ fontSize: 11, display: 'block', fontWeight: 700 }}>Class / Section</span><span style={{ fontSize: 13, fontWeight: 600 }}>{instance.classGroupLabel}</span></div>
+        <div><span className="muted" style={{ fontSize: 11, display: 'block', fontWeight: 700 }}>Subject</span><span style={{ fontSize: 13, fontWeight: 600 }}>{instance.subjectName}</span></div>
+        <div><span className="muted" style={{ fontSize: 11, display: 'block', fontWeight: 700 }}>Scheme</span><span style={{ fontSize: 12, color: '#475569' }}>{instance.schemeName}</span></div>
+        <div><span className="muted" style={{ fontSize: 11, display: 'block', fontWeight: 700 }}>Component</span><span style={{ fontSize: 12, color: '#475569' }}>{instance.componentName}</span></div>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginBottom: 10, fontStyle: 'italic' }}>
+        Schedules are generated from published assessment schemes. Class, section, subject, and component are resolved automatically and cannot be changed.
+      </div>
       <div className="stack" style={{ gap: 10 }}>
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           <label className="stack" style={{ gap: 6 }}>
@@ -2748,19 +2824,7 @@ function EditAssessmentForm({
             <input value={form.name} onChange={(e) => set('name', e.target.value)} />
           </label>
           <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Class / Section</span>
-            <SmartSelect value={form.classGroupId} onChange={(v) => set('classGroupId', v)}
-              options={classGroups.map((cg) => ({ value: String(cg.id), label: cg.displayName ?? `Class ${cg.gradeLevel ?? '-'} ${cg.section ?? ''}` }))}
-              placeholder="Select class…" searchable />
-          </label>
-          <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</span>
-            <SmartSelect value={form.subjectId} onChange={(v) => set('subjectId', v)}
-              options={subjects.map((s) => ({ value: String(s.id), label: s.code ? `${s.code} – ${s.name}` : s.name }))}
-              placeholder="Select subject…" searchable />
-          </label>
-          <label className="stack" style={{ gap: 6 }}>
-            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Max marks</span>
+            <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Max marks *</span>
             <input type="number" min={0.01} step="0.01" value={form.maxMarks}
               onChange={(e) => set('maxMarks', e.target.value)}
               placeholder="100" />
@@ -2787,6 +2851,12 @@ function EditAssessmentForm({
             <input type="number" min={1} value={form.sequence} onChange={(e) => set('sequence', e.target.value)} />
           </label>
         </div>
+        <label className="stack" style={{ gap: 6 }}>
+          <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Instructions (optional)</span>
+          <textarea value={form.instructions} onChange={(e) => set('instructions', e.target.value)}
+            rows={2} placeholder="Any special instructions for this exam…"
+            style={{ resize: 'vertical', fontSize: 13 }} />
+        </label>
         <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" className="btn secondary" onClick={onCancel}>Cancel</button>
           <button type="button" className="btn" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate()}>
@@ -3489,6 +3559,17 @@ function MarksEntryPanel({
   const [filterStatus, setFilterStatus] = useState('MARKS_ENTRY_OPEN');
   const [enteringInstanceId, setEnteringInstanceId] = useState<number | null>(null);
 
+  // Check if any published (SCHEDULED or beyond) assessments exist — gate for Marks Entry
+  const publishedCheckQ = useQuery({
+    queryKey: ['exam-assessments-published-check'],
+    queryFn: async () =>
+      (await api.get<AssessmentInstance[]>('/api/exams/assessments')).data,
+    staleTime: 30_000,
+  });
+  const hasPublishedSchedule = (publishedCheckQ.data ?? []).some(
+    (a) => ['SCHEDULED', 'MARKS_ENTRY_OPEN', 'MARKS_SUBMITTED', 'LOCKED', 'PUBLISHED'].includes(a.status),
+  );
+
   const serverQs = useMemo(() => {
     const p = new URLSearchParams();
     if (filterClassGroupId) p.set('classGroupId', filterClassGroupId);
@@ -3526,10 +3607,20 @@ function MarksEntryPanel({
         <div>
           <div style={{ fontWeight: 900 }}>Marks Entry</div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-            Showing assessments where marks can be entered. Use "Open Marks" on the Schedule tab to enable marks entry for an assessment.
+            Showing assessments where marks can be entered. Use "Publish / Schedule" on the Schedule tab to unlock marks entry.
           </div>
         </div>
       </div>
+
+      {/* Dependency gate: no published schedule yet */}
+      {!publishedCheckQ.isLoading && !hasPublishedSchedule && (
+        <div className="card" style={{ padding: 16, border: '1.5px solid rgba(245,158,11,0.4)', background: 'rgba(254,243,199,0.5)', textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>🔒 Marks Entry is locked</div>
+          <div style={{ fontSize: 13, color: '#78350f' }}>
+            No published exam schedules found. Go to the <strong>Exam Schedule</strong> tab, assign dates/times, and publish at least one schedule to unlock marks entry.
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card" style={{ padding: 12, border: '1px solid rgba(15,23,42,0.1)' }}>
